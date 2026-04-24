@@ -127,13 +127,50 @@ function tryDepositGrain(world: World, ix: number, iy: number): { x: number; y: 
  *      + snap prev if the total tick motion was large (so the renderer
  *      doesn't interpolate through unsupported mid-tick space)
  */
+import type { PheromoneState } from './pheromone';
+
+/**
+ * Dig-pheromone tuning. A dig event deposits a strong signal (1.0);
+ * the field diffuses slowly and evaporates on a ~5 s timescale so
+ * the gradient persists long enough for other ants to follow but
+ * doesn't linger past the relevance of a particular worksite.
+ */
+const PHEROMONE_DEPOSIT_DIG = 1.0;
+const PHEROMONE_DIFFUSE = 0.04;
+const PHEROMONE_EVAP = 0.985;
+const PHEROMONE_FOLLOW_STRENGTH = 0.35;
+
+/**
+ * Sample the pheromone gradient at (x, y) by central differences
+ * on the current buffer; return a heading that points up the
+ * gradient, weighted by magnitude. Returns NaN if the gradient is
+ * effectively zero.
+ */
+function pheromoneGradientHeading(dig: { sample: (x: number, y: number) => number }, x: number, y: number): { angle: number; magnitude: number } {
+  const ix = x | 0;
+  const iy = y | 0;
+  const dx = dig.sample(ix + 1, iy) - dig.sample(ix - 1, iy);
+  const dy = dig.sample(ix, iy + 1) - dig.sample(ix, iy - 1);
+  const mag = Math.hypot(dx, dy);
+  if (mag < 1e-4) return { angle: 0, magnitude: 0 };
+  return { angle: Math.atan2(dy, dx), magnitude: mag };
+}
+
 export function stepSimulation(
   world: World,
   colony: Colony,
   rng: RNG,
   slabThicknessCm = 0.8,
+  pheromones?: PheromoneState,
 ): void {
   world.tickCount++;
+
+  // Diffuse + evaporate pheromones (pre-step so ants sample the
+  // decayed-but-not-yet-deposited state — the field represents the
+  // recent past).
+  if (pheromones) {
+    pheromones.dig.step(PHEROMONE_DIFFUSE, PHEROMONE_EVAP);
+  }
 
   for (let i = 0; i < colony.count; i++) {
     colony.prevX[i] = colony.posX[i];
@@ -149,6 +186,19 @@ export function stepSimulation(
     const digProb = colony.digProbPerSoilHit[i]!;
 
     // Heading update.
+    // WANDER + pheromone: pull toward dig pheromone gradient
+    // (stigmergy — Deneubourg & Goss 1989). Ants preferentially
+    // join existing dig sites instead of exploring at random.
+    if (state === STATE_WANDER && pheromones) {
+      const g = pheromoneGradientHeading(pheromones.dig, colony.posX[i]!, colony.posY[i]!);
+      if (g.magnitude > 0) {
+        // Bias strength scales with the local gradient magnitude
+        // (capped so strong-trail cells don't pin heading instantly).
+        const bias = Math.min(0.5, g.magnitude) * PHEROMONE_FOLLOW_STRENGTH;
+        const dh = wrapAngle(g.angle - h);
+        h += dh * bias;
+      }
+    }
     if (state === STATE_CARRY) {
       // Path integration (Wehner 1996): the home vector points from
       // the ant back toward its spawn point. Bias heading toward
@@ -212,6 +262,11 @@ export function stepSimulation(
           // we don't pre-compute — leave target unset so the UI can
           // describe it generically ("heading up to deposit").
           colony.clearTarget(i);
+          // Pheromone: deposit a strong dig signal at the dig site
+          // so other WANDER ants can find it via gradient.
+          if (pheromones) {
+            pheromones.dig.deposit(target.x, target.y, PHEROMONE_DEPOSIT_DIG);
+          }
         }
       }
     }

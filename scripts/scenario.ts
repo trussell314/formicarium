@@ -13,6 +13,7 @@
 
 import { CELLS_PER_CM, buildFromScenario, resolveScenario, type Scenario } from '../src/scenario';
 import { stepSimulation } from '../src/sim/ant-rules';
+import { createPheromones } from '../src/sim/pheromone';
 import { isSupported } from '../src/sim/physics';
 import { CELL_GRAIN, CELL_SOIL } from '../src/sim/world';
 import { STATE_CARRY } from '../src/sim/colony';
@@ -33,6 +34,7 @@ const TICKS = Number(process.env.TICKS ?? scenario.dayDurationTicks ?? 60) | 0;
 const ticksToRun = Math.max(1, TICKS * (Number(process.env.CYCLES ?? 1) | 0));
 
 const { resolved, world, colony, antType, rng } = buildFromScenario(scenario);
+const pheromones = createPheromones(world.width, world.height);
 
 console.log(`[scenario] ${resolved.name}`);
 console.log(`[scenario] world ${resolved.worldWidthCm}×${resolved.worldHeightCm} cm  ` +
@@ -116,7 +118,7 @@ function debugSnapshot(tick: number): void {
 }
 
 for (let t = 1; t <= ticksToRun; t++) {
-  stepSimulation(world, colony, rng, resolved.slabThicknessCm);
+  stepSimulation(world, colony, rng, resolved.slabThicknessCm, pheromones);
   checkInvariants(t);
   if (t % resolved.debugIntervalTicks === 0) debugSnapshot(t);
 }

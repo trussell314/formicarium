@@ -6,6 +6,7 @@
 import { buildFromScenario } from './scenario';
 import { DEFAULT_SCENARIO } from './scenarios/default';
 import { stepSimulation } from './sim/ant-rules';
+import { createPheromones } from './sim/pheromone';
 import { Renderer } from './render/renderer';
 import { Loop } from './runtime/loop';
 import { bindVisibilityPause } from './runtime/visibility';
@@ -21,6 +22,7 @@ function boot(): void {
   const canvas = canvasMaybe;
 
   const { resolved, world, colony, rng, antType } = buildFromScenario(DEFAULT_SCENARIO);
+  const pheromones = createPheromones(world.width, world.height);
 
   const renderer = new Renderer(
     canvas,
@@ -35,7 +37,7 @@ function boot(): void {
 
   const simHz = 1 / resolved.secondsPerTick;
   const loop = new Loop(simHz, {
-    step: () => stepSimulation(world, colony, rng, resolved.slabThicknessCm),
+    step: () => stepSimulation(world, colony, rng, resolved.slabThicknessCm, pheromones),
     draw: (alpha: number) => renderer.draw(colony, alpha),
   });
 
