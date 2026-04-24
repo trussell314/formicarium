@@ -162,6 +162,53 @@ const REST_CROWD_RADIUS_CELLS = 3.0;
 const REST_PROB_PER_TICK = 0.04;
 const REST_DURATION_TICKS = 50;
 
+// Thigmotaxis (wall-following). Ants preferentially walk along
+// surfaces (Dussutour et al. 2005). We sample one cell out on each
+// of the 8 compass directions; where solid is found, we bias the
+// heading to run PARALLEL to that surface instead of either ramming
+// it or flying off into open space.
+const THIGMOTAXIS_PROBE_CELLS = 1.5;
+const THIGMOTAXIS_STRENGTH = 0.12;
+
+/**
+ * Returns a heading adjustment (in radians) that pulls the ant
+ * toward running alongside the nearest wall. 0 if no wall is close.
+ * Works for any body orientation.
+ */
+function thigmotaxisBias(world: World, x: number, y: number, heading: number): number {
+  // Check a ring of 8 sample points at probe radius; find the
+  // closest solid direction.
+  let wallAngle = NaN;
+  let closest = Infinity;
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2;
+    const sx = x + Math.cos(a) * THIGMOTAXIS_PROBE_CELLS;
+    const sy = y + Math.sin(a) * THIGMOTAXIS_PROBE_CELLS;
+    const ix = sx | 0;
+    const iy = sy | 0;
+    if (!world.inBounds(ix, iy)) continue;
+    const k2 = world.cells[world.index(ix, iy)];
+    if (k2 === 1 /* SOIL */ || k2 === 2 /* GRAIN */) {
+      // Distance weight = probe distance (we're just picking the
+      // closest-angle match; use 1 here since all probes are same
+      // radius).
+      if (1 < closest) {
+        closest = 1;
+        wallAngle = a;
+      }
+    }
+  }
+  if (Number.isNaN(wallAngle)) return 0;
+  // Two tangent directions run 90° from the wall normal. Pick the
+  // one closer to the current heading so the ant doesn't U-turn.
+  const t1 = wrapAngle(wallAngle + Math.PI / 2);
+  const t2 = wrapAngle(wallAngle - Math.PI / 2);
+  const d1 = Math.abs(wrapAngle(t1 - heading));
+  const d2 = Math.abs(wrapAngle(t2 - heading));
+  const tangent = d1 < d2 ? t1 : t2;
+  return wrapAngle(tangent - heading) * THIGMOTAXIS_STRENGTH;
+}
+
 /**
  * Sample the pheromone gradient at (x, y) by central differences
  * on the current buffer; return a heading that points up the
@@ -265,6 +312,12 @@ export function stepSimulation(
         const dh = wrapAngle(g.angle - h);
         h += dh * bias;
       }
+    }
+    // Thigmotaxis (Dussutour et al. 2005): ants prefer to walk along
+    // walls rather than through open space. Applies to WANDER ants;
+    // CARRY ants are already goal-directed by path integration.
+    if (state === STATE_WANDER) {
+      h += thigmotaxisBias(world, colony.posX[i]!, colony.posY[i]!, h);
     }
     if (state === STATE_CARRY) {
       // Path integration (Wehner 1996): the home vector points from
