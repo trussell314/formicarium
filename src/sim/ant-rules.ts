@@ -144,9 +144,23 @@ export function stepSimulation(world: World, colony: Colony, rng: RNG): void {
 
     // Heading update.
     if (state === STATE_CARRY) {
-      // Bias heading toward straight up (−π/2).
-      const up = -Math.PI / 2;
-      const dh = wrapAngle(up - h);
+      // Path integration (Wehner 1996): the home vector points from
+      // the ant back toward its spawn point. Bias heading toward
+      // that direction so carrying ants return home along an
+      // efficient straight line instead of a random walk biased
+      // upward. If the ant is very close to home (|home| < 2 cells)
+      // the vector is noise-dominated — fall back to "head up"
+      // which at least reaches the surface.
+      const hxV = colony.homeX[i]!;
+      const hyV = colony.homeY[i]!;
+      const mag = Math.hypot(hxV, hyV);
+      let want: number;
+      if (mag > 2) {
+        want = Math.atan2(hyV, hxV);
+      } else {
+        want = -Math.PI / 2;
+      }
+      const dh = wrapAngle(want - h);
       h += dh * CONFIG.carryUpBias;
     }
     h += rng.gauss() * noise;
@@ -238,6 +252,16 @@ export function stepSimulation(world: World, colony: Colony, rng: RNG): void {
       settledIy = settle(world, ix, preSettleY | 0);
     }
     colony.posY[i] = settledIy + 0.5;
+    // Path-integration update: the home vector decays by the tick's
+    // total displacement. `prev` was set at start of tick (still
+    // the pre-tick position at this moment). Walking right by dx
+    // means home is now dx more to the left, so homeX -= dx.
+    const tickDx = colony.posX[i]! - colony.prevX[i]!;
+    const tickDy = colony.posY[i]! - colony.prevY[i]!;
+    colony.homeX[i] -= tickDx;
+    colony.homeY[i] -= tickDy;
+    // Snap prev=current if settle teleported the ant. This must run
+    // AFTER the home-vector update so it reads the real tick motion.
     const settleDelta = Math.abs(colony.posY[i]! - preSettleY);
     if (settleDelta > 1.0) {
       colony.prevX[i] = colony.posX[i]!;

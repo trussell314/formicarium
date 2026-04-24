@@ -45,6 +45,15 @@ export class Colony {
    */
   readonly targetX: Float32Array;
   readonly targetY: Float32Array;
+  /**
+   * Path-integration home vector (Wehner 1996): displacement from
+   * the ant to its "home" (spawn point), updated each tick by
+   * subtracting the tick's motion. CARRY ants steer by
+   * atan2(homeY, homeX) to return directly home instead of
+   * random-walking upward.
+   */
+  readonly homeX: Float32Array;
+  readonly homeY: Float32Array;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -64,6 +73,8 @@ export class Colony {
     this.bodyLengthCells = new Float32Array(capacity);
     this.targetX = new Float32Array(capacity);
     this.targetY = new Float32Array(capacity);
+    this.homeX = new Float32Array(capacity);
+    this.homeY = new Float32Array(capacity);
     // Initialise targets to NaN so "no target" is the default.
     this.targetX.fill(NaN);
     this.targetY.fill(NaN);

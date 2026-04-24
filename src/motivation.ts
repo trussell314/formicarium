@@ -41,10 +41,19 @@ export function motivationOf(colony: Colony, i: number): Motivation {
         ? `excavating soil at (${tx.toFixed(1)}, ${ty.toFixed(1)})`
         : 'excavating soil';
       break;
-    case STATE_CARRY:
+    case STATE_CARRY: {
       stateLabel = 'CARRY';
-      description = 'hauling a grain up to the surface';
+      const hx = colony.homeX[i]!;
+      const hy = colony.homeY[i]!;
+      const mag = Math.hypot(hx, hy);
+      if (mag > 2) {
+        const cmDist = mag / CELLS_PER_CM;
+        description = `hauling a grain home (${cmDist.toFixed(1)} cm to go)`;
+      } else {
+        description = 'carrying a grain — looking for a surface spot to deposit';
+      }
       break;
+    }
     case STATE_REST:
       stateLabel = 'REST';
       description = 'resting';
