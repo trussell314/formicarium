@@ -188,6 +188,10 @@ export function stepSimulation(world: World, colony: Colony, rng: RNG): void {
           colony.posY[i] = target.y + 0.5;
           // Head upward (carriers want to reach the surface).
           colony.heading[i] = -Math.PI / 2 + rng.range(-0.6, 0.6);
+          // A CARRY ant's target is the nearest surface column, which
+          // we don't pre-compute — leave target unset so the UI can
+          // describe it generically ("heading up to deposit").
+          colony.clearTarget(i);
         }
       }
     }
@@ -197,6 +201,7 @@ export function stepSimulation(world: World, colony: Colony, rng: RNG): void {
       const deposited = tryDepositGrain(world, colony.posX[i]! | 0, colony.posY[i]! | 0);
       if (deposited !== null) {
         colony.setState(i, STATE_WANDER);
+        colony.clearTarget(i);
         // Place ant above the new grain.
         const ny2 = deposited.y - 1;
         colony.posY[i] = (ny2 < 0 ? 0 : ny2) + 0.5;

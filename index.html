@@ -36,6 +36,29 @@
         pointer-events: none;
       }
       #help.hidden { display: none; }
+      #antinfo {
+        position: fixed; top: 12px; right: 12px;
+        background: rgba(10, 12, 16, 0.82);
+        color: #e2e4ea;
+        padding: 10px 14px;
+        border-radius: 8px;
+        font-size: 13px;
+        line-height: 1.5;
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+        min-width: 200px;
+        max-width: 280px;
+        backdrop-filter: blur(6px);
+        border: 1px solid rgba(255, 240, 120, 0.35);
+        box-shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
+      }
+      #antinfo.hidden { display: none; }
+      #antinfo .name { font-size: 15px; font-weight: 600; color: #fff4a8; margin-bottom: 2px; }
+      #antinfo .id { font-size: 10px; color: #8c909a; font-family: ui-monospace, monospace; margin-bottom: 6px; }
+      #antinfo .row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+      #antinfo .row .label { color: #9ea2ac; }
+      #antinfo .row .value { color: #e2e4ea; }
+      #antinfo .close { position: absolute; top: 4px; right: 6px; cursor: pointer; color: #6a6e78; font-size: 16px; line-height: 1; padding: 2px; }
+      #antinfo .close:hover { color: #e2e4ea; }
       noscript { padding: 24px; display: block; }
     </style>
   </head>
@@ -43,7 +66,8 @@
     <div id="app">
       <canvas id="screen"></canvas>
       <div id="overlay" class="hidden"></div>
-      <div id="help">click: poke · space: pause · h: overlay · r: reseed · c: clear · n: new ants</div>
+      <div id="antinfo" class="hidden"></div>
+      <div id="help">tap an ant for info</div>
     </div>
     <noscript>Formicarium requires JavaScript.</noscript>
     <script type="module" src="/src/main.ts"></script>

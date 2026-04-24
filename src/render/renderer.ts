@@ -258,95 +258,163 @@ export class Renderer {
 
   /**
    * Draw one ant in world-space. The ants layer is pre-scaled so
-   * 1 unit = 1 cell. The sprite's anatomy is expressed in body-length
-   * units (nose-to-gaster-tip = 1.0) and scaled by `bodyLengthCells`,
-   * so real-world body size is preserved when CELLS_PER_CM changes.
+   * 1 unit = 1 cell. Anatomy is expressed as fractions of body
+   * length along the body axis (forward + / back −) and perpendicular
+   * (right + / left −), then scaled by bodyLengthCells, so real-world
+   * body size is preserved when CELLS_PER_CM changes.
+   *
+   * The sprite includes: segmented body (head / thorax / petiole /
+   * gaster), six 2-segment legs in a tripod gait, two elbowed
+   * antennae, mandibles at the front, and soft highlights on the
+   * thorax and gaster to give a glossy-chitin look. A thin outline
+   * stroke around the body helps each ant read clearly against the
+   * tunnel tan.
    */
-  private drawAnt(cx: number, cy: number, heading: number, t: number, state: number, bodyLengthCells: number): void {
+  private drawAnt(
+    cx: number, cy: number, heading: number, t: number, state: number,
+    bodyLengthCells: number, selected: boolean,
+  ): void {
     const ctx = this.ctx;
     const cos = Math.cos(heading);
     const sin = Math.sin(heading);
     const perpX = -sin;
     const perpY = cos;
-    const L = bodyLengthCells; // scale: 1.0 = full body length
+    const L = bodyLengthCells;
 
     const pt = (forward: number, right: number): [number, number] =>
       [cx + cos * forward * L + perpX * right * L, cy + sin * forward * L + perpY * right * L];
 
-    // Anatomy, expressed as fractions of body length along the axis
-    // (+ = forward / nose, − = back / gaster) and perpendicular
-    // (+ = right side, − = left).
-    const head = pt(0.40, 0);
-    const thorax = pt(0.05, 0);
-    const gaster = pt(-0.35, 0);
+    // Anchor points (fractions of body length).
+    const nose = pt(0.50, 0);
+    const head = pt(0.36, 0);
+    const mandibleL = pt(0.48, -0.04);
+    const mandibleR = pt(0.48,  0.04);
+    const thorax = pt(0.10, 0);
+    const petiole = pt(-0.08, 0);
+    const gaster = pt(-0.30, 0);
 
-    const legPhase = (off: number) => Math.sin(t + off);
-    const legY = (f: number, side: number, phase: number) => {
-      const origin = pt(f, side * 0.10);
-      const swing = phase * 0.10;
-      const foot = pt(f + swing, side * 0.33);
-      return [origin, foot] as const;
-    };
-
-    // Gaster (abdomen).
-    ctx.fillStyle = RENDER.antBody;
-    ctx.beginPath();
-    ctx.ellipse(gaster[0], gaster[1], 0.24 * L, 0.16 * L, heading, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Thorax.
-    ctx.beginPath();
-    ctx.ellipse(thorax[0], thorax[1], 0.15 * L, 0.12 * L, heading, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Legs. Three pairs (front / mid / rear), tripod gait (opposite
-    // sides alternate).
-    ctx.strokeStyle = RENDER.antLeg;
-    ctx.lineWidth = 0.045 * L;
-    ctx.lineCap = 'round';
-    const pairs: Array<[number, number, number]> = [
-      [ 0.11,  1, 0],
-      [ 0.03, -1, Math.PI],
-      [-0.06,  1, Math.PI],
-      [-0.06, -1, 0],
-      [ 0.03,  1, Math.PI],
-      [ 0.11, -1, 0],
-    ];
-    for (const [f, s, off] of pairs) {
-      const ph = legPhase(off);
-      const [origin, foot] = legY(f, s, ph);
+    // Tripod-gait leg phases. Front-left + mid-right + rear-left
+    // are in phase; the other three are anti-phase.
+    const swing = (off: number) => Math.sin(t + off);
+    const drawLeg = (
+      shoulderF: number, shoulderR: number,
+      reachF: number, reachR: number,
+      off: number, sign: number,
+    ) => {
+      const ph = swing(off);
+      const shoulder = pt(shoulderF, shoulderR * sign);
+      // Knee: outward from body, partway to foot.
+      const knee = pt(
+        shoulderF + reachF * 0.4 + ph * 0.03,
+        (shoulderR + reachR * 0.55 + 0.04) * sign,
+      );
+      const foot = pt(
+        shoulderF + reachF + ph * 0.08,
+        (shoulderR + reachR) * sign,
+      );
       ctx.beginPath();
-      ctx.moveTo(origin[0], origin[1]);
+      ctx.moveTo(shoulder[0], shoulder[1]);
+      ctx.lineTo(knee[0], knee[1]);
       ctx.lineTo(foot[0], foot[1]);
       ctx.stroke();
-    }
+    };
 
-    // Antennae.
-    const wiggle = Math.sin(t * 1.4) * 0.03;
-    const antL = pt(0.62, -0.12 + wiggle);
-    const antR = pt(0.62,  0.12 - wiggle);
     ctx.strokeStyle = RENDER.antLeg;
-    ctx.lineWidth = 0.035 * L;
-    ctx.beginPath();
-    ctx.moveTo(head[0], head[1]);
-    ctx.lineTo(antL[0], antL[1]);
-    ctx.moveTo(head[0], head[1]);
-    ctx.lineTo(antR[0], antR[1]);
-    ctx.stroke();
+    ctx.lineWidth = Math.max(0.04 * L, 0.5);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    // Six legs. Tripod A: front-left, mid-right, rear-left (phase 0).
+    //          Tripod B: the other three (phase π).
+    drawLeg( 0.14,  0.07,  0.08,  0.16, 0,        -1); // front L
+    drawLeg( 0.02,  0.07,  0.04,  0.22, Math.PI,   1); // mid R
+    drawLeg(-0.10,  0.07, -0.02,  0.18, 0,        -1); // rear L
+    drawLeg( 0.14,  0.07,  0.08,  0.16, Math.PI,   1); // front R
+    drawLeg( 0.02,  0.07,  0.04,  0.22, 0,        -1); // mid L
+    drawLeg(-0.10,  0.07, -0.02,  0.18, Math.PI,   1); // rear R
 
-    // Head.
-    ctx.fillStyle = RENDER.antHead;
+    // Body segments. Gaster first (rearmost).
+    ctx.fillStyle = RENDER.antBody;
     ctx.beginPath();
-    ctx.ellipse(head[0], head[1], 0.14 * L, 0.13 * L, heading, 0, Math.PI * 2);
+    ctx.ellipse(gaster[0], gaster[1], 0.22 * L, 0.15 * L, heading, 0, Math.PI * 2);
+    ctx.fill();
+    // Petiole (narrow waist): small circle connecting thorax→gaster.
+    ctx.beginPath();
+    ctx.arc(petiole[0], petiole[1], 0.055 * L, 0, Math.PI * 2);
+    ctx.fill();
+    // Thorax.
+    ctx.beginPath();
+    ctx.ellipse(thorax[0], thorax[1], 0.12 * L, 0.10 * L, heading, 0, Math.PI * 2);
     ctx.fill();
 
-    // Carried grain.
+    // Gloss highlights — small lighter ellipses on the upper (−perp)
+    // side of thorax and gaster. Gives a subtle 3D chitin feel.
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    const gHighlight = pt(-0.25, -0.08);
+    ctx.beginPath();
+    ctx.ellipse(gHighlight[0], gHighlight[1], 0.11 * L, 0.04 * L, heading, 0, Math.PI * 2);
+    ctx.fill();
+    const tHighlight = pt(0.12, -0.05);
+    ctx.beginPath();
+    ctx.ellipse(tHighlight[0], tHighlight[1], 0.06 * L, 0.025 * L, heading, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Antennae — elbowed, each with a scape (from head to elbow) and
+    // a funiculus (from elbow to tip). Slight per-frame wobble.
+    const antWob = Math.sin(t * 1.6) * 0.04;
+    const drawAntenna = (sign: number) => {
+      const base = pt(0.40, 0.05 * sign);
+      const elbow = pt(0.48, (0.14 + antWob) * sign);
+      const tip = pt(0.62, (0.10 - antWob * 0.5) * sign);
+      ctx.beginPath();
+      ctx.moveTo(base[0], base[1]);
+      ctx.lineTo(elbow[0], elbow[1]);
+      ctx.lineTo(tip[0], tip[1]);
+      ctx.stroke();
+    };
+    ctx.strokeStyle = RENDER.antLeg;
+    ctx.lineWidth = Math.max(0.03 * L, 0.4);
+    drawAntenna(-1);
+    drawAntenna(1);
+
+    // Mandibles — two short curves converging at the nose.
+    ctx.beginPath();
+    ctx.moveTo(mandibleL[0], mandibleL[1]);
+    ctx.lineTo(nose[0], nose[1]);
+    ctx.moveTo(mandibleR[0], mandibleR[1]);
+    ctx.lineTo(nose[0], nose[1]);
+    ctx.stroke();
+
+    // Head — drawn last so antennae bases tuck under.
+    ctx.fillStyle = RENDER.antHead;
+    ctx.beginPath();
+    ctx.ellipse(head[0], head[1], 0.11 * L, 0.11 * L, heading, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Tiny eye highlights on head.
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    const eyeL = pt(0.40, -0.05);
+    const eyeR = pt(0.40,  0.05);
+    ctx.beginPath();
+    ctx.arc(eyeL[0], eyeL[1], 0.012 * L, 0, Math.PI * 2);
+    ctx.arc(eyeR[0], eyeR[1], 0.012 * L, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Carried grain — small tan bead at the mandibles.
     if (state === STATE_CARRY) {
-      const jaw = pt(0.58, 0);
+      const jaw = pt(0.56, 0);
       ctx.fillStyle = RENDER.grainColor;
       ctx.beginPath();
-      ctx.arc(jaw[0], jaw[1], 0.09 * L, 0, Math.PI * 2);
+      ctx.arc(jaw[0], jaw[1], 0.08 * L, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    // Selection ring.
+    if (selected) {
+      ctx.strokeStyle = 'rgba(255,240,120,0.95)';
+      ctx.lineWidth = Math.max(0.04 * L, 0.8);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 0.5 * L, 0, Math.PI * 2);
+      ctx.stroke();
     }
 
     // REST ants get a faint dim overlay.
@@ -428,6 +496,21 @@ export class Renderer {
     return { dx: (cw - dw) * 0.5, dy: (ch - dh) * 0.5, dw, dh };
   }
 
+  /**
+   * Convert a canvas-pixel position (e.g. from a mouse/touch event)
+   * to world-cell coordinates. Returns null if the point is outside
+   * the rendered world rect.
+   */
+  canvasToWorld(cxPx: number, cyPx: number): { x: number; y: number } | null {
+    const { dx, dy, dw, dh } = this.fitRect();
+    if (cxPx < dx || cxPx > dx + dw || cyPx < dy || cyPx > dy + dh) return null;
+    const sx = dw / this.world.width;
+    return { x: (cxPx - dx) / sx, y: (cyPx - dy) / sx };
+  }
+
+  /** Selected ant id to highlight; -1 for none. */
+  selectedAntId = -1;
+
   draw(colony: Colony, alpha: number): void {
     const ctx = this.ctx;
     const cel = celestialOf(this.world.tickCount, this.cycle);
@@ -490,6 +573,7 @@ export class Renderer {
         gaitT + i * 0.7,
         colony.state[i]!,
         colony.bodyLengthCells[i]!,
+        colony.id[i] === this.selectedAntId,
       );
     }
     ctx.restore();

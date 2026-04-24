@@ -37,6 +37,14 @@ export class Colony {
   readonly winged: Uint8Array;
   /** Physical body length in cells — renderer scales anatomy by this. */
   readonly bodyLengthCells: Float32Array;
+  /**
+   * Current navigation target in cell coordinates. NaN when the ant
+   * has no specific destination (e.g., free wandering). DIG ants
+   * point at the soil cell they're about to excavate; CARRY ants
+   * point at the surface column they're heading for.
+   */
+  readonly targetX: Float32Array;
+  readonly targetY: Float32Array;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -54,6 +62,29 @@ export class Colony {
     this.turnNoiseRadPerTick = new Float32Array(capacity);
     this.winged = new Uint8Array(capacity);
     this.bodyLengthCells = new Float32Array(capacity);
+    this.targetX = new Float32Array(capacity);
+    this.targetY = new Float32Array(capacity);
+    // Initialise targets to NaN so "no target" is the default.
+    this.targetX.fill(NaN);
+    this.targetY.fill(NaN);
+  }
+
+  /**
+   * Clear the ant's navigation target. Called when the ant reaches
+   * its destination or transitions to a state with no destination.
+   */
+  clearTarget(i: number): void {
+    this.targetX[i] = NaN;
+    this.targetY[i] = NaN;
+  }
+
+  setTarget(i: number, x: number, y: number): void {
+    this.targetX[i] = x;
+    this.targetY[i] = y;
+  }
+
+  hasTarget(i: number): boolean {
+    return !Number.isNaN(this.targetX[i]!);
   }
 
   /** Defaults used when spawn() is called without a behaviour spec. */
