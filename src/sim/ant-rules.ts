@@ -135,11 +135,12 @@ export function stepSimulation(world: World, colony: Colony, rng: RNG): void {
     colony.prevY[i] = colony.posY[i];
   }
 
-  const speed = CONFIG.antWalkSpeed;
-
   for (let i = 0; i < colony.count; i++) {
     const state = colony.state[i];
     let h = colony.heading[i];
+    const speed = colony.walkSpeedCellsPerTick[i]!;
+    const noise = colony.turnNoiseRadPerTick[i]!;
+    const digProb = colony.digProbPerSoilHit[i]!;
 
     // Heading update.
     if (state === STATE_CARRY) {
@@ -148,7 +149,7 @@ export function stepSimulation(world: World, colony: Colony, rng: RNG): void {
       const dh = wrapAngle(up - h);
       h += dh * CONFIG.carryUpBias;
     }
-    h += rng.gauss() * CONFIG.turnNoiseRad;
+    h += rng.gauss() * noise;
     h = wrapAngle(h);
     colony.heading[i] = h;
 
@@ -177,7 +178,7 @@ export function stepSimulation(world: World, colony: Colony, rng: RNG): void {
 
     // WANDER + soil contact → maybe dig.
     if (state === STATE_WANDER && hitSoil) {
-      if (rng.next() < CONFIG.digProbPerSoilHit) {
+      if (rng.next() < digProb) {
         const target = pickDigTarget(world, ix, iy, h);
         if (target !== null) {
           world.cells[world.index(target.x, target.y)] = CELL_AIR;
@@ -206,11 +207,24 @@ export function stepSimulation(world: World, colony: Colony, rng: RNG): void {
   }
 
   // End-of-tick settle. Enforces the no-flying-ants invariant and
-  // the no-embedded-ants invariant in one pass.
+  // the no-embedded-ants invariant in one pass. Winged ants bypass
+  // gravity but still get extricated from solid cells.
   for (let i = 0; i < colony.count; i++) {
     const ix = colony.posX[i]! | 0;
     const beforeY = colony.posY[i]!;
-    const settledIy = settle(world, ix, beforeY | 0);
+    let settledIy: number;
+    if (colony.winged[i]) {
+      // Winged: only extricate, don't fall.
+      let iy = beforeY | 0;
+      while (iy >= 0) {
+        const k = world.cells[world.index(ix, iy)];
+        if (k !== 1 /* SOIL */ && k !== 2 /* GRAIN */) break;
+        iy--;
+      }
+      settledIy = iy;
+    } else {
+      settledIy = settle(world, ix, beforeY | 0);
+    }
     colony.posY[i] = settledIy + 0.5;
     // If the settle moved the ant far, snap prev=current so the
     // renderer doesn't interpolate a flight through midair.

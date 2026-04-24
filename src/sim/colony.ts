@@ -25,6 +25,16 @@ export class Colony {
   readonly heading: Float32Array;
   readonly state: Uint8Array;
   readonly stateTimer: Uint16Array;
+  /** Stable per-ant ID, equal to spawn index; never reused. */
+  readonly id: Uint32Array;
+
+  // Per-ant tunable behaviour, set at spawn time. Different castes
+  // (workers, scouts, queens) can have different values.
+  readonly walkSpeedCellsPerTick: Float32Array;
+  readonly digProbPerSoilHit: Float32Array;
+  readonly turnNoiseRadPerTick: Float32Array;
+  /** 1 = winged (bypasses gravity), 0 = walking. */
+  readonly winged: Uint8Array;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -36,9 +46,32 @@ export class Colony {
     this.heading = new Float32Array(capacity);
     this.state = new Uint8Array(capacity);
     this.stateTimer = new Uint16Array(capacity);
+    this.id = new Uint32Array(capacity);
+    this.walkSpeedCellsPerTick = new Float32Array(capacity);
+    this.digProbPerSoilHit = new Float32Array(capacity);
+    this.turnNoiseRadPerTick = new Float32Array(capacity);
+    this.winged = new Uint8Array(capacity);
   }
 
-  spawn(x: number, y: number, heading: number): number | null {
+  /** Defaults used when spawn() is called without a behaviour spec. */
+  static readonly DEFAULT_BEHAVIOUR = {
+    walkSpeedCellsPerTick: 0.08,
+    digProbPerSoilHit: 0.035,
+    turnNoiseRadPerTick: 0.15,
+    winged: 0,
+  };
+
+  spawn(
+    x: number,
+    y: number,
+    heading: number,
+    behaviour?: Partial<{
+      walkSpeedCellsPerTick: number;
+      digProbPerSoilHit: number;
+      turnNoiseRadPerTick: number;
+      winged: number;
+    }>,
+  ): number | null {
     if (this.count >= this.capacity) return null;
     const i = this.count++;
     this.posX[i] = x;
@@ -48,7 +81,37 @@ export class Colony {
     this.heading[i] = heading;
     this.state[i] = STATE_WANDER;
     this.stateTimer[i] = 0;
+    this.id[i] = i;
+    this.walkSpeedCellsPerTick[i] =
+      behaviour?.walkSpeedCellsPerTick ?? Colony.DEFAULT_BEHAVIOUR.walkSpeedCellsPerTick;
+    this.digProbPerSoilHit[i] =
+      behaviour?.digProbPerSoilHit ?? Colony.DEFAULT_BEHAVIOUR.digProbPerSoilHit;
+    this.turnNoiseRadPerTick[i] =
+      behaviour?.turnNoiseRadPerTick ?? Colony.DEFAULT_BEHAVIOUR.turnNoiseRadPerTick;
+    this.winged[i] = behaviour?.winged ?? Colony.DEFAULT_BEHAVIOUR.winged;
     return i;
+  }
+
+  /**
+   * Snapshot of ant `i` for debug / logging. Floats truncated to a
+   * sensible precision. Cheap; allocates a small object.
+   */
+  inspect(i: number): {
+    id: number;
+    x: number;
+    y: number;
+    heading: number;
+    state: AntState;
+    stateTicks: number;
+  } {
+    return {
+      id: this.id[i]!,
+      x: Math.round(this.posX[i]! * 100) / 100,
+      y: Math.round(this.posY[i]! * 100) / 100,
+      heading: Math.round(this.heading[i]! * 100) / 100,
+      state: this.state[i] as AntState,
+      stateTicks: this.stateTimer[i]!,
+    };
   }
 
   /** Spawn n ants uniformly at random within air cells of a rectangle. */
@@ -60,6 +123,12 @@ export class Colony {
     n: number,
     rng: RNG,
     isAir: (x: number, y: number) => boolean,
+    behaviour?: Partial<{
+      walkSpeedCellsPerTick: number;
+      digProbPerSoilHit: number;
+      turnNoiseRadPerTick: number;
+      winged: number;
+    }>,
   ): number {
     const candidates: number[] = [];
     for (let y = y0; y <= y1; y++) {
@@ -75,7 +144,7 @@ export class Colony {
       const x = candidates[pick * 2]! + 0.5;
       const y = candidates[pick * 2 + 1]! + 0.5;
       const h = rng.range(0, Math.PI * 2);
-      if (this.spawn(x, y, h) === null) break;
+      if (this.spawn(x, y, h, behaviour) === null) break;
       added++;
     }
     return added;

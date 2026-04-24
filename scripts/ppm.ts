@@ -10,16 +10,13 @@
 //   python3 -c "from PIL import Image; Image.open('/tmp/frame.ppm').save('/tmp/frame.png')"
 
 import { writeFileSync } from 'node:fs';
-import { CONFIG, RENDER } from '../src/config';
-import {
-  CELL_AIR,
-  CELL_GRAIN,
-  CELL_SOIL,
-  World,
-} from '../src/sim/world';
-import { Colony, STATE_CARRY } from '../src/sim/colony';
+import { RENDER } from '../src/config';
+import { CELL_AIR, CELL_GRAIN, CELL_SOIL } from '../src/sim/world';
+import { STATE_CARRY } from '../src/sim/colony';
 import { stepSimulation } from '../src/sim/ant-rules';
-import { RNG } from '../src/sim/rng';
+import { celestialOf } from '../src/render/renderer';
+import { buildFromScenario } from '../src/scenario';
+import { DEFAULT_SCENARIO } from '../src/scenarios/default';
 
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '');
@@ -35,28 +32,14 @@ function lerpRgb(a: [number, number, number], b: [number, number, number], t: nu
 }
 
 const SEED = Number(process.env.SEED ?? 0xc0ffee) >>> 0;
-const TICKS = Number(process.env.TICKS ?? 1800) | 0;
+const TICKS = Number(process.env.TICKS ?? 60) | 0;
 const SCALE = Math.max(1, Number(process.env.SCALE ?? 3) | 0);
 const OUT = process.env.OUT ?? 'out.ppm';
 const DAYLIGHT_OVERRIDE = process.env.DAYLIGHT !== undefined ? Number(process.env.DAYLIGHT) : null;
 
-const rng = new RNG(SEED);
-const world = new World(CONFIG.gridWidth, CONFIG.gridHeight);
-world.generate(rng);
-
-const colony = new Colony(CONFIG.antCount);
-const surfaceY = Math.floor(world.height * CONFIG.surfaceFraction);
-const cx = Math.floor(world.width / 2);
-const halfW = CONFIG.starterChamberHalfWidth;
-colony.spawnInRect(
-  cx - halfW,
-  surfaceY + 1,
-  cx + halfW,
-  surfaceY + CONFIG.starterChamberDepth,
-  CONFIG.antCount,
-  rng,
-  (x, y) => world.isAir(x, y),
-);
+// Use the same scenario the web UI uses, but with a deterministic seed.
+const scenario = { ...DEFAULT_SCENARIO, seed: SEED };
+const { resolved, world, colony, rng } = buildFromScenario(scenario);
 
 for (let t = 0; t < TICKS; t++) stepSimulation(world, colony, rng);
 
@@ -76,15 +59,16 @@ const GRAIN = hexToRgb(RENDER.grainColor);
 const ANT_BODY = hexToRgb(RENDER.antBody);
 const ANT_HEAD = hexToRgb(RENDER.antHead);
 
-const phase = (world.tickCount % CONFIG.dayLengthTicks) / CONFIG.dayLengthTicks;
-const DAYLIGHT = DAYLIGHT_OVERRIDE !== null
-  ? DAYLIGHT_OVERRIDE
-  : 0.5 - 0.5 * Math.cos(phase * Math.PI * 2);
-console.log(`tick=${world.tickCount}  daylight=${DAYLIGHT.toFixed(2)}  ants=${colony.count}`);
+const cel = celestialOf(world.tickCount, {
+  dayDurationTicks: resolved.dayDurationTicks,
+  nightDurationTicks: resolved.nightDurationTicks,
+});
+const DAYLIGHT = DAYLIGHT_OVERRIDE !== null ? DAYLIGHT_OVERRIDE : cel.daylight;
+console.log(`tick=${world.tickCount}  daylight=${DAYLIGHT.toFixed(2)}  ants=${colony.count}  scenario=${resolved.name}`);
 
 const w = world.width;
 const h = world.height;
-const surfEst = Math.max(1, Math.floor(h * CONFIG.surfaceFraction));
+const surfEst = Math.max(1, resolved.surfaceCellsFromTop);
 const skyRow: [number, number, number][] = [];
 const tunRow: [number, number, number][] = [];
 const soilRow: [number, number, number][] = [];

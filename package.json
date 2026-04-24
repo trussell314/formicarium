@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests --ext .ts",
-    "ppm": "vite-node scripts/ppm.ts"
+    "ppm": "vite-node scripts/ppm.ts",
+    "scenario": "vite-node scripts/scenario.ts"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7.18.0",

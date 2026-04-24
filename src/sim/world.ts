@@ -66,11 +66,23 @@ export class World {
 
   /**
    * Generate a world: air above a wavy surface line, soil below.
-   * A small starter chamber is carved at world centre so the colony
-   * has a room to spawn into (no embedded ants at t=0).
+   * A starter chamber is carved at world centre so the colony has
+   * a room to spawn into (no embedded ants at t=0).
+   *
+   * Optional `opts` lets a scenario builder override the legacy
+   * CONFIG-driven sizes; pass nothing for the original behaviour.
    */
-  generate(rng: RNG): void {
-    const surfaceBase = Math.floor(this.height * CONFIG.surfaceFraction);
+  generate(rng: RNG, opts?: {
+    surfaceCellsFromTop?: number;
+    starterChamberHalfWidth?: number;
+    starterChamberDepth?: number;
+  }): void {
+    const surfaceBase = opts?.surfaceCellsFromTop
+      ?? Math.floor(this.height * CONFIG.surfaceFraction);
+    const halfW = opts?.starterChamberHalfWidth
+      ?? CONFIG.starterChamberHalfWidth;
+    const depth = opts?.starterChamberDepth
+      ?? CONFIG.starterChamberDepth;
     const amp1 = CONFIG.surfaceRoughness;
     const amp2 = Math.max(1, Math.floor(amp1 * 0.5));
     const phase = rng.range(0, Math.PI * 2);
@@ -96,8 +108,6 @@ export class World {
     // the top, narrower at the bottom, so ants have a clear floor to
     // stand on.
     const cx = Math.floor(this.width / 2);
-    const halfW = CONFIG.starterChamberHalfWidth;
-    const depth = CONFIG.starterChamberDepth;
     for (let dx = -halfW; dx <= halfW; dx++) {
       const taper = 1 - Math.abs(dx) / (halfW + 1);
       const dDepth = Math.round(depth * taper);

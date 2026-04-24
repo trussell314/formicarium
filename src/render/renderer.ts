@@ -11,7 +11,7 @@
 //      antennae, and six legs animated in a tripod gait. At 10 ants
 //      the per-frame cost is negligible.
 
-import { CONFIG, RENDER } from '../config';
+import { RENDER } from '../config';
 import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from '../sim/world';
 import {
   Colony,
@@ -49,10 +49,46 @@ const GRASS_TOP = hexToRgb(RENDER.grassTop);
 const GRASS_ROOT = hexToRgb(RENDER.grassRoot);
 const GRAIN = hexToRgb(RENDER.grainColor);
 
-/** Daylight in [0,1] from a tick count. 0 = midnight, 1 = noon. */
-export function daylightOf(tickCount: number): number {
-  const phase = (tickCount % CONFIG.dayLengthTicks) / CONFIG.dayLengthTicks;
-  return 0.5 - 0.5 * Math.cos(phase * Math.PI * 2);
+export interface DayNightCycle {
+  dayDurationTicks: number;
+  nightDurationTicks: number;
+}
+
+/**
+ * Returns the celestial state at a given tick.
+ *
+ *   daylight    — sky brightness, [0..1]. 0 = full night, 1 = noon.
+ *   sunPhase    — fraction through the day cycle, [0..1]. Used to
+ *                  position the sun's arc.
+ *   moonPhase   — fraction through the night cycle, [0..1].
+ *   sunUp       — true when the sun is the visible body.
+ */
+export function celestialOf(tickCount: number, cycle: DayNightCycle): {
+  daylight: number;
+  sunPhase: number;
+  moonPhase: number;
+  sunUp: boolean;
+} {
+  const day = cycle.dayDurationTicks;
+  const night = cycle.nightDurationTicks;
+  const total = day + night;
+  const t = ((tickCount % total) + total) % total;
+  if (t < day) {
+    const f = day === 0 ? 0 : t / day;
+    return {
+      daylight: Math.sin(f * Math.PI),
+      sunPhase: f,
+      moonPhase: 0,
+      sunUp: true,
+    };
+  }
+  const f = night === 0 ? 0 : (t - day) / night;
+  return {
+    daylight: 0,
+    sunPhase: 0,
+    moonPhase: f,
+    sunUp: false,
+  };
 }
 
 export class Renderer {
@@ -62,6 +98,8 @@ export class Renderer {
   readonly offscreen: HTMLCanvasElement;
   readonly offCtx: CanvasRenderingContext2D;
   readonly imageData: ImageData;
+  readonly cycle: DayNightCycle;
+  readonly surfaceCellsFromTop: number;
 
   // Per-row gradient caches (day sky, night sky, tunnel, soil).
   private readonly skyRowDay: Uint8ClampedArray;
@@ -69,8 +107,10 @@ export class Renderer {
   private readonly tunnelRow: Uint8ClampedArray;
   private readonly soilRow: Uint8ClampedArray;
 
-  constructor(canvas: HTMLCanvasElement, world: World) {
+  constructor(canvas: HTMLCanvasElement, world: World, cycle: DayNightCycle, surfaceCellsFromTop: number) {
     this.canvas = canvas;
+    this.cycle = cycle;
+    this.surfaceCellsFromTop = surfaceCellsFromTop;
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('no 2d ctx');
     this.ctx = ctx;
@@ -89,7 +129,7 @@ export class Renderer {
     this.tunnelRow = new Uint8ClampedArray(world.height * 3);
     this.soilRow = new Uint8ClampedArray(world.height * 3);
 
-    const surfEst = Math.max(1, Math.floor(world.height * CONFIG.surfaceFraction));
+    const surfEst = Math.max(1, this.surfaceCellsFromTop);
     for (let y = 0; y < world.height; y++) {
       const skyT = Math.min(1, y / surfEst);
       const day = lerpRgb(SKY_TOP_DAY, SKY_BOT_DAY, skyT);
@@ -316,6 +356,63 @@ export class Renderer {
     }
   }
 
+  /**
+   * Draw a crescent moon at (mx, my) with disc radius r. The lit side
+   * faces (sx, sy) — the conceptual sun position. Implemented as the
+   * moon disk minus an offset "shadow" disk in the same colour as
+   * the surrounding sky, so the result is a crescent whose horns
+   * point away from the sun.
+   */
+  private drawCrescentMoon(mx: number, my: number, r: number, sx: number, sy: number): void {
+    const ctx = this.ctx;
+    // Direction unit vector from moon → sun.
+    let dx = sx - mx;
+    let dy = sy - my;
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len; dy /= len;
+    // Shadow disk is offset AWAY from the sun by ~0.5 r so a thin
+    // crescent shows on the lit side.
+    const offset = r * 0.55;
+    const shadowX = mx - dx * offset;
+    const shadowY = my - dy * offset;
+    // Bright disk first.
+    ctx.fillStyle = RENDER.moonColor;
+    ctx.beginPath();
+    ctx.arc(mx, my, r, 0, Math.PI * 2);
+    ctx.fill();
+    // Cut out by drawing a sky-coloured disk on top.
+    ctx.fillStyle = this.skyColorAt(shadowY);
+    ctx.beginPath();
+    ctx.arc(shadowX, shadowY, r * 0.96, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  /**
+   * Sky colour at a given canvas-pixel y, blending day/night by the
+   * current tick's daylight factor. Used by the crescent moon's
+   * shadow disk so it matches the sky behind it.
+   */
+  private skyColorAt(canvasY: number): string {
+    const cel = celestialOf(this.world.tickCount, this.cycle);
+    // Rough vertical position in the sky band [0,1].
+    const surfaceCanvasY = this.canvas.height * 0.4;
+    const t = Math.max(0, Math.min(1, canvasY / Math.max(1, surfaceCanvasY)));
+    const day = lerpRgb(
+      [SKY_TOP_DAY[0], SKY_TOP_DAY[1], SKY_TOP_DAY[2]],
+      [SKY_BOT_DAY[0], SKY_BOT_DAY[1], SKY_BOT_DAY[2]],
+      t,
+    );
+    const night = lerpRgb(
+      [SKY_TOP_NIGHT[0], SKY_TOP_NIGHT[1], SKY_TOP_NIGHT[2]],
+      [SKY_BOT_NIGHT[0], SKY_BOT_NIGHT[1], SKY_BOT_NIGHT[2]],
+      t,
+    );
+    const r = night[0] + (day[0] - night[0]) * cel.daylight;
+    const g = night[1] + (day[1] - night[1]) * cel.daylight;
+    const b = night[2] + (day[2] - night[2]) * cel.daylight;
+    return `rgb(${r | 0},${g | 0},${b | 0})`;
+  }
+
   private fitRect(): { dx: number; dy: number; dw: number; dh: number } {
     const cw = this.canvas.width;
     const ch = this.canvas.height;
@@ -329,33 +426,46 @@ export class Renderer {
 
   draw(colony: Colony, alpha: number): void {
     const ctx = this.ctx;
-    const daylight = daylightOf(this.world.tickCount);
-    this.paintGrid(daylight);
+    const cel = celestialOf(this.world.tickCount, this.cycle);
+    this.paintGrid(cel.daylight);
 
     const { dx, dy, dw, dh } = this.fitRect();
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'low';
     ctx.drawImage(this.offscreen, dx, dy, dw, dh);
 
-    // Sun / moon — on an arc across the upper portion of the canvas.
-    const phase = (this.world.tickCount % CONFIG.dayLengthTicks) / CONFIG.dayLengthTicks;
-    const ang = phase * Math.PI * 2 - Math.PI / 2;
-    const sunX = this.canvas.width * 0.5 + Math.sin(ang) * this.canvas.width * 0.45;
-    const sunY = this.canvas.height * 0.35 - Math.cos(ang) * this.canvas.height * 0.25;
-    const moonX = this.canvas.width * 0.5 - Math.sin(ang) * this.canvas.width * 0.45;
-    const moonY = this.canvas.height * 0.35 + Math.cos(ang) * this.canvas.height * 0.25;
+    // Sun / moon arcs. Each rises from the left horizon, peaks
+    // overhead, sets to the right.
+    const archCenterX = this.canvas.width * 0.5;
+    const archHorizonY = this.canvas.height * 0.35;
+    const archSpanX = this.canvas.width * 0.45;
+    const archSpanY = this.canvas.height * 0.25;
     const discR = Math.max(8, Math.min(this.canvas.width, this.canvas.height) * 0.025);
-    if (daylight > 0.05) {
-      ctx.globalAlpha = Math.min(1, daylight * 1.2);
+
+    if (cel.sunUp) {
+      // Sun position parameterised by sunPhase ∈ [0,1].
+      const ang = (cel.sunPhase - 0.5) * Math.PI;
+      const sx = archCenterX + Math.sin(ang) * archSpanX;
+      const sy = archHorizonY - Math.cos(ang) * archSpanY;
       ctx.fillStyle = RENDER.sunColor;
-      ctx.beginPath(); ctx.arc(sunX, sunY, discR, 0, Math.PI * 2); ctx.fill();
-      ctx.globalAlpha = 1;
-    }
-    if (daylight < 0.95) {
-      ctx.globalAlpha = Math.min(1, (1 - daylight) * 1.2);
-      ctx.fillStyle = RENDER.moonColor;
-      ctx.beginPath(); ctx.arc(moonX, moonY, discR * 0.85, 0, Math.PI * 2); ctx.fill();
-      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.arc(sx, sy, discR, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Moon arcs from left horizon (moonPhase=0) to right horizon
+      // (moonPhase=1), peaking overhead at moonPhase=0.5.
+      const moonAng = (cel.moonPhase - 0.5) * Math.PI;
+      const mx = archCenterX + Math.sin(moonAng) * archSpanX;
+      const my = archHorizonY - Math.cos(moonAng) * archSpanY;
+      // Notional sun continues across the lower (under-world) arc:
+      // it set on the right at moonPhase=0 and rises on the left at
+      // moonPhase=1, opposite the moon. This gives the crescent the
+      // proper apparent rotation through the night — lit side faces
+      // the (invisible) sun.
+      const sunAng = Math.PI / 2 + cel.moonPhase * Math.PI;
+      const sx = archCenterX + Math.sin(sunAng) * archSpanX;
+      const sy = archHorizonY - Math.cos(sunAng) * archSpanY;
+      this.drawCrescentMoon(mx, my, discR * 0.9, sx, sy);
     }
 
     // Ants — world-space coordinates scaled to canvas.
