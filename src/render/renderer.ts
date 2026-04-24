@@ -216,15 +216,29 @@ export class Renderer {
           } else if (y === surfY + 1) {
             r = GRASS_ROOT[0]; g = GRASS_ROOT[1]; b = GRASS_ROOT[2];
           } else {
-            // Edge tinting: soil cells next to any air lean toward
-            // lighter soil-edge; interior cells use the base gradient.
-            let airNeighbours = 0;
-            if (x > 0 && cells[idx - 1] === CELL_AIR) airNeighbours++;
-            if (x < w - 1 && cells[idx + 1] === CELL_AIR) airNeighbours++;
-            if (y > 0 && cells[idx - w] === CELL_AIR) airNeighbours++;
-            if (y < h - 1 && cells[idx + w] === CELL_AIR) airNeighbours++;
-            if (airNeighbours > 0) {
-              const t = Math.min(1, airNeighbours * 0.4);
+            // "Clearedness" tint: count air cells in a 3×3 window
+            // around this soil cell. Zero = undisturbed deep dirt
+            // (base gradient). A few = nibbled edge (lean toward
+            // the lighter soil-edge color). Many = heavily worked
+            // soil, visible as a halo of loosened dirt that fades
+            // smoothly into the tunnel color itself.
+            let airN = 0;
+            const y0 = Math.max(0, y - 1);
+            const y1 = Math.min(h - 1, y + 1);
+            const x0 = Math.max(0, x - 1);
+            const x1 = Math.min(w - 1, x + 1);
+            for (let yy = y0; yy <= y1; yy++) {
+              const row = yy * w;
+              for (let xx = x0; xx <= x1; xx++) {
+                if (xx === x && yy === y) continue;
+                if (cells[row + xx] === CELL_AIR) airN++;
+              }
+            }
+            if (airN > 0) {
+              // Up to 8 possible air neighbours. Curve biased so
+              // 1 neighbour already paints an edge, 4+ starts
+              // looking clearly disturbed.
+              const t = Math.min(1, airN / 6);
               r = SOIL_EDGE[0] * (1 - t) + tunR * t;
               g = SOIL_EDGE[1] * (1 - t) + tunG * t;
               b = SOIL_EDGE[2] * (1 - t) + tunB * t;
@@ -293,29 +307,32 @@ export class Renderer {
     const petiole = pt(-0.08, 0);
     const gaster = pt(-0.30, 0);
 
-    // Tripod-gait leg phases. Front-left + mid-right + rear-left
-    // are in phase; the other three are anti-phase.
-    const swing = (off: number) => Math.sin(t + off);
-    const drawLeg = (
-      shoulderF: number, shoulderR: number,
-      reachF: number, reachR: number,
-      off: number, sign: number,
-    ) => {
-      const ph = swing(off);
-      const shoulder = pt(shoulderF, shoulderR * sign);
-      // Knee: outward from body, partway to foot.
-      const knee = pt(
-        shoulderF + reachF * 0.4 + ph * 0.03,
-        (shoulderR + reachR * 0.55 + 0.04) * sign,
-      );
-      const foot = pt(
-        shoulderF + reachF + ph * 0.08,
-        (shoulderR + reachR) * sign,
-      );
+    // Legs reach toward world-down (gravity) regardless of heading
+    // so an ant on a horizontal floor always looks like it's
+    // standing on its feet, not its hind legs. For side-view
+    // cross-section, we render 3 visible legs (front / mid / rear) —
+    // the 3 legs on the far side would just overlap these, and
+    // showing only one set reads more cleanly.
+    //
+    // Shoulder sits on the body axis; foot is directly below
+    // (world-down) plus a small swing along the body axis so the
+    // gait animates. Knee bends forward of the shoulder–foot line.
+    const legReach = 0.24 * L;
+    const drawLeg = (forwardFrac: number, phase: number) => {
+      const shoulderX = cx + cos * forwardFrac * L;
+      const shoulderY = cy + sin * forwardFrac * L;
+      const swing = phase * 0.08 * L;
+      const footX = shoulderX + cos * swing;
+      const footY = shoulderY + sin * swing + legReach;
+      // Knee: world-space midpoint lifted slightly along the body
+      // axis toward the leg's stride direction, giving a visible
+      // kink. For horizontal ants this shows as an above-foot bend.
+      const midX = (shoulderX + footX) * 0.5 + cos * 0.02 * L;
+      const midY = (shoulderY + footY) * 0.5 + sin * 0.02 * L - 0.03 * L;
       ctx.beginPath();
-      ctx.moveTo(shoulder[0], shoulder[1]);
-      ctx.lineTo(knee[0], knee[1]);
-      ctx.lineTo(foot[0], foot[1]);
+      ctx.moveTo(shoulderX, shoulderY);
+      ctx.lineTo(midX, midY);
+      ctx.lineTo(footX, footY);
       ctx.stroke();
     };
 
@@ -323,14 +340,12 @@ export class Renderer {
     ctx.lineWidth = Math.max(0.04 * L, 0.5);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    // Six legs. Tripod A: front-left, mid-right, rear-left (phase 0).
-    //          Tripod B: the other three (phase π).
-    drawLeg( 0.14,  0.07,  0.08,  0.16, 0,        -1); // front L
-    drawLeg( 0.02,  0.07,  0.04,  0.22, Math.PI,   1); // mid R
-    drawLeg(-0.10,  0.07, -0.02,  0.18, 0,        -1); // rear L
-    drawLeg( 0.14,  0.07,  0.08,  0.16, Math.PI,   1); // front R
-    drawLeg( 0.02,  0.07,  0.04,  0.22, 0,        -1); // mid L
-    drawLeg(-0.10,  0.07, -0.02,  0.18, Math.PI,   1); // rear R
+    // Tripod gait: front + rear legs in phase, mid leg antiphase
+    // (approximation of the real Formica pattern; in a side view the
+    // opposing-side tripod reads the same as the near-side one).
+    drawLeg( 0.14,  Math.sin(t));
+    drawLeg( 0.02,  Math.sin(t + Math.PI));
+    drawLeg(-0.10,  Math.sin(t));
 
     // Body segments. Gaster first (rearmost).
     ctx.fillStyle = RENDER.antBody;

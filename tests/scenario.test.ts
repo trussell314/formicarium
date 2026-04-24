@@ -102,7 +102,7 @@ describe('scenario DSL', () => {
     const { colony, resolved } = buildFromScenario({
       name: 'speed-test',
       secondsPerTick: 0.1,
-      ants: { worker: { count: 3, walkSpeedCmPerSec: 2.0 } },
+      ants: { worker: { count: 3, walkSpeedCmPerSec: 2.0, variation: 0 } },
     });
     // 2 cm/sec * 20 cells/cm * 0.1 sec/tick = 4 cells/tick.
     for (let i = 0; i < colony.count; i++) {
@@ -113,10 +113,23 @@ describe('scenario DSL', () => {
   it('per-ant bodyLengthCells scales with CELLS_PER_CM', () => {
     const { colony } = buildFromScenario({
       name: 'body-test',
-      ants: { worker: { count: 1, bodyLengthCm: 0.5 } },
+      ants: { worker: { count: 1, bodyLengthCm: 0.5, variation: 0 } },
     });
     // 0.5 cm * 20 cells/cm = 10 cells.
     expect(colony.bodyLengthCells[0]).toBeCloseTo(0.5 * CELLS_PER_CM);
+  });
+
+  it('variation > 0 produces heterogeneous ants within a single caste', () => {
+    const { colony } = buildFromScenario({
+      name: 'het',
+      seed: 42,
+      ants: { worker: { count: 20, variation: 0.3 } },
+    });
+    const speeds = new Set<number>();
+    for (let i = 0; i < colony.count; i++) speeds.add(colony.walkSpeedCellsPerTick[i]!);
+    // With variation on, essentially every ant should have a
+    // distinct walk speed.
+    expect(speeds.size).toBeGreaterThanOrEqual(15);
   });
 
   it('multiple ant types each get their tag and behaviour', () => {

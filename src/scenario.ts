@@ -34,6 +34,13 @@ export interface AntTypeSpec {
    */
   bodyLengthCm?: number;
   /**
+   * Per-ant variation. At spawn each behaviour parameter is jittered
+   * by (1 + gauss() × variation). Models heterogeneity within a
+   * caste — real workers have individually-varying thresholds and
+   * speeds. Default 0.15 (= 15% stddev).
+   */
+  variation?: number;
+  /**
    * Reserved — no behaviour yet: alates/queens during nuptial flight
    * bypass gravity.
    */
@@ -120,6 +127,7 @@ const ANT_DEFAULTS = {
   digProbPerSoilHit: 0.035,
   turnNoiseRadPerSec: 1.2,
   bodyLengthCm: 0.6,
+  variation: 0.15,
   winged: false,
 };
 
@@ -143,6 +151,7 @@ export function resolveScenario(s: Scenario): ResolvedScenario {
       digProbPerSoilHit: spec.digProbPerSoilHit ?? ANT_DEFAULTS.digProbPerSoilHit,
       turnNoiseRadPerSec: spec.turnNoiseRadPerSec ?? ANT_DEFAULTS.turnNoiseRadPerSec,
       bodyLengthCm: spec.bodyLengthCm ?? ANT_DEFAULTS.bodyLengthCm,
+      variation: spec.variation ?? ANT_DEFAULTS.variation,
       winged: spec.winged ?? ANT_DEFAULTS.winged,
       tag: spec.tag,
     };
@@ -197,28 +206,38 @@ export function buildFromScenario(s: Scenario): {
   const halfW = resolved.starterChamberHalfWidthCells;
   const surfaceY = resolved.surfaceCellsFromTop;
   const antType: string[] = [];
+  // Per-ant variation: each parameter gets an independent gaussian
+  // jitter factor clamped below by 0.3× to avoid zero or negative
+  // values. Spawned one at a time so each ant gets its own roll.
+  const jitter = (base: number, stddev: number): number =>
+    base * Math.max(0.3, 1 + rng.gauss() * stddev);
   for (const [name, spec] of Object.entries(resolved.ants)) {
-    const cellsPerTick = spec.walkSpeedCmPerSec * CELLS_PER_CM * resolved.secondsPerTick;
-    const noisePerTick = spec.turnNoiseRadPerSec * resolved.secondsPerTick;
-    const behaviour = {
-      walkSpeedCellsPerTick: cellsPerTick,
-      digProbPerSoilHit: spec.digProbPerSoilHit,
-      turnNoiseRadPerTick: noisePerTick,
-      winged: spec.winged ? 1 : 0,
-      bodyLengthCells: spec.bodyLengthCm * CELLS_PER_CM,
-    };
-    const before = colony.count;
-    colony.spawnInRect(
-      cx - halfW,
-      surfaceY + 1,
-      cx + halfW,
-      surfaceY + resolved.starterChamberDepthCells,
-      spec.count,
-      rng,
-      (x, y) => world.isAir(x, y),
-      behaviour,
-    );
-    for (let i = before; i < colony.count; i++) antType.push(name);
+    const baseCellsPerTick = spec.walkSpeedCmPerSec * CELLS_PER_CM * resolved.secondsPerTick;
+    const baseNoisePerTick = spec.turnNoiseRadPerSec * resolved.secondsPerTick;
+    const baseBodyLen = spec.bodyLengthCm * CELLS_PER_CM;
+    for (let k = 0; k < spec.count; k++) {
+      const behaviour = {
+        walkSpeedCellsPerTick: jitter(baseCellsPerTick, spec.variation),
+        digProbPerSoilHit: jitter(spec.digProbPerSoilHit, spec.variation),
+        turnNoiseRadPerTick: jitter(baseNoisePerTick, spec.variation),
+        winged: spec.winged ? 1 : 0,
+        // Body-length variation is halved so ants don't end up
+        // visually wildly different sizes.
+        bodyLengthCells: jitter(baseBodyLen, spec.variation * 0.5),
+      };
+      const before = colony.count;
+      colony.spawnInRect(
+        cx - halfW,
+        surfaceY + 1,
+        cx + halfW,
+        surfaceY + resolved.starterChamberDepthCells,
+        1,
+        rng,
+        (x, y) => world.isAir(x, y),
+        behaviour,
+      );
+      if (colony.count > before) antType.push(name);
+    }
   }
 
   return { resolved, world, colony, rng, antType };
