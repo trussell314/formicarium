@@ -241,6 +241,11 @@ export function buildFromScenario(s: Scenario): {
         // visually wildly different sizes.
         bodyLengthCells: jitter(baseBodyLen, spec.variation * 0.5),
         posZ: spawnZ,
+        // Response threshold for the REST task. Per-ant so some
+        // individuals are more easily annoyed by crowding than
+        // others (Beshers & Fewell 2001). Range roughly 1.5..5
+        // neighbours, with larger `variation` widening the spread.
+        restThreshold: jitter(3, spec.variation),
       };
       const before = colony.count;
       colony.spawnInRect(

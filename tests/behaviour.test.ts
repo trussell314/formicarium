@@ -125,8 +125,9 @@ describe('behavioural invariants — 10-ant colony', () => {
     }
     // Over 50 ticks × 10 ants = 500 samples; at least some should
     // have prev != current. If ALL are snapped, renderer sees no
-    // motion.
-    expect(distinctCount).toBeGreaterThan(100);
+    // motion. Threshold kept low because REST can pin crowded ants
+    // for ~50 ticks at a time (Beshers & Fewell task allocation).
+    expect(distinctCount).toBeGreaterThan(20);
   });
 
   it('settle never teleports more than the movement cap without snapping prev', () => {

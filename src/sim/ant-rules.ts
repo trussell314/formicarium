@@ -27,6 +27,7 @@ import { CONFIG } from '../config';
 import {
   Colony,
   STATE_CARRY,
+  STATE_REST,
   STATE_WANDER,
 } from './colony';
 import {
@@ -140,6 +141,16 @@ const PHEROMONE_DIFFUSE = 0.04;
 const PHEROMONE_EVAP = 0.985;
 const PHEROMONE_FOLLOW_STRENGTH = 0.35;
 
+// Response-threshold (Beshers & Fewell 2001) for the REST task:
+//   P(engage REST) = s² / (s² + θ²)
+// where s = number of neighbours within REST_CROWD_RADIUS_CELLS and
+// θ = this ant's restThreshold. Per-tick engage probability is
+// further throttled by REST_PROB_PER_TICK so transitions don't
+// snap-chatter at every frame.
+const REST_CROWD_RADIUS_CELLS = 3.0;
+const REST_PROB_PER_TICK = 0.04;
+const REST_DURATION_TICKS = 50;
+
 /**
  * Sample the pheromone gradient at (x, y) by central differences
  * on the current buffer; return a heading that points up the
@@ -184,6 +195,45 @@ export function stepSimulation(
     const speed = colony.walkSpeedCellsPerTick[i]!;
     const noise = colony.turnNoiseRadPerTick[i]!;
     const digProb = colony.digProbPerSoilHit[i]!;
+
+    // REST: stay put; exit after REST_DURATION_TICKS.
+    if (state === STATE_REST) {
+      if (colony.stateTimer[i]! >= REST_DURATION_TICKS) {
+        colony.setState(i, STATE_WANDER);
+        // Kick heading to a fresh direction so we don't drop
+        // straight back into the neighbours we were trying to
+        // escape.
+        colony.heading[i] = rng.range(0, Math.PI * 2);
+      }
+      continue;
+    }
+
+    // Response-threshold task allocation (Beshers & Fewell 2001).
+    // Count neighbours within a small radius; compute
+    // P(engage REST) = s² / (s² + θ²) · throttle.
+    // Applies to WANDER ants only — a carrying ant powers through.
+    if (state === STATE_WANDER) {
+      let crowd = 0;
+      const ax = colony.posX[i]!;
+      const ay = colony.posY[i]!;
+      for (let j = 0; j < colony.count; j++) {
+        if (j === i) continue;
+        const dx = colony.posX[j]! - ax;
+        const dy = colony.posY[j]! - ay;
+        if (dx * dx + dy * dy <= REST_CROWD_RADIUS_CELLS * REST_CROWD_RADIUS_CELLS) {
+          crowd++;
+        }
+      }
+      if (crowd > 0) {
+        const theta = colony.restThreshold[i]!;
+        const s = crowd;
+        const p = (s * s) / (s * s + theta * theta) * REST_PROB_PER_TICK;
+        if (rng.next() < p) {
+          colony.setState(i, STATE_REST);
+          continue;
+        }
+      }
+    }
 
     // Heading update.
     // WANDER + pheromone: pull toward dig pheromone gradient

@@ -63,6 +63,14 @@ export class Colony {
    */
   readonly homeX: Float32Array;
   readonly homeY: Float32Array;
+  /**
+   * Response-threshold (Beshers & Fewell 2001) for the REST task:
+   * minimum neighbour-count that makes this ant likely to stop and
+   * rest. Lower = more easily annoyed by crowding. Per-ant so
+   * different individuals have different tolerance, producing
+   * emergent role specialisation without hand-coded castes.
+   */
+  readonly restThreshold: Float32Array;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -86,6 +94,7 @@ export class Colony {
     this.targetY = new Float32Array(capacity);
     this.homeX = new Float32Array(capacity);
     this.homeY = new Float32Array(capacity);
+    this.restThreshold = new Float32Array(capacity);
     // Initialise targets to NaN so "no target" is the default.
     this.targetX.fill(NaN);
     this.targetY.fill(NaN);
@@ -129,6 +138,7 @@ export class Colony {
       winged: number;
       bodyLengthCells: number;
       posZ: number;
+      restThreshold: number;
     }>,
   ): number | null {
     if (this.count >= this.capacity) return null;
@@ -152,6 +162,7 @@ export class Colony {
     this.winged[i] = behaviour?.winged ?? Colony.DEFAULT_BEHAVIOUR.winged;
     this.bodyLengthCells[i] =
       behaviour?.bodyLengthCells ?? Colony.DEFAULT_BEHAVIOUR.bodyLengthCells;
+    this.restThreshold[i] = behaviour?.restThreshold ?? 3;
     return i;
   }
 
@@ -193,6 +204,7 @@ export class Colony {
       winged: number;
       bodyLengthCells: number;
       posZ: number;
+      restThreshold: number;
     }>,
   ): number {
     const candidates: number[] = [];

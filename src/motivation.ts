@@ -56,7 +56,7 @@ export function motivationOf(colony: Colony, i: number): Motivation {
     }
     case STATE_REST:
       stateLabel = 'REST';
-      description = 'resting';
+      description = 'resting — waiting for the crowd to thin';
       break;
     default:
       stateLabel = `STATE${state}`;
