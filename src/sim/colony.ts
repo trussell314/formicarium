@@ -22,6 +22,15 @@ export class Colony {
   readonly posY: Float32Array;
   readonly prevX: Float32Array;
   readonly prevY: Float32Array;
+  /**
+   * Depth coordinate along the slab's z axis, in cm. The world is a
+   * 2D cross-section (xy) with a small thickness (z); ants at
+   * different z can pass each other without colliding even when
+   * their xy positions overlap. 0 = front glass, slabThicknessCm
+   * = back glass.
+   */
+  readonly posZ: Float32Array;
+  readonly prevZ: Float32Array;
   readonly heading: Float32Array;
   readonly state: Uint8Array;
   readonly stateTimer: Uint16Array;
@@ -62,6 +71,8 @@ export class Colony {
     this.posY = new Float32Array(capacity);
     this.prevX = new Float32Array(capacity);
     this.prevY = new Float32Array(capacity);
+    this.posZ = new Float32Array(capacity);
+    this.prevZ = new Float32Array(capacity);
     this.heading = new Float32Array(capacity);
     this.state = new Uint8Array(capacity);
     this.stateTimer = new Uint16Array(capacity);
@@ -117,6 +128,7 @@ export class Colony {
       turnNoiseRadPerTick: number;
       winged: number;
       bodyLengthCells: number;
+      posZ: number;
     }>,
   ): number | null {
     if (this.count >= this.capacity) return null;
@@ -125,6 +137,8 @@ export class Colony {
     this.posY[i] = y;
     this.prevX[i] = x;
     this.prevY[i] = y;
+    this.posZ[i] = behaviour?.posZ ?? 0.4;
+    this.prevZ[i] = this.posZ[i]!;
     this.heading[i] = heading;
     this.state[i] = STATE_WANDER;
     this.stateTimer[i] = 0;
@@ -178,6 +192,7 @@ export class Colony {
       turnNoiseRadPerTick: number;
       winged: number;
       bodyLengthCells: number;
+      posZ: number;
     }>,
   ): number {
     const candidates: number[] = [];

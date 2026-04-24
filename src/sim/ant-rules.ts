@@ -127,12 +127,18 @@ function tryDepositGrain(world: World, ix: number, iy: number): { x: number; y: 
  *      + snap prev if the total tick motion was large (so the renderer
  *      doesn't interpolate through unsupported mid-tick space)
  */
-export function stepSimulation(world: World, colony: Colony, rng: RNG): void {
+export function stepSimulation(
+  world: World,
+  colony: Colony,
+  rng: RNG,
+  slabThicknessCm = 0.8,
+): void {
   world.tickCount++;
 
   for (let i = 0; i < colony.count; i++) {
     colony.prevX[i] = colony.posX[i];
     colony.prevY[i] = colony.posY[i];
+    colony.prevZ[i] = colony.posZ[i];
   }
 
   for (let i = 0; i < colony.count; i++) {
@@ -222,6 +228,57 @@ export function stepSimulation(world: World, colony: Colony, rng: RNG): void {
         // Head back down into the nest.
         colony.heading[i] = Math.PI / 2 + rng.range(-0.6, 0.6);
       }
+    }
+  }
+
+  // Collision avoidance with z dimension.
+  //
+  // For each pair of ants closer than ~1 body length in xy:
+  //   - if their z are close too (would actually touch), push
+  //     them apart in z (they pass in depth).
+  //   - additionally give each ant a small heading deflection away
+  //     from the neighbour so they can also steer around in xy.
+  // Plus a small per-tick z noise so ants don't settle into a
+  // single plane. z is bounded to [0.05, slab-0.05] so ants don't
+  // clip the glass.
+  const zMax = Math.max(0.1, slabThicknessCm - 0.05);
+  const zMin = 0.05;
+  const collideRcells = 1.2; // xy radius in cells to trigger avoidance
+  const collideRz = 0.3;    // z radius in cm
+  for (let i = 0; i < colony.count; i++) {
+    // Spontaneous z drift.
+    colony.posZ[i] += rng.gauss() * 0.015;
+    if (colony.posZ[i]! < zMin) colony.posZ[i] = zMin;
+    if (colony.posZ[i]! > zMax) colony.posZ[i] = zMax;
+  }
+  for (let i = 0; i < colony.count; i++) {
+    const ix = colony.posX[i]!;
+    const iy = colony.posY[i]!;
+    const iz = colony.posZ[i]!;
+    for (let j = i + 1; j < colony.count; j++) {
+      const dx = colony.posX[j]! - ix;
+      const dy = colony.posY[j]! - iy;
+      const dz = colony.posZ[j]! - iz;
+      const xyDist2 = dx * dx + dy * dy;
+      if (xyDist2 > collideRcells * collideRcells) continue;
+      if (Math.abs(dz) > collideRz) continue;
+      // They're close in xy and close in z. Nudge z apart — the
+      // side with the LARGER current z gets pushed more positive,
+      // the smaller gets more negative. Symmetric total-z conserved.
+      const sign = dz >= 0 ? 1 : -1;
+      const push = 0.04;
+      colony.posZ[j] = Math.min(zMax, Math.max(zMin, colony.posZ[j]! + sign * push));
+      colony.posZ[i] = Math.min(zMax, Math.max(zMin, colony.posZ[i]! - sign * push));
+      // Heading deflect in xy away from the other ant.
+      const xyDist = Math.sqrt(xyDist2) + 1e-6;
+      const away = Math.atan2(-dy / xyDist, -dx / xyDist);
+      const steer = 0.06;
+      colony.heading[i] = wrapAngle(
+        colony.heading[i]! + wrapAngle(away - colony.heading[i]!) * steer,
+      );
+      colony.heading[j] = wrapAngle(
+        colony.heading[j]! + wrapAngle((away + Math.PI) - colony.heading[j]!) * steer,
+      );
     }
   }
 

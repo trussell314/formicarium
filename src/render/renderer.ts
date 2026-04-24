@@ -571,25 +571,45 @@ export class Renderer {
     }
 
     // Ants — world-space coordinates scaled to canvas.
+    // Render back-to-front in z so the front ants occlude those
+    // behind. With 10 ants the sort is cheap.
     const sx = dw / this.world.width;
     ctx.save();
     ctx.translate(dx, dy);
     ctx.scale(sx, sx);
     const gaitT = performance.now() * 0.012;
-    for (let i = 0; i < colony.count; i++) {
+    const order: number[] = [];
+    for (let i = 0; i < colony.count; i++) order.push(i);
+    order.sort((a, b) => colony.posZ[b]! - colony.posZ[a]!);
+    // Slab thickness is in cm; we treat posZ here as a rough depth
+    // factor where 0 = front glass, thickest value = back. We
+    // estimate the thickness from the actual max posZ in the colony
+    // (avoids threading yet another constructor param) and fall
+    // back to 1 cm if empty.
+    let maxZ = 0.01;
+    for (let i = 0; i < colony.count; i++) if (colony.posZ[i]! > maxZ) maxZ = colony.posZ[i]!;
+    for (const i of order) {
       const px = colony.prevX[i]!;
       const py = colony.prevY[i]!;
       const nx = colony.posX[i]! * alpha + px * (1 - alpha);
       const ny = colony.posY[i]! * alpha + py * (1 - alpha);
+      // Depth cue: ants farther back (higher posZ) render slightly
+      // smaller and dimmer. Front ants sit at full size and contrast.
+      const zNorm = colony.posZ[i]! / maxZ; // 0 = front, 1 = back
+      const depthScale = 1 - zNorm * 0.25;
+      const depthAlpha = 1 - zNorm * 0.35;
+      ctx.save();
+      ctx.globalAlpha = depthAlpha;
       this.drawAnt(
         nx,
         ny,
         colony.heading[i]!,
         gaitT + i * 0.7,
         colony.state[i]!,
-        colony.bodyLengthCells[i]!,
+        colony.bodyLengthCells[i]! * depthScale,
         colony.id[i] === this.selectedAntId,
       );
+      ctx.restore();
     }
     ctx.restore();
   }

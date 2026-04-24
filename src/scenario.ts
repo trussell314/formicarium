@@ -71,6 +71,15 @@ export interface Scenario {
   /** Depth of the carved starter chamber in cm. Default 2. */
   starterChamberDepthCm?: number;
 
+  /**
+   * Slab thickness (the z dimension of the formicarium world) in cm.
+   * Default 0.8 cm — enough for two ~0.3 cm ants to pass each other
+   * by shifting z, matching the narrow book-style display tanks
+   * this cross-section models. Collision avoidance uses this to
+   * decide whether to steer sideways (in xy) or in z.
+   */
+  slabThicknessCm?: number;
+
   /** PRNG seed. Default Date.now()-derived. */
   seed?: number;
 
@@ -96,6 +105,7 @@ export interface ResolvedScenario {
   surfaceFromTopCm: number;
   starterChamberWidthCm: number;
   starterChamberDepthCm: number;
+  slabThicknessCm: number;
   seed: number;
   debugIntervalTicks: number;
   ants: Record<string, Required<Omit<AntTypeSpec, 'tag'>> & { tag?: string }>;
@@ -119,6 +129,7 @@ const DEFAULTS = {
   surfaceFromTopCm: 5,
   starterChamberWidthCm: 4,
   starterChamberDepthCm: 2,
+  slabThicknessCm: 0.8,
   debugIntervalTicks: 50,
 };
 
@@ -139,6 +150,7 @@ export function resolveScenario(s: Scenario): ResolvedScenario {
   const surfaceFromTopCm = s.surfaceFromTopCm ?? DEFAULTS.surfaceFromTopCm;
   const starterChamberWidthCm = s.starterChamberWidthCm ?? DEFAULTS.starterChamberWidthCm;
   const starterChamberDepthCm = s.starterChamberDepthCm ?? DEFAULTS.starterChamberDepthCm;
+  const slabThicknessCm = s.slabThicknessCm ?? DEFAULTS.slabThicknessCm;
   const dayDurationSec = s.dayDurationSec ?? DEFAULTS.dayDurationSec;
   const nightDurationSec = s.nightDurationSec ?? DEFAULTS.nightDurationSec;
 
@@ -170,6 +182,7 @@ export function resolveScenario(s: Scenario): ResolvedScenario {
     surfaceFromTopCm,
     starterChamberWidthCm,
     starterChamberDepthCm,
+    slabThicknessCm,
     seed: s.seed ?? ((Date.now() & 0xffffffff) >>> 0),
     debugIntervalTicks: s.debugIntervalTicks ?? DEFAULTS.debugIntervalTicks,
     ants,
@@ -216,6 +229,9 @@ export function buildFromScenario(s: Scenario): {
     const baseNoisePerTick = spec.turnNoiseRadPerSec * resolved.secondsPerTick;
     const baseBodyLen = spec.bodyLengthCm * CELLS_PER_CM;
     for (let k = 0; k < spec.count; k++) {
+      // Spawn at a uniformly random z between 10%..90% of the slab
+      // so ants aren't all pressed against one glass.
+      const spawnZ = resolved.slabThicknessCm * (0.1 + rng.next() * 0.8);
       const behaviour = {
         walkSpeedCellsPerTick: jitter(baseCellsPerTick, spec.variation),
         digProbPerSoilHit: jitter(spec.digProbPerSoilHit, spec.variation),
@@ -224,6 +240,7 @@ export function buildFromScenario(s: Scenario): {
         // Body-length variation is halved so ants don't end up
         // visually wildly different sizes.
         bodyLengthCells: jitter(baseBodyLen, spec.variation * 0.5),
+        posZ: spawnZ,
       };
       const before = colony.count;
       colony.spawnInRect(

@@ -35,7 +35,7 @@ function boot(): void {
 
   const simHz = 1 / resolved.secondsPerTick;
   const loop = new Loop(simHz, {
-    step: () => stepSimulation(world, colony, rng),
+    step: () => stepSimulation(world, colony, rng, resolved.slabThicknessCm),
     draw: (alpha: number) => renderer.draw(colony, alpha),
   });
 
