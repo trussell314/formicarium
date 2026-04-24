@@ -35,6 +35,8 @@ export class Colony {
   readonly turnNoiseRadPerTick: Float32Array;
   /** 1 = winged (bypasses gravity), 0 = walking. */
   readonly winged: Uint8Array;
+  /** Physical body length in cells — renderer scales anatomy by this. */
+  readonly bodyLengthCells: Float32Array;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -51,6 +53,7 @@ export class Colony {
     this.digProbPerSoilHit = new Float32Array(capacity);
     this.turnNoiseRadPerTick = new Float32Array(capacity);
     this.winged = new Uint8Array(capacity);
+    this.bodyLengthCells = new Float32Array(capacity);
   }
 
   /** Defaults used when spawn() is called without a behaviour spec. */
@@ -59,6 +62,7 @@ export class Colony {
     digProbPerSoilHit: 0.035,
     turnNoiseRadPerTick: 0.15,
     winged: 0,
+    bodyLengthCells: 3,
   };
 
   spawn(
@@ -70,6 +74,7 @@ export class Colony {
       digProbPerSoilHit: number;
       turnNoiseRadPerTick: number;
       winged: number;
+      bodyLengthCells: number;
     }>,
   ): number | null {
     if (this.count >= this.capacity) return null;
@@ -89,6 +94,8 @@ export class Colony {
     this.turnNoiseRadPerTick[i] =
       behaviour?.turnNoiseRadPerTick ?? Colony.DEFAULT_BEHAVIOUR.turnNoiseRadPerTick;
     this.winged[i] = behaviour?.winged ?? Colony.DEFAULT_BEHAVIOUR.winged;
+    this.bodyLengthCells[i] =
+      behaviour?.bodyLengthCells ?? Colony.DEFAULT_BEHAVIOUR.bodyLengthCells;
     return i;
   }
 
@@ -128,6 +135,7 @@ export class Colony {
       digProbPerSoilHit: number;
       turnNoiseRadPerTick: number;
       winged: number;
+      bodyLengthCells: number;
     }>,
   ): number {
     const candidates: number[] = [];

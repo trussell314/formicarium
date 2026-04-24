@@ -1,18 +1,20 @@
 // Scenario DSL.
 //
 // A scenario is a single typed object that fully specifies a sim run:
-// world geometry in centimetres, day/night durations in ticks, and
-// the population of ants by type. It's the canonical input for both
-// the web UI and the headless runner — same object, same behaviour.
+// world geometry in centimetres, day/night durations in **seconds**,
+// and the population of ants by type. It's the canonical input for
+// both the web UI and the headless runner — same object, same
+// behaviour.
 //
-// Cells-per-cm is fixed (CELLS_PER_CM = 4 → 0.25 cm cells). All
-// scenario fields are in cm or ticks; the builder converts.
+// Cells-per-cm is fixed (CELLS_PER_CM = 20 → 0.5 mm cells). All
+// scenario fields are in cm, sec, or counts; the resolver converts
+// into cells and ticks.
 
 import { Colony } from './sim/colony';
 import { World } from './sim/world';
 import { RNG } from './sim/rng';
 
-export const CELLS_PER_CM = 4;
+export const CELLS_PER_CM = 20;
 
 /** Behaviour and population of one ant caste. */
 export interface AntTypeSpec {
@@ -25,11 +27,15 @@ export interface AntTypeSpec {
   /** Heading-noise stddev (radians) per second of sim time. */
   turnNoiseRadPerSec?: number;
   /**
-   * Future hooks (no behavioural effect yet, but reserved so callers
-   * can already declare them and not break when behaviour lands):
-   *   `winged`: bypass gravity (for alates / queens during nuptial
-   *             flight).
-   *   `tag`: arbitrary label that the renderer or analytics may use.
+   * Physical body length in cm (nose to gaster tip). Default 0.6 cm,
+   * a Formica-worker-ish size. The renderer scales ant anatomy by
+   * this so ants stay the same *physical* size even when the grid
+   * resolution changes.
+   */
+  bodyLengthCm?: number;
+  /**
+   * Reserved — no behaviour yet: alates/queens during nuptial flight
+   * bypass gravity.
    */
   winged?: boolean;
   tag?: string;
@@ -39,23 +45,23 @@ export interface AntTypeSpec {
 export interface Scenario {
   name: string;
 
-  /** Wall-clock seconds represented per simulation tick. Default 1. */
+  /** Wall-clock seconds represented per simulation tick. Default 0.1 (10 Hz). */
   secondsPerTick?: number;
-  /** Ticks of "daytime" per cycle. Default 60. */
-  dayDurationTicks?: number;
-  /** Ticks of "nighttime" per cycle. Default 60. */
-  nightDurationTicks?: number;
+  /** Seconds of daytime per cycle. Default 60. */
+  dayDurationSec?: number;
+  /** Seconds of nighttime per cycle. Default 60. */
+  nightDurationSec?: number;
 
   /** Total world height in cm. Default 20. */
   worldHeightCm?: number;
-  /** Total world width in cm. Default 36 (16:9-ish at 20cm tall). */
+  /** Total world width in cm. Default 36 (16:9 at 20 cm tall). */
   worldWidthCm?: number;
   /** Distance from the top of the world to the natural surface. Default 5. */
   surfaceFromTopCm?: number;
 
-  /** Width of the carved starter chamber in cm. Default 3. */
+  /** Width of the carved starter chamber in cm. Default 4. */
   starterChamberWidthCm?: number;
-  /** Depth of the carved starter chamber in cm. Default 1.5. */
+  /** Depth of the carved starter chamber in cm. Default 2. */
   starterChamberDepthCm?: number;
 
   /** PRNG seed. Default Date.now()-derived. */
@@ -68,11 +74,15 @@ export interface Scenario {
   ants: Record<string, AntTypeSpec>;
 }
 
-/** Fully-resolved scenario with all defaults filled in (cm, ticks, etc.). */
+/** Fully-resolved scenario with all defaults filled in (cm, sec, ticks). */
 export interface ResolvedScenario {
   name: string;
   secondsPerTick: number;
+  dayDurationSec: number;
+  nightDurationSec: number;
+  /** Derived: dayDurationSec / secondsPerTick, rounded. */
   dayDurationTicks: number;
+  /** Derived: nightDurationSec / secondsPerTick, rounded. */
   nightDurationTicks: number;
   worldWidthCm: number;
   worldHeightCm: number;
@@ -90,28 +100,30 @@ export interface ResolvedScenario {
   starterChamberHalfWidthCells: number;
   starterChamberDepthCells: number;
   totalAnts: number;
+  cellsPerCm: number;
 }
 
 const DEFAULTS = {
-  secondsPerTick: 1,
-  dayDurationTicks: 60,
-  nightDurationTicks: 60,
+  secondsPerTick: 0.1,
+  dayDurationSec: 60,
+  nightDurationSec: 60,
   worldWidthCm: 36,
   worldHeightCm: 20,
   surfaceFromTopCm: 5,
-  starterChamberWidthCm: 3,
-  starterChamberDepthCm: 1.5,
-  debugIntervalTicks: 10,
+  starterChamberWidthCm: 4,
+  starterChamberDepthCm: 2,
+  debugIntervalTicks: 50,
 };
 
 const ANT_DEFAULTS = {
   walkSpeedCmPerSec: 2.4,
   digProbPerSoilHit: 0.035,
-  turnNoiseRadPerSec: 0.45,
+  turnNoiseRadPerSec: 1.2,
+  bodyLengthCm: 0.6,
   winged: false,
 };
 
-/** Fill in defaults; convert cm to cells. Pure function — no side effects. */
+/** Fill in defaults; convert cm to cells, sec to ticks. Pure function. */
 export function resolveScenario(s: Scenario): ResolvedScenario {
   const secondsPerTick = s.secondsPerTick ?? DEFAULTS.secondsPerTick;
   const worldWidthCm = s.worldWidthCm ?? DEFAULTS.worldWidthCm;
@@ -119,6 +131,8 @@ export function resolveScenario(s: Scenario): ResolvedScenario {
   const surfaceFromTopCm = s.surfaceFromTopCm ?? DEFAULTS.surfaceFromTopCm;
   const starterChamberWidthCm = s.starterChamberWidthCm ?? DEFAULTS.starterChamberWidthCm;
   const starterChamberDepthCm = s.starterChamberDepthCm ?? DEFAULTS.starterChamberDepthCm;
+  const dayDurationSec = s.dayDurationSec ?? DEFAULTS.dayDurationSec;
+  const nightDurationSec = s.nightDurationSec ?? DEFAULTS.nightDurationSec;
 
   const ants: ResolvedScenario['ants'] = {};
   let total = 0;
@@ -128,6 +142,7 @@ export function resolveScenario(s: Scenario): ResolvedScenario {
       walkSpeedCmPerSec: spec.walkSpeedCmPerSec ?? ANT_DEFAULTS.walkSpeedCmPerSec,
       digProbPerSoilHit: spec.digProbPerSoilHit ?? ANT_DEFAULTS.digProbPerSoilHit,
       turnNoiseRadPerSec: spec.turnNoiseRadPerSec ?? ANT_DEFAULTS.turnNoiseRadPerSec,
+      bodyLengthCm: spec.bodyLengthCm ?? ANT_DEFAULTS.bodyLengthCm,
       winged: spec.winged ?? ANT_DEFAULTS.winged,
       tag: spec.tag,
     };
@@ -137,8 +152,10 @@ export function resolveScenario(s: Scenario): ResolvedScenario {
   return {
     name: s.name,
     secondsPerTick,
-    dayDurationTicks: s.dayDurationTicks ?? DEFAULTS.dayDurationTicks,
-    nightDurationTicks: s.nightDurationTicks ?? DEFAULTS.nightDurationTicks,
+    dayDurationSec,
+    nightDurationSec,
+    dayDurationTicks: Math.max(1, Math.round(dayDurationSec / secondsPerTick)),
+    nightDurationTicks: Math.max(1, Math.round(nightDurationSec / secondsPerTick)),
     worldWidthCm,
     worldHeightCm,
     surfaceFromTopCm,
@@ -153,6 +170,7 @@ export function resolveScenario(s: Scenario): ResolvedScenario {
     starterChamberHalfWidthCells: Math.max(2, Math.round(starterChamberWidthCm * CELLS_PER_CM * 0.5)),
     starterChamberDepthCells: Math.max(2, Math.round(starterChamberDepthCm * CELLS_PER_CM)),
     totalAnts: total,
+    cellsPerCm: CELLS_PER_CM,
   };
 }
 
@@ -168,9 +186,6 @@ export function buildFromScenario(s: Scenario): {
   const resolved = resolveScenario(s);
   const rng = new RNG(resolved.seed);
   const world = new World(resolved.gridWidth, resolved.gridHeight);
-  // Override the world's notion of where the surface is so the
-  // generator carves at the scenario-specified depth, not the legacy
-  // CONFIG.surfaceFraction.
   world.generate(rng, {
     surfaceCellsFromTop: resolved.surfaceCellsFromTop,
     starterChamberHalfWidth: resolved.starterChamberHalfWidthCells,
@@ -183,7 +198,6 @@ export function buildFromScenario(s: Scenario): {
   const surfaceY = resolved.surfaceCellsFromTop;
   const antType: string[] = [];
   for (const [name, spec] of Object.entries(resolved.ants)) {
-    // Convert cm/sec → cells/tick using the scenario's secondsPerTick.
     const cellsPerTick = spec.walkSpeedCmPerSec * CELLS_PER_CM * resolved.secondsPerTick;
     const noisePerTick = spec.turnNoiseRadPerSec * resolved.secondsPerTick;
     const behaviour = {
@@ -191,6 +205,7 @@ export function buildFromScenario(s: Scenario): {
       digProbPerSoilHit: spec.digProbPerSoilHit,
       turnNoiseRadPerTick: noisePerTick,
       winged: spec.winged ? 1 : 0,
+      bodyLengthCells: spec.bodyLengthCm * CELLS_PER_CM,
     };
     const before = colony.count;
     colony.spawnInRect(

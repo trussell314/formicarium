@@ -26,6 +26,7 @@ function boot(): void {
       nightDurationTicks: resolved.nightDurationTicks,
     },
     resolved.surfaceCellsFromTop,
+    resolved.cellsPerCm,
   );
 
   // Loop runs at the scenario's tick rate. With secondsPerTick=1
@@ -45,7 +46,7 @@ function boot(): void {
         `seed: 0x${resolved.seed.toString(16)}  tick: ${world.tickCount}`,
         `world: ${resolved.worldWidthCm}×${resolved.worldHeightCm} cm  ` +
           `(${world.width}×${world.height} cells)`,
-        `day: ${resolved.dayDurationTicks}t  night: ${resolved.nightDurationTicks}t  ` +
+        `day: ${resolved.dayDurationSec}s  night: ${resolved.nightDurationSec}s  ` +
           `tick: ${resolved.secondsPerTick}s`,
         `ants: ${colony.count}  ` +
           Object.entries(resolved.ants).map(([n, s]) => `${n}=${s.count}`).join(' '),

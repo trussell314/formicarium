@@ -100,6 +100,7 @@ export class Renderer {
   readonly imageData: ImageData;
   readonly cycle: DayNightCycle;
   readonly surfaceCellsFromTop: number;
+  readonly cellsPerCm: number;
 
   // Per-row gradient caches (day sky, night sky, tunnel, soil).
   private readonly skyRowDay: Uint8ClampedArray;
@@ -107,10 +108,17 @@ export class Renderer {
   private readonly tunnelRow: Uint8ClampedArray;
   private readonly soilRow: Uint8ClampedArray;
 
-  constructor(canvas: HTMLCanvasElement, world: World, cycle: DayNightCycle, surfaceCellsFromTop: number) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    world: World,
+    cycle: DayNightCycle,
+    surfaceCellsFromTop: number,
+    cellsPerCm: number,
+  ) {
     this.canvas = canvas;
     this.cycle = cycle;
     this.surfaceCellsFromTop = surfaceCellsFromTop;
+    this.cellsPerCm = cellsPerCm;
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('no 2d ctx');
     this.ctx = ctx;
@@ -249,63 +257,60 @@ export class Renderer {
   }
 
   /**
-   * Draw one ant in world-space. Called with the canvas already
-   * scaled to "1 unit = 1 cell" in the ants layer.
-   *
-   * Anatomy: head + thorax + gaster (three ellipses along the body
-   * axis), two antennae arcing forward-outward from the head, six
-   * legs (tripod gait) sweeping in sync. Ant is ~3.6 cells long
-   * nose-to-gaster, ~1.2 cells wide.
+   * Draw one ant in world-space. The ants layer is pre-scaled so
+   * 1 unit = 1 cell. The sprite's anatomy is expressed in body-length
+   * units (nose-to-gaster-tip = 1.0) and scaled by `bodyLengthCells`,
+   * so real-world body size is preserved when CELLS_PER_CM changes.
    */
-  private drawAnt(cx: number, cy: number, heading: number, t: number, state: number): void {
+  private drawAnt(cx: number, cy: number, heading: number, t: number, state: number, bodyLengthCells: number): void {
     const ctx = this.ctx;
     const cos = Math.cos(heading);
     const sin = Math.sin(heading);
     const perpX = -sin;
     const perpY = cos;
+    const L = bodyLengthCells; // scale: 1.0 = full body length
 
-    // Reference points along the body axis. Body-frame offsets (forward-, right+).
     const pt = (forward: number, right: number): [number, number] =>
-      [cx + cos * forward + perpX * right, cy + sin * forward + perpY * right];
+      [cx + cos * forward * L + perpX * right * L, cy + sin * forward * L + perpY * right * L];
 
-    const head = pt(1.6, 0);
-    const thorax = pt(0.2, 0);
-    const gaster = pt(-1.3, 0);
+    // Anatomy, expressed as fractions of body length along the axis
+    // (+ = forward / nose, − = back / gaster) and perpendicular
+    // (+ = right side, − = left).
+    const head = pt(0.40, 0);
+    const thorax = pt(0.05, 0);
+    const gaster = pt(-0.35, 0);
 
-    // Legs — 3 per side. Tripod gait: ipsilateral front + mid + rear
-    // legs are in anti-phase (one group forward while the other is
-    // back). Phase t is a wall-clock radian.
     const legPhase = (off: number) => Math.sin(t + off);
     const legY = (f: number, side: number, phase: number) => {
-      const origin = pt(f, side * 0.35);
-      // Foot: swings ± along body axis, placed out to the side.
-      const swing = phase * 0.35;
-      const foot = pt(f + swing, side * 1.2);
+      const origin = pt(f, side * 0.10);
+      const swing = phase * 0.10;
+      const foot = pt(f + swing, side * 0.33);
       return [origin, foot] as const;
     };
 
-    // Draw gaster (abdomen — largest).
+    // Gaster (abdomen).
     ctx.fillStyle = RENDER.antBody;
     ctx.beginPath();
-    ctx.ellipse(gaster[0], gaster[1], 0.85, 0.55, heading, 0, Math.PI * 2);
+    ctx.ellipse(gaster[0], gaster[1], 0.24 * L, 0.16 * L, heading, 0, Math.PI * 2);
     ctx.fill();
 
-    // Draw thorax.
+    // Thorax.
     ctx.beginPath();
-    ctx.ellipse(thorax[0], thorax[1], 0.55, 0.42, heading, 0, Math.PI * 2);
+    ctx.ellipse(thorax[0], thorax[1], 0.15 * L, 0.12 * L, heading, 0, Math.PI * 2);
     ctx.fill();
 
-    // Legs (under thorax) — draw before head so head covers the roots.
+    // Legs. Three pairs (front / mid / rear), tripod gait (opposite
+    // sides alternate).
     ctx.strokeStyle = RENDER.antLeg;
-    ctx.lineWidth = 0.16;
+    ctx.lineWidth = 0.045 * L;
     ctx.lineCap = 'round';
     const pairs: Array<[number, number, number]> = [
-      [ 0.4,  1, 0],
-      [ 0.1, -1, Math.PI],
-      [-0.2,  1, Math.PI],
-      [-0.2, -1, 0],
-      [ 0.1,  1, Math.PI],
-      [ 0.4, -1, 0],
+      [ 0.11,  1, 0],
+      [ 0.03, -1, Math.PI],
+      [-0.06,  1, Math.PI],
+      [-0.06, -1, 0],
+      [ 0.03,  1, Math.PI],
+      [ 0.11, -1, 0],
     ];
     for (const [f, s, off] of pairs) {
       const ph = legPhase(off);
@@ -316,12 +321,12 @@ export class Renderer {
       ctx.stroke();
     }
 
-    // Antennae — curved forward from head.
-    const wiggle = Math.sin(t * 1.4) * 0.1;
-    const antL = pt(2.3, -0.45 + wiggle);
-    const antR = pt(2.3,  0.45 - wiggle);
+    // Antennae.
+    const wiggle = Math.sin(t * 1.4) * 0.03;
+    const antL = pt(0.62, -0.12 + wiggle);
+    const antR = pt(0.62,  0.12 - wiggle);
     ctx.strokeStyle = RENDER.antLeg;
-    ctx.lineWidth = 0.12;
+    ctx.lineWidth = 0.035 * L;
     ctx.beginPath();
     ctx.moveTo(head[0], head[1]);
     ctx.lineTo(antL[0], antL[1]);
@@ -329,28 +334,27 @@ export class Renderer {
     ctx.lineTo(antR[0], antR[1]);
     ctx.stroke();
 
-    // Head (draw last so legs/antennae tuck under).
+    // Head.
     ctx.fillStyle = RENDER.antHead;
     ctx.beginPath();
-    ctx.ellipse(head[0], head[1], 0.5, 0.45, heading, 0, Math.PI * 2);
+    ctx.ellipse(head[0], head[1], 0.14 * L, 0.13 * L, heading, 0, Math.PI * 2);
     ctx.fill();
 
-    // Carried grain — small tan dot at mandibles.
+    // Carried grain.
     if (state === STATE_CARRY) {
-      const jaw = pt(2.15, 0);
+      const jaw = pt(0.58, 0);
       ctx.fillStyle = RENDER.grainColor;
       ctx.beginPath();
-      ctx.arc(jaw[0], jaw[1], 0.35, 0, Math.PI * 2);
+      ctx.arc(jaw[0], jaw[1], 0.09 * L, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // REST ants get a faint dim overlay (optional visual beat; we're
-    // not currently using REST state but the hook is here).
+    // REST ants get a faint dim overlay.
     if (state === STATE_REST) {
       ctx.globalAlpha = 0.4;
       ctx.fillStyle = '#000';
       ctx.beginPath();
-      ctx.ellipse(thorax[0], thorax[1], 0.8, 0.6, heading, 0, Math.PI * 2);
+      ctx.ellipse(thorax[0], thorax[1], 0.22 * L, 0.18 * L, heading, 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
     }
@@ -479,7 +483,14 @@ export class Renderer {
       const py = colony.prevY[i]!;
       const nx = colony.posX[i]! * alpha + px * (1 - alpha);
       const ny = colony.posY[i]! * alpha + py * (1 - alpha);
-      this.drawAnt(nx, ny, colony.heading[i]!, gaitT + i * 0.7, colony.state[i]!);
+      this.drawAnt(
+        nx,
+        ny,
+        colony.heading[i]!,
+        gaitT + i * 0.7,
+        colony.state[i]!,
+        colony.bodyLengthCells[i]!,
+      );
     }
     ctx.restore();
   }

@@ -101,15 +101,51 @@ describe('behavioural invariants — 10-ant colony', () => {
     }
   });
 
-  it('prev-pos is always within movement cap of current pos (safe for render interp)', () => {
+  it('prev differs from current during normal locomotion (so the renderer has something to interpolate)', () => {
+    // Regression guard for the "ants rotate and wiggle legs but don't
+    // translate" bug. When an ant is freely walking (no gravity
+    // correction), prev should be its pre-tick position — NOT the
+    // post-tick position. Previously the end-of-tick snap fired
+    // whenever total tick motion exceeded 1.5 cells, which meant
+    // every locomotion tick snapped prev=current and killed
+    // interpolation. The settle-only snap fixes it.
+    const { world, colony, rng } = makeSim(0xdeadcafe);
+    // Run a few ticks to let ants settle out of their spawn.
+    for (let t = 0; t < 20; t++) stepSimulation(world, colony, rng);
+
+    let distinctCount = 0;
+    const trials = 50;
+    for (let t = 0; t < trials; t++) {
+      stepSimulation(world, colony, rng);
+      for (let i = 0; i < colony.count; i++) {
+        const dx = colony.posX[i]! - colony.prevX[i]!;
+        const dy = colony.posY[i]! - colony.prevY[i]!;
+        if (Math.hypot(dx, dy) > 0.05) distinctCount++;
+      }
+    }
+    // Over 50 ticks × 10 ants = 500 samples; at least some should
+    // have prev != current. If ALL are snapped, renderer sees no
+    // motion.
+    expect(distinctCount).toBeGreaterThan(100);
+  });
+
+  it('settle never teleports more than the movement cap without snapping prev', () => {
+    // Gravity-drop semantics: when the end-of-tick settle pulls an
+    // ant down by more than ~1 cell, prev must be snapped to the
+    // post-settle position so the renderer doesn't lerp a
+    // multi-cell flight through unsupported sky.
     const { world, colony, rng } = makeSim(0xabad1dea);
     for (let t = 0; t < 500; t++) {
       stepSimulation(world, colony, rng);
       for (let i = 0; i < colony.count; i++) {
-        const dx = Math.abs(colony.posX[i]! - colony.prevX[i]!);
+        // If prev was snapped, prev == current — interp is a no-op.
+        // If not snapped, current must be close to where the ant
+        // actually walked (i.e. within a plausible single-tick walk
+        // distance, caller-defined cap of 15 cells — well beyond any
+        // realistic locomotion at the default speed).
         const dy = Math.abs(colony.posY[i]! - colony.prevY[i]!);
-        // Either tiny step (movement) or prev was snapped to current.
-        expect(Math.max(dx, dy)).toBeLessThanOrEqual(1.5);
+        const dx = Math.abs(colony.posX[i]! - colony.prevX[i]!);
+        expect(Math.hypot(dx, dy)).toBeLessThan(15);
       }
     }
   });

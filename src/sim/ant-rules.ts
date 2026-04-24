@@ -209,13 +209,20 @@ export function stepSimulation(world: World, colony: Colony, rng: RNG): void {
   // End-of-tick settle. Enforces the no-flying-ants invariant and
   // the no-embedded-ants invariant in one pass. Winged ants bypass
   // gravity but still get extricated from solid cells.
+  //
+  // Prev-snap policy: only snap prev=post-settle when SETTLE itself
+  // moved the ant by more than a cell. Normal locomotion (even 10+
+  // cells/tick at the scenario's current tick rate) leaves prev as
+  // the pre-tick position so the renderer can smoothly interpolate
+  // between ticks. The snap still prevents flight-through-air after
+  // a rare gravity drop / grain-burial extrication.
   for (let i = 0; i < colony.count; i++) {
     const ix = colony.posX[i]! | 0;
-    const beforeY = colony.posY[i]!;
+    const preSettleY = colony.posY[i]!;
     let settledIy: number;
     if (colony.winged[i]) {
       // Winged: only extricate, don't fall.
-      let iy = beforeY | 0;
+      let iy = preSettleY | 0;
       while (iy >= 0) {
         const k = world.cells[world.index(ix, iy)];
         if (k !== 1 /* SOIL */ && k !== 2 /* GRAIN */) break;
@@ -223,14 +230,11 @@ export function stepSimulation(world: World, colony: Colony, rng: RNG): void {
       }
       settledIy = iy;
     } else {
-      settledIy = settle(world, ix, beforeY | 0);
+      settledIy = settle(world, ix, preSettleY | 0);
     }
     colony.posY[i] = settledIy + 0.5;
-    // If the settle moved the ant far, snap prev=current so the
-    // renderer doesn't interpolate a flight through midair.
-    const totalDy = Math.abs(colony.posY[i]! - colony.prevY[i]!);
-    const totalDx = Math.abs(colony.posX[i]! - colony.prevX[i]!);
-    if (totalDy > 1.5 || totalDx > 1.5) {
+    const settleDelta = Math.abs(colony.posY[i]! - preSettleY);
+    if (settleDelta > 1.0) {
       colony.prevX[i] = colony.posX[i]!;
       colony.prevY[i] = colony.posY[i]!;
     }
