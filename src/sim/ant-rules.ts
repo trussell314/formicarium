@@ -129,6 +129,17 @@ function tryDepositGrain(world: World, ix: number, iy: number): { x: number; y: 
  *      doesn't interpolate through unsupported mid-tick space)
  */
 import type { PheromoneState } from './pheromone';
+import { celestialOf, type DayNightCycle } from '../day-night';
+
+// Circadian modulation (many Formicinae are diurnal; Hölldobler &
+// Wilson 1990). At low daylight, ants walk slower, turn less, and
+// are much less likely to dig. Baseline minimum keeps them from
+// freezing entirely.
+const CIRCADIAN_NIGHT_ACTIVITY = 0.25;
+function activityOf(daylight: number): number {
+  // Smooth lerp from night baseline to full daytime activity.
+  return CIRCADIAN_NIGHT_ACTIVITY + (1 - CIRCADIAN_NIGHT_ACTIVITY) * daylight;
+}
 
 /**
  * Dig-pheromone tuning. A dig event deposits a strong signal (1.0);
@@ -173,8 +184,14 @@ export function stepSimulation(
   rng: RNG,
   slabThicknessCm = 0.8,
   pheromones?: PheromoneState,
+  cycle?: DayNightCycle,
 ): void {
   world.tickCount++;
+
+  // Circadian activity multiplier, 0..1 (actually clamped to
+  // [CIRCADIAN_NIGHT_ACTIVITY, 1]). Applied to walkSpeed / dig
+  // probability / turn noise so ants slow and quiet at night.
+  const activity = cycle ? activityOf(celestialOf(world.tickCount, cycle).daylight) : 1;
 
   // Diffuse + evaporate pheromones (pre-step so ants sample the
   // decayed-but-not-yet-deposited state — the field represents the
@@ -192,9 +209,9 @@ export function stepSimulation(
   for (let i = 0; i < colony.count; i++) {
     const state = colony.state[i];
     let h = colony.heading[i];
-    const speed = colony.walkSpeedCellsPerTick[i]!;
-    const noise = colony.turnNoiseRadPerTick[i]!;
-    const digProb = colony.digProbPerSoilHit[i]!;
+    const speed = colony.walkSpeedCellsPerTick[i]! * activity;
+    const noise = colony.turnNoiseRadPerTick[i]! * activity;
+    const digProb = colony.digProbPerSoilHit[i]! * activity;
 
     // REST: stay put; exit after REST_DURATION_TICKS.
     if (state === STATE_REST) {

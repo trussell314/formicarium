@@ -37,7 +37,14 @@ function boot(): void {
 
   const simHz = 1 / resolved.secondsPerTick;
   const loop = new Loop(simHz, {
-    step: () => stepSimulation(world, colony, rng, resolved.slabThicknessCm, pheromones),
+    step: () => stepSimulation(
+      world,
+      colony,
+      rng,
+      resolved.slabThicknessCm,
+      pheromones,
+      { dayDurationTicks: resolved.dayDurationTicks, nightDurationTicks: resolved.nightDurationTicks },
+    ),
     draw: (alpha: number) => renderer.draw(colony, alpha),
   });
 

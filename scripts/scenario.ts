@@ -118,7 +118,10 @@ function debugSnapshot(tick: number): void {
 }
 
 for (let t = 1; t <= ticksToRun; t++) {
-  stepSimulation(world, colony, rng, resolved.slabThicknessCm, pheromones);
+  stepSimulation(
+    world, colony, rng, resolved.slabThicknessCm, pheromones,
+    { dayDurationTicks: resolved.dayDurationTicks, nightDurationTicks: resolved.nightDurationTicks },
+  );
   checkInvariants(t);
   if (t % resolved.debugIntervalTicks === 0) debugSnapshot(t);
 }
