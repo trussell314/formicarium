@@ -1,53 +1,48 @@
 import { describe, expect, it } from 'vitest';
-import { Colony, STATE_DIG, STATE_WANDER } from '../src/sim/colony';
+import { Colony, STATE_CARRY, STATE_WANDER } from '../src/sim/colony';
 import { RNG } from '../src/sim/rng';
 
 describe('Colony', () => {
-  it('spawns up to capacity', () => {
-    const c = new Colony(3);
-    expect(c.spawn(1, 1, 0)).toBe(0);
-    expect(c.spawn(2, 2, 0)).toBe(1);
-    expect(c.spawn(3, 3, 0)).toBe(2);
-    expect(c.spawn(4, 4, 0)).toBe(null);
-    expect(c.count).toBe(3);
-  });
-
-  it('initial state is WANDER', () => {
-    const c = new Colony(5);
-    c.spawn(0, 0, 0);
+  it('spawn stores position, heading, state and increments count', () => {
+    const c = new Colony(4);
+    const idx = c.spawn(3.5, 4.5, 0.1);
+    expect(idx).toBe(0);
+    expect(c.count).toBe(1);
+    expect(c.posX[0]).toBe(3.5);
+    expect(c.posY[0]).toBe(4.5);
+    expect(c.prevX[0]).toBe(3.5);
+    expect(c.prevY[0]).toBe(4.5);
+    expect(c.heading[0]).toBeCloseTo(0.1, 5);
     expect(c.state[0]).toBe(STATE_WANDER);
   });
 
-  it('setState resets stateTimer only on actual change', () => {
-    const c = new Colony(5);
+  it('spawn returns null when at capacity', () => {
+    const c = new Colony(1);
+    expect(c.spawn(0, 0, 0)).toBe(0);
+    expect(c.spawn(1, 1, 0)).toBeNull();
+  });
+
+  it('setState resets the state timer', () => {
+    const c = new Colony(2);
     c.spawn(0, 0, 0);
-    c.stateTimer[0] = 50;
-    c.setState(0, STATE_WANDER); // no change
-    expect(c.stateTimer[0]).toBe(50);
-    c.setState(0, STATE_DIG);
+    c.tickTimers();
+    c.tickTimers();
+    expect(c.stateTimer[0]).toBe(2);
+    c.setState(0, STATE_CARRY);
     expect(c.stateTimer[0]).toBe(0);
   });
 
-  it('endOfTickBookkeeping decays collisions and ages', () => {
-    const c = new Colony(2);
-    c.spawn(0, 0, 0);
-    c.collisionCount[0] = 5;
-    c.endOfTickBookkeeping();
-    expect(c.collisionCount[0]).toBeLessThan(5);
-    expect(c.collisionCount[0]).toBeGreaterThanOrEqual(0);
-    expect(c.age[0]).toBe(1);
-    expect(c.stateTimer[0]).toBe(1);
-  });
-
-  it('spawnCluster places ants near the center', () => {
-    const c = new Colony(20);
-    const r = new RNG(1);
-    const added = c.spawnCluster(50, 50, 10, r, 3);
-    expect(added).toBe(10);
+  it('spawnInRect places ants only at air cells', () => {
+    const c = new Colony(10);
+    const rng = new RNG(1);
+    // "Air" is odd x+y; "solid" otherwise (checkerboard).
+    const isAir = (x: number, y: number) => ((x + y) & 1) === 1;
+    const n = c.spawnInRect(0, 0, 9, 0, 10, rng, isAir);
+    expect(n).toBeGreaterThan(0);
     for (let i = 0; i < c.count; i++) {
-      const dx = c.posX[i]! - 50;
-      const dy = c.posY[i]! - 50;
-      expect(Math.sqrt(dx * dx + dy * dy)).toBeLessThanOrEqual(3);
+      const ix = c.posX[i]! | 0;
+      const iy = c.posY[i]! | 0;
+      expect(isAir(ix, iy)).toBe(true);
     }
   });
 });

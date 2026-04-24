@@ -1,38 +1,45 @@
-// 2D world grid: vertical cross-section. Origin top-left, y increases downward.
-// SPEC §5.1.
+// 2D world grid: vertical cross-section. Origin top-left; y grows downward.
+//
+// Cells are a single enum. Everything above the "natural surface" row
+// (set at generate-time) is sky; below is soil (before excavation) or
+// whatever the ants have carved. We store the natural surface per
+// column so the renderer can distinguish sky-air from tunnel-air
+// later, and so the grass band sits at a stable depth even when ants
+// dig above it.
 
-import { SIM } from '../config';
+import { CONFIG } from '../config';
 import type { RNG } from './rng';
 
 export const CELL_AIR = 0;
 export const CELL_SOIL = 1;
-export const CELL_BOUNDARY = 2;
-export const CELL_GRAIN = 3;
+export const CELL_GRAIN = 2;
+export const CELL_BOUNDARY = 3;
 
-export type CellKind = typeof CELL_AIR | typeof CELL_SOIL | typeof CELL_BOUNDARY | typeof CELL_GRAIN;
+export type CellKind =
+  | typeof CELL_AIR
+  | typeof CELL_SOIL
+  | typeof CELL_GRAIN
+  | typeof CELL_BOUNDARY;
 
 export class World {
   readonly width: number;
   readonly height: number;
   readonly cells: Uint8Array;
-  // Per-cell exposure-time counter — used by chamber-widening rule (SPEC §6.5).
-  // Float because we decay it gently when no longer exposed.
-  readonly exposure: Float32Array;
-  // Per-cell grain count for grain piles.
   readonly grainAmount: Uint8Array;
-  // Surface mound height tracking — index by column, value is how many grains
-  // are deposited there.
   readonly surfaceMound: Uint16Array;
-  // Initial soil cells, used for grain conservation invariant.
+  readonly naturalSurface: Uint16Array; // per-column y of original surface
+  readonly soilNoise: Uint8Array;       // per-cell 0..255 for render texture
   initialSoilCells = 0;
+  tickCount = 0;
 
   constructor(width: number, height: number) {
     this.width = width;
     this.height = height;
     this.cells = new Uint8Array(width * height);
-    this.exposure = new Float32Array(width * height);
     this.grainAmount = new Uint8Array(width * height);
     this.surfaceMound = new Uint16Array(width);
+    this.naturalSurface = new Uint16Array(width);
+    this.soilNoise = new Uint8Array(width * height);
   }
 
   index(x: number, y: number): number {
@@ -48,69 +55,70 @@ export class World {
     return this.cells[y * this.width + x] as CellKind;
   }
 
-  set(x: number, y: number, kind: CellKind): void {
-    if (!this.inBounds(x, y)) return;
-    this.cells[y * this.width + x] = kind;
+  isAir(x: number, y: number): boolean {
+    return this.get(x, y) === CELL_AIR;
   }
 
-  isPassable(x: number, y: number): boolean {
+  isSolid(x: number, y: number): boolean {
     const k = this.get(x, y);
-    return k === CELL_AIR;
-  }
-
-  isSoil(x: number, y: number): boolean {
-    return this.get(x, y) === CELL_SOIL;
+    return k === CELL_SOIL || k === CELL_GRAIN;
   }
 
   /**
-   * Initialize: air on top, soil below a wavy surface line.
-   * Creates a tiny entry slot just below the surface so initial ants have
-   * somewhere to start digging.
+   * Generate a world: air above a wavy surface line, soil below.
+   * A small starter chamber is carved at world centre so the colony
+   * has a room to spawn into (no embedded ants at t=0).
    */
   generate(rng: RNG): void {
-    const surfaceBase = Math.floor(this.height * SIM.surfaceFraction);
-    const wave1 = SIM.surfaceRoughness;
-    const wave2 = Math.max(1, Math.floor(SIM.surfaceRoughness * 0.5));
+    const surfaceBase = Math.floor(this.height * CONFIG.surfaceFraction);
+    const amp1 = CONFIG.surfaceRoughness;
+    const amp2 = Math.max(1, Math.floor(amp1 * 0.5));
     const phase = rng.range(0, Math.PI * 2);
     let soilCount = 0;
+
     for (let x = 0; x < this.width; x++) {
       const surface =
         surfaceBase +
-        Math.round(Math.sin(x * 0.07 + phase) * wave1) +
-        Math.round(Math.sin(x * 0.21 + phase * 1.7) * wave2);
+        Math.round(Math.sin(x * 0.07 + phase) * amp1) +
+        Math.round(Math.sin(x * 0.21 + phase * 1.7) * amp2);
+      this.naturalSurface[x] = surface;
       for (let y = 0; y < this.height; y++) {
-        const idx = y * this.width + x;
         if (y < surface) {
-          this.cells[idx] = CELL_AIR;
+          this.cells[y * this.width + x] = CELL_AIR;
         } else {
-          this.cells[idx] = CELL_SOIL;
+          this.cells[y * this.width + x] = CELL_SOIL;
           soilCount++;
         }
       }
     }
-    // Carve a small starter divot in the middle so initial wandering ants
-    // immediately encounter soil-air interfaces and start digging.
+
+    // Carve a starter chamber at world centre. Trapezoidal: wider at
+    // the top, narrower at the bottom, so ants have a clear floor to
+    // stand on.
     const cx = Math.floor(this.width / 2);
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dy = 0; dy <= 3; dy++) {
+    const halfW = CONFIG.starterChamberHalfWidth;
+    const depth = CONFIG.starterChamberDepth;
+    for (let dx = -halfW; dx <= halfW; dx++) {
+      const taper = 1 - Math.abs(dx) / (halfW + 1);
+      const dDepth = Math.round(depth * taper);
+      for (let dy = 1; dy <= dDepth; dy++) {
         const x = cx + dx;
-        const y = surfaceBase + dy + 1;
-        if (this.inBounds(x, y) && this.get(x, y) === CELL_SOIL) {
+        const y = surfaceBase + dy;
+        if (this.inBounds(x, y) && this.cells[this.index(x, y)] === CELL_SOIL) {
           this.cells[this.index(x, y)] = CELL_AIR;
           soilCount--;
         }
       }
     }
-    // Set after the divot so the conservation invariant
-    // (initialSoil === currentSoil + currentGrains + currentCarriers) holds
-    // from t=0.
+
+    // Soil noise for render texture; deterministic from the rng.
+    for (let i = 0; i < this.soilNoise.length; i++) {
+      this.soilNoise[i] = (rng.next() * 256) | 0;
+    }
+
     this.initialSoilCells = soilCount;
   }
 
-  /**
-   * Counts soil cells currently in the grid. O(width*height) — only used in
-   * tests and stats.
-   */
   countSoil(): number {
     let n = 0;
     for (let i = 0; i < this.cells.length; i++) {
@@ -127,10 +135,7 @@ export class World {
     return n;
   }
 
-  /**
-   * Returns surface y at column x — the y of the top-most soil/grain cell.
-   * Returns height if column is fully air.
-   */
+  /** y of the topmost solid cell in column x, or `height` if none. */
   surfaceY(x: number): number {
     if (x < 0 || x >= this.width) return this.height;
     for (let y = 0; y < this.height; y++) {

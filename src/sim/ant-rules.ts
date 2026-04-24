@@ -1,11 +1,32 @@
-// Per-tick agent rules. SPEC §6.
+// Per-tick ant behaviour.
+//
+// Scope is intentionally narrow for the 10-ant restart:
+//
+//   WANDER  — walk with small heading noise + very mild downward
+//             drift (positive thermotaxis toward cooler earth).
+//             If movement hits soil, roll digProbPerSoilHit; on
+//             success, excavate that cell and pick up a grain.
+//   DIG     — (transient, same tick) excavate soil → CARRY.
+//   CARRY   — walk with an upward heading bias toward the surface.
+//             If the ant is at a surface column it can deposit on,
+//             do so and return to WANDER.
+//   REST    — reserved; not currently used.
+//
+// The ant model is inspired by Sudd (1970) and Pasteels & Deneubourg
+// (1987): contact-triggered digging with a small per-contact
+// probability, and thigmotaxis (wall-following) implicit in the
+// movement rule (ants can only step into supported cells, so they
+// naturally hug walls).
+//
+// Every rule here has a dedicated test in tests/. The physics
+// invariants (no flying, no embedding) are guaranteed by the shared
+// settle() at the end of every tick; callers don't need to think
+// about them.
 
-import { SIM } from '../config';
+import { CONFIG } from '../config';
 import {
   Colony,
   STATE_CARRY,
-  STATE_DIG,
-  STATE_REST,
   STATE_WANDER,
 } from './colony';
 import {
@@ -14,7 +35,7 @@ import {
   CELL_SOIL,
   World,
 } from './world';
-import type { FieldsState } from './fields';
+import { isSupported, settle, tryStep } from './physics';
 import type { RNG } from './rng';
 
 const TWO_PI = Math.PI * 2;
@@ -26,364 +47,116 @@ function wrapAngle(a: number): number {
 }
 
 /**
- * Sample dig pheromone gradient as seen from (x, y) facing `heading`.
- * Returns a heading delta to bias the ant toward higher pheromone.
- *
- * Uses three taps: ahead, ahead-left, ahead-right. The gradient between
- * them controls turn direction. This is cheap and avoids a full O(N^2)
- * arc sample.
+ * Find a SOIL cell adjacent to (ix, iy) to excavate. Prefers the
+ * cell the ant was heading toward; falls back to any orthogonal
+ * solid neighbour. Returns null if no soil touches the ant.
  */
-function pheromoneTurnBias(
-  field: { sample: (x: number, y: number) => number },
-  x: number,
-  y: number,
-  heading: number,
-  radius: number,
-): number {
-  const ax = x + Math.cos(heading) * radius;
-  const ay = y + Math.sin(heading) * radius;
-  const lh = heading - 0.6;
-  const rh = heading + 0.6;
-  const lx = x + Math.cos(lh) * radius;
-  const ly = y + Math.sin(lh) * radius;
-  const rx = x + Math.cos(rh) * radius;
-  const ry = y + Math.sin(rh) * radius;
-
-  const fa = field.sample(ax | 0, ay | 0);
-  const fl = field.sample(lx | 0, ly | 0);
-  const fr = field.sample(rx | 0, ry | 0);
-
-  // If front cell is strongest, no bias.
-  // Otherwise turn toward the stronger flank.
-  const diff = fr - fl;
-  // Magnitude of the turn scales with field magnitude relative to ahead.
-  const total = fa + fl + fr + 1e-3;
-  return (diff / total) * SIM.pheromoneFollowStrength;
-}
-
-/**
- * Find a soil neighbour to dig. Returns one of the 4-cardinal neighbours
- * picked by a weighted score: prefers neighbours in the heading direction,
- * with chamber-widening bias toward lateral neighbours when local exposure
- * is high.
- *
- * Returns null if the ant is not currently next to any soil.
- */
-function pickDigTarget(
-  world: World,
-  x: number,
-  y: number,
-  heading: number,
-  rng: RNG,
-): { nx: number; ny: number } | null {
-  const ix = x | 0;
-  const iy = y | 0;
-
-  // Candidate offsets and base directional weights (forward bias).
-  const candidates: Array<{ dx: number; dy: number; w: number }> = [];
-  const dirs = [
-    { dx: 1, dy: 0, ang: 0 },
-    { dx: -1, dy: 0, ang: Math.PI },
-    { dx: 0, dy: 1, ang: Math.PI / 2 },
-    { dx: 0, dy: -1, ang: -Math.PI / 2 },
+function pickDigTarget(world: World, ix: number, iy: number, heading: number): { x: number; y: number } | null {
+  // Heading-aligned primary candidate.
+  const hx = Math.cos(heading);
+  const hy = Math.sin(heading);
+  const prefer = Math.abs(hx) > Math.abs(hy)
+    ? (hx > 0 ? [1, 0] : [-1, 0])
+    : (hy > 0 ? [0, 1] : [0, -1]);
+  const order = [
+    prefer,
+    [1, 0], [-1, 0], [0, 1], [0, -1],
   ];
-  for (const d of dirs) {
-    const nx = ix + d.dx;
-    const ny = iy + d.dy;
-    if (!world.inBounds(nx, ny)) continue;
-    if (world.cells[world.index(nx, ny)] !== CELL_SOIL) continue;
-    // Forward bias: alignment with heading in [0..1].
-    const align = Math.cos(wrapAngle(d.ang - heading));
-    let w = Math.max(0.1, 0.5 + 0.5 * align);
-
-    // Chamber-widening: if this soil cell has high exposure, give a strong
-    // boost when it is lateral (dy === 0).
-    const exposure = world.exposure[world.index(nx, ny)];
-    if (exposure > SIM.chamberExposureThreshold && d.dy === 0) {
-      w += SIM.chamberLateralBias;
-    }
-    // Slight gravity preference for downward digging in fresh soil so shafts
-    // form rather than purely horizontal scrapes.
-    if (d.dy === 1 && exposure < SIM.chamberExposureThreshold) {
-      w += 0.15;
-    }
-    candidates.push({ dx: d.dx, dy: d.dy, w });
+  for (const [dx, dy] of order) {
+    const x = ix + dx!;
+    const y = iy + dy!;
+    if (!world.inBounds(x, y)) continue;
+    if (world.cells[world.index(x, y)] === CELL_SOIL) return { x, y };
   }
-  if (candidates.length === 0) return null;
-
-  let total = 0;
-  for (const c of candidates) total += c.w;
-  let r = rng.next() * total;
-  for (const c of candidates) {
-    r -= c.w;
-    if (r <= 0) return { nx: ix + c.dx, ny: iy + c.dy };
-  }
-  const last = candidates[candidates.length - 1]!;
-  return { nx: ix + last.dx, ny: iy + last.dy };
+  return null;
 }
 
 /**
- * Returns true if the cell at (ix, iy) is "exposed" — i.e., it is soil
- * and at least one neighbour is air. Used to update the exposure field.
+ * Try to drop a grain at the surface near column ix. Respects the
+ * angle-of-repose rule: a column may not be more than
+ * grainAngleOfRepose cells taller than its shorter horizontal
+ * neighbour. Returns the placement cell or null if no legal spot
+ * exists within a small search radius.
  */
-function isExposedSoil(world: World, ix: number, iy: number): boolean {
-  if (world.cells[world.index(ix, iy)] !== CELL_SOIL) return false;
-  if (world.get(ix - 1, iy) === CELL_AIR) return true;
-  if (world.get(ix + 1, iy) === CELL_AIR) return true;
-  if (world.get(ix, iy - 1) === CELL_AIR) return true;
-  if (world.get(ix, iy + 1) === CELL_AIR) return true;
-  return false;
-}
-
-/**
- * Update the exposure field for cells adjacent to (ix, iy). We only
- * touch cells in a 3x3 around the change site, so this is cheap to call
- * after every dig.
- */
-function bumpExposureAround(world: World, ix: number, iy: number): void {
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
-      const x = ix + dx;
-      const y = iy + dy;
-      if (!world.inBounds(x, y)) continue;
-      if (world.cells[world.index(x, y)] !== CELL_SOIL) continue;
-      if (isExposedSoil(world, x, y)) {
-        world.exposure[world.index(x, y)] += 1;
-      }
-    }
-  }
-}
-
-/**
- * Per-tick global decay on the exposure field. We don't iterate every cell
- * every tick because that would cost width*height each frame — instead we
- * decay only the cells around recent agent positions. But we do a cheap
- * stochastic global sweep occasionally.
- */
-function decayExposureLocal(world: World, x: number, y: number): void {
-  for (let dy = -2; dy <= 2; dy++) {
-    for (let dx = -2; dx <= 2; dx++) {
-      const ix = (x + dx) | 0;
-      const iy = (y + dy) | 0;
-      if (!world.inBounds(ix, iy)) continue;
-      const v = world.exposure[world.index(ix, iy)];
-      if (v > 0) world.exposure[world.index(ix, iy)] = v * 0.999;
-    }
-  }
-}
-
-/**
- * Try to step an ant from (x, y) by (dx, dy). Returns the new (x, y)
- * (clamped to bounds and the soil/grain frontier) and reports whether
- * a collision-with-soil happened so the caller can decide to dig.
- */
-function tryStep(
-  world: World,
-  x: number,
-  y: number,
-  dx: number,
-  dy: number,
-): { x: number; y: number; hitSoil: boolean } {
-  const nx = x + dx;
-  const ny = y + dy;
-  // Out-of-bounds: stay put. (We used to clamp into the world here, but
-  // that could land the ant inside a solid edge cell.)
-  if (nx < 0 || nx >= world.width || ny < 0 || ny >= world.height) {
-    return { x, y, hitSoil: false };
-  }
-  // Solid: stay put, mark hit.
-  const k = world.cells[world.index(nx | 0, ny | 0)];
-  if (k === CELL_SOIL || k === CELL_GRAIN) {
-    return { x, y, hitSoil: k === CELL_SOIL };
-  }
-  return { x: nx, y: ny, hitSoil: false };
-}
-
-/**
- * Try to deposit a grain near the carrier's current cell. Returns the
- * (x, y) cell where the grain was placed, or null if no suitable cell
- * was found this tick (the ant should keep walking).
- *
- * Selection rule:
- *   - Look for an air cell at (cx, cy) such that the cell directly below
- *     is solid (CELL_SOIL or CELL_GRAIN) and the column's mound height is
- *     under the cap.
- *   - First check the ant's current cell, then a small radius around it.
- *   - If the column is in the air ABOVE the surface, prefer dropping at
- *     the air cell directly atop the surface to grow the entrance mound.
- */
-function tryDepositGrain(
-  world: World,
-  fields: FieldsState,
-  ix: number,
-  iy: number,
-  rng: RNG,
-): { x: number; y: number } | null {
-  // Drops only happen on top of the column's topmost solid cell — never
-  // mid-tunnel. This keeps grain piles to the entrance mound and prevents
-  // grain from being deposited under a chamber ceiling (which would embed
-  // the carrier).
-  //
-  // We also require the ant to be near the surface (within a few cells of
-  // the column's surfaceY), so a deep-tunnel carrier walks itself out
-  // before dropping.
-  const place = (x: number, y: number): { x: number; y: number } => {
-    world.cells[world.index(x, y)] = CELL_GRAIN;
-    world.grainAmount[world.index(x, y)]++;
-    world.surfaceMound[x]++;
-    fields.construction.deposit(x, y, SIM.constructionPheromoneDeposit);
-    return { x, y };
-  };
+function tryDepositGrain(world: World, ix: number, iy: number): { x: number; y: number } | null {
   const tryColumn = (cx: number): { x: number; y: number } | null => {
     if (cx < 0 || cx >= world.width) return null;
-    if (world.surfaceMound[cx] >= SIM.grainPileMax) return null;
+    if (world.surfaceMound[cx]! >= CONFIG.grainPileMax) return null;
+    // Angle of repose.
+    const lm = cx > 0 ? world.surfaceMound[cx - 1]! : world.surfaceMound[cx]!;
+    const rm = cx < world.width - 1 ? world.surfaceMound[cx + 1]! : world.surfaceMound[cx]!;
+    const minN = lm < rm ? lm : rm;
+    if (world.surfaceMound[cx]! >= minN + CONFIG.grainAngleOfRepose) return null;
+    // Place on top of the column's current surface.
     const sy = world.surfaceY(cx);
     if (sy <= 0 || sy >= world.height) return null;
     const cy = sy - 1;
     if (world.cells[world.index(cx, cy)] !== CELL_AIR) return null;
-    // Carrier must actually be near this column's surface — not far below
-    // it inside a tunnel.
-    if (iy > cy + 1) return null;
-    return place(cx, cy);
+    // Ant must be near the drop site (within 2 cells vertically).
+    if (iy > cy + 2) return null;
+    world.cells[world.index(cx, cy)] = CELL_GRAIN;
+    world.grainAmount[world.index(cx, cy)]++;
+    world.surfaceMound[cx]++;
+    return { x: cx, y: cy };
   };
-
-  // Try the ant's column first.
-  const here = tryColumn(ix);
-  if (here !== null) return here;
-
-  // Then scan a small neighbourhood with random side preference.
-  for (let r = 1; r <= SIM.grainPileGrowthRadius; r++) {
-    const order = rng.bool(0.5) ? [-1, 1] : [1, -1];
-    for (const sign of order) {
-      const result = tryColumn(ix + sign * r);
-      if (result !== null) return result;
+  // Search own column, then ±1, ±2.
+  for (let r = 0; r <= 2; r++) {
+    if (r === 0) {
+      const here = tryColumn(ix);
+      if (here !== null) return here;
+    } else {
+      const a = tryColumn(ix - r);
+      if (a !== null) return a;
+      const b = tryColumn(ix + r);
+      if (b !== null) return b;
     }
   }
   return null;
 }
 
 /**
- * Coarse pairwise ant-vs-ant collision detection. We bin ants by integer
- * cell and test only same-cell pairs. This is O(N) average for our densities
- * and avoids quadratic blow-up.
+ * Advance one full simulation tick.
+ *
+ * Ordering within a tick:
+ *   1. prev-pos snapshot (for render interpolation)
+ *   2. heading update per ant (state-dependent bias + noise)
+ *   3. movement step (half-step × 2 to reduce tunnelling)
+ *   4. on-contact: maybe transition WANDER → DIG → CARRY
+ *   5. on-carry: maybe deposit and transition CARRY → WANDER
+ *   6. end-of-tick settle: extricate + iterative gravity
+ *      + snap prev if the total tick motion was large (so the renderer
+ *      doesn't interpolate through unsupported mid-tick space)
  */
-function processAntCollisions(colony: Colony, world: World): void {
-  const w = world.width;
-  const bins = new Map<number, number[]>();
-  for (let i = 0; i < colony.count; i++) {
-    const ix = colony.posX[i] | 0;
-    const iy = colony.posY[i] | 0;
-    const key = iy * w + ix;
-    let bin = bins.get(key);
-    if (!bin) {
-      bin = [];
-      bins.set(key, bin);
-    }
-    bin.push(i);
-  }
-  for (const bin of bins.values()) {
-    if (bin.length < 2) continue;
-    for (let a = 0; a < bin.length; a++) {
-      for (let b = a + 1; b < bin.length; b++) {
-        const i = bin[a]!;
-        const j = bin[b]!;
-        const dx = colony.posX[j] - colony.posX[i];
-        const dy = colony.posY[j] - colony.posY[i];
-        const d2 = dx * dx + dy * dy;
-        if (d2 < SIM.antRadius * SIM.antRadius * 4) {
-          colony.collisionCount[i] += 1;
-          colony.collisionCount[j] += 1;
-          // Bounce: rotate both headings by ~ pi/2 with random sign.
-          colony.heading[i] = wrapAngle(colony.heading[i] + Math.PI);
-          colony.heading[j] = wrapAngle(colony.heading[j] + Math.PI);
-        }
-      }
-    }
-  }
-}
+export function stepSimulation(world: World, colony: Colony, rng: RNG): void {
+  world.tickCount++;
 
-/**
- * Run one full simulation tick. SPEC §6.
- */
-export function stepSimulation(
-  world: World,
-  colony: Colony,
-  fields: FieldsState,
-  rng: RNG,
-): void {
-  // 1) Snapshot prev positions for render interpolation.
   for (let i = 0; i < colony.count; i++) {
     colony.prevX[i] = colony.posX[i];
     colony.prevY[i] = colony.posY[i];
   }
 
-  // 2) Diffuse + evaporate pheromone fields.
-  fields.dig.step();
-  fields.construction.step();
+  const speed = CONFIG.antWalkSpeed;
 
-  // 3) Per-ant update.
   for (let i = 0; i < colony.count; i++) {
     const state = colony.state[i];
-    const x = colony.posX[i];
-    const y = colony.posY[i];
-
-    // REST: just count down and stay put.
-    if (state === STATE_REST) {
-      if (colony.stateTimer[i] >= SIM.agitationRestTicks) {
-        colony.setState(i, STATE_WANDER);
-        // Reset collision count after rest so we don't loop straight back.
-        colony.collisionCount[i] *= 0.2;
-      }
-      continue;
-    }
-
-    // Heading update — pheromone follow + downward bias + noise.
     let h = colony.heading[i];
 
-    if (state === STATE_WANDER) {
-      h += pheromoneTurnBias(fields.dig, x, y, h, SIM.digSensingRadius);
-      // Downward bias for empty-handed wanderers (gravity/thermal metaphor).
-      h += SIM.downwardBias * Math.sin(Math.PI / 2 - h) * 0.5;
-    } else if (state === STATE_CARRY) {
-      // Carrying: head up by nudging heading toward -pi/2.
-      const dh = wrapAngle(-Math.PI / 2 - h);
-      h += dh * SIM.surfaceUpBias;
+    // Heading update.
+    if (state === STATE_CARRY) {
+      // Bias heading toward straight up (−π/2).
+      const up = -Math.PI / 2;
+      const dh = wrapAngle(up - h);
+      h += dh * CONFIG.carryUpBias;
     }
-
-    // Random heading noise.
-    h += rng.gauss() * SIM.turnNoiseRad * 0.4;
+    h += rng.gauss() * CONFIG.turnNoiseRad;
     h = wrapAngle(h);
     colony.heading[i] = h;
 
-    // Excavating: dig immediately and skip movement this tick.
-    if (state === STATE_DIG) {
-      const target = pickDigTarget(world, x, y, h, rng);
-      if (target === null) {
-        colony.setState(i, STATE_WANDER);
-        continue;
-      }
-      const idx = world.index(target.nx, target.ny);
-      world.cells[idx] = CELL_AIR;
-      world.exposure[idx] = 0;
-      // Drop a dig pheromone marker near the freshly dug face.
-      fields.dig.deposit(target.nx, target.ny, SIM.digPheromoneDeposit);
-      // Update exposure on neighbours of the dug cell.
-      bumpExposureAround(world, target.nx, target.ny);
-      // Pick up the grain → CARRY.
-      colony.setState(i, STATE_CARRY);
-      // Step into the freshly excavated cell so we're not stuck overlapping
-      // a soil neighbour.
-      colony.posX[i] = target.nx + 0.5;
-      colony.posY[i] = target.ny + 0.5;
-      continue;
-    }
-
-    // Movement step. We move in two half-steps to reduce tunnelling.
-    const speed = SIM.antSpeed;
-    let nx = x;
-    let ny = y;
+    // Movement. Two half-steps; heading reflects on a hit so the ant
+    // doesn't grind into the wall indefinitely.
+    let nx = colony.posX[i];
+    let ny = colony.posY[i];
     let hitSoil = false;
-
     for (let half = 0; half < 2; half++) {
       const dx = Math.cos(h) * speed * 0.5;
       const dy = Math.sin(h) * speed * 0.5;
@@ -392,103 +165,65 @@ export function stepSimulation(
       ny = r.y;
       if (r.hitSoil) {
         hitSoil = true;
-        // On hit, partially reflect heading along the cell normal — easier
-        // in practice to flip a component than compute a true normal.
-        const ix = (nx + Math.cos(h)) | 0;
-        const iy = (ny + Math.sin(h)) | 0;
-        if (world.get(ix, ny | 0) === CELL_SOIL) {
-          h = wrapAngle(Math.PI - h); // flip x component
-        } else if (world.get(nx | 0, iy) === CELL_SOIL) {
-          h = -h; // flip y component
-        } else {
-          h = wrapAngle(h + Math.PI);
-        }
+        h = wrapAngle(h + Math.PI * (0.5 + rng.next() * 0.5));
         colony.heading[i] = h;
       }
     }
     colony.posX[i] = nx;
     colony.posY[i] = ny;
 
-    // CARRY: try to drop grain. Conservation requires that we only
-    // transition back to WANDER if we actually deposited a grain — otherwise
-    // grains would silently vanish.
-    if (state === STATE_CARRY) {
-      const deposited = tryDepositGrain(world, fields, nx | 0, ny | 0, rng);
+    const ix = nx | 0;
+    const iy = ny | 0;
+
+    // WANDER + soil contact → maybe dig.
+    if (state === STATE_WANDER && hitSoil) {
+      if (rng.next() < CONFIG.digProbPerSoilHit) {
+        const target = pickDigTarget(world, ix, iy, h);
+        if (target !== null) {
+          world.cells[world.index(target.x, target.y)] = CELL_AIR;
+          colony.setState(i, STATE_CARRY);
+          // Step into the dug cell.
+          colony.posX[i] = target.x + 0.5;
+          colony.posY[i] = target.y + 0.5;
+          // Head upward (carriers want to reach the surface).
+          colony.heading[i] = -Math.PI / 2 + rng.range(-0.6, 0.6);
+        }
+      }
+    }
+
+    // CARRY → maybe deposit.
+    if (colony.state[i] === STATE_CARRY) {
+      const deposited = tryDepositGrain(world, colony.posX[i]! | 0, colony.posY[i]! | 0);
       if (deposited !== null) {
         colony.setState(i, STATE_WANDER);
-        // Step the ant just above the new grain to avoid embedding.
-        colony.posY[i] = Math.max(0, deposited.y - 0.5);
-        // Head back down to dig again.
-        colony.heading[i] = wrapAngle(rng.range(Math.PI * 0.2, Math.PI * 0.8));
+        // Place ant above the new grain.
+        const ny2 = deposited.y - 1;
+        colony.posY[i] = (ny2 < 0 ? 0 : ny2) + 0.5;
+        // Head back down into the nest.
+        colony.heading[i] = Math.PI / 2 + rng.range(-0.6, 0.6);
       }
-      continue;
-    }
-
-    // WANDER: maybe transition to DIG if we just hit soil.
-    if (state === STATE_WANDER && hitSoil) {
-      // Probability of digging scales with local pheromone (positive feedback)
-      // and decreases when we're crowded / agitated.
-      const p =
-        SIM.digProbBase +
-        SIM.digProbPheromone * Math.tanh(fields.dig.sample(nx | 0, ny | 0)) -
-        SIM.digProbCollisionPenalty * Math.tanh(colony.collisionCount[i] * 0.3);
-      if (rng.bool(Math.max(0, Math.min(1, p)))) {
-        colony.setState(i, STATE_DIG);
-      }
-      // Either way, drop a tiny dig pheromone where we touched soil — even
-      // failed digs leave a trace (an ant sniffed at the spot).
-      fields.dig.deposit(nx | 0, ny | 0, SIM.digPheromoneDeposit * 0.15);
-    }
-
-    // Agitation: collisions over threshold → REST.
-    if (colony.collisionCount[i] >= SIM.agitationThreshold) {
-      colony.setState(i, STATE_REST);
-    }
-
-    // Cheap stochastic exposure-decay near this ant.
-    if ((i & 7) === 0) {
-      decayExposureLocal(world, x, y);
     }
   }
 
-  // 4) Resolve agent-agent collisions.
-  processAntCollisions(colony, world);
-
-  // 5) Bookkeeping: decay collision counters, age ants, advance state timers.
-  colony.endOfTickBookkeeping();
-}
-
-/**
- * Disturbance event — apply mouse-poke effects within radius. SPEC §6.7.
- */
-export function applyDisturbance(
-  world: World,
-  colony: Colony,
-  fields: FieldsState,
-  cx: number,
-  cy: number,
-): void {
-  const r = SIM.disturbanceRadius;
-  const r2 = r * r;
+  // End-of-tick settle. Enforces the no-flying-ants invariant and
+  // the no-embedded-ants invariant in one pass.
   for (let i = 0; i < colony.count; i++) {
-    const dx = colony.posX[i] - cx;
-    const dy = colony.posY[i] - cy;
-    if (dx * dx + dy * dy <= r2) {
-      colony.collisionCount[i] += SIM.disturbanceCollisionBoost;
-      // Kick heading away from the poke center.
-      colony.heading[i] = wrapAngle(Math.atan2(dy, dx));
+    const ix = colony.posX[i]! | 0;
+    const beforeY = colony.posY[i]!;
+    const settledIy = settle(world, ix, beforeY | 0);
+    colony.posY[i] = settledIy + 0.5;
+    // If the settle moved the ant far, snap prev=current so the
+    // renderer doesn't interpolate a flight through midair.
+    const totalDy = Math.abs(colony.posY[i]! - colony.prevY[i]!);
+    const totalDx = Math.abs(colony.posX[i]! - colony.prevX[i]!);
+    if (totalDy > 1.5 || totalDx > 1.5) {
+      colony.prevX[i] = colony.posX[i]!;
+      colony.prevY[i] = colony.posY[i]!;
     }
   }
-  // Boost dig pheromone in a small Gaussian — recruits diggers to the
-  // poked area, like ants investigating a disturbance.
-  for (let dy = -r; dy <= r; dy++) {
-    for (let dx = -r; dx <= r; dx++) {
-      const d2 = dx * dx + dy * dy;
-      if (d2 > r2) continue;
-      const w = SIM.disturbanceDigPheromoneBoost * Math.exp(-d2 / (r * 0.6));
-      fields.dig.deposit((cx + dx) | 0, (cy + dy) | 0, w);
-    }
-  }
-  // Mark world variable as referenced (silences unused-arg lints in future).
-  void world;
+
+  colony.tickTimers();
+  // Silence unused-import warnings if future code paths drop usage.
+  void isSupported;
+  void CELL_GRAIN;
 }

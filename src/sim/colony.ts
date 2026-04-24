@@ -1,18 +1,18 @@
-// Colony — struct-of-arrays storage of all live ants. SPEC §5.3.
+// Colony — struct-of-arrays storage of all live ants.
+//
+// Kept minimal for the restart: position (+ previous for render
+// interpolation), heading, state, and a state timer. No
+// collision counters or agitation — at 10 ants those mechanics don't
+// matter and just add noise to tests.
 
 import type { RNG } from './rng';
-import { SIM } from '../config';
 
 export const STATE_WANDER = 0;
 export const STATE_DIG = 1;
 export const STATE_CARRY = 2;
 export const STATE_REST = 3;
 
-export type AntState =
-  | typeof STATE_WANDER
-  | typeof STATE_DIG
-  | typeof STATE_CARRY
-  | typeof STATE_REST;
+export type AntState = 0 | 1 | 2 | 3;
 
 export class Colony {
   readonly capacity: number;
@@ -25,10 +25,6 @@ export class Colony {
   readonly heading: Float32Array;
   readonly state: Uint8Array;
   readonly stateTimer: Uint16Array;
-  readonly age: Uint16Array;
-  // Decaying float counter; SPEC says Uint8Array but float lets us decay
-  // smoothly per tick rather than per-N-ticks.
-  readonly collisionCount: Float32Array;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -40,55 +36,44 @@ export class Colony {
     this.heading = new Float32Array(capacity);
     this.state = new Uint8Array(capacity);
     this.stateTimer = new Uint16Array(capacity);
-    this.age = new Uint16Array(capacity);
-    this.collisionCount = new Float32Array(capacity);
   }
 
-  spawn(x: number, y: number, headingRad: number): number | null {
+  spawn(x: number, y: number, heading: number): number | null {
     if (this.count >= this.capacity) return null;
     const i = this.count++;
     this.posX[i] = x;
     this.posY[i] = y;
     this.prevX[i] = x;
     this.prevY[i] = y;
-    this.heading[i] = headingRad;
+    this.heading[i] = heading;
     this.state[i] = STATE_WANDER;
     this.stateTimer[i] = 0;
-    this.age[i] = 0;
-    this.collisionCount[i] = 0;
     return i;
   }
 
-  /**
-   * Spawn `n` ants in a tight cluster around (cx, cy) with random headings.
-   * Used for initial colony seeding and the "n" key burst.
-   *
-   * If `isAir` is supplied, the spawn position is rejected when it lands in
-   * non-air (so ants never start embedded in soil); we retry along the
-   * upward direction until we find air or run out of attempts.
-   */
-  spawnCluster(
-    cx: number,
-    cy: number,
+  /** Spawn n ants uniformly at random within air cells of a rectangle. */
+  spawnInRect(
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
     n: number,
     rng: RNG,
-    radius = 4,
-    isAir?: (x: number, y: number) => boolean,
+    isAir: (x: number, y: number) => boolean,
   ): number {
+    const candidates: number[] = [];
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        if (isAir(x, y)) candidates.push(x, y);
+      }
+    }
+    if (candidates.length === 0) return 0;
+    const cellCount = candidates.length / 2;
     let added = 0;
     for (let k = 0; k < n; k++) {
-      const r = rng.range(0, radius);
-      const a = rng.range(0, Math.PI * 2);
-      const x = cx + Math.cos(a) * r;
-      let y = cy + Math.sin(a) * r;
-      if (isAir) {
-        let attempts = 0;
-        while (!isAir(x | 0, y | 0) && attempts < 64) {
-          y -= 1;
-          attempts++;
-        }
-        if (!isAir(x | 0, y | 0)) continue;
-      }
+      const pick = (rng.next() * cellCount) | 0;
+      const x = candidates[pick * 2]! + 0.5;
+      const y = candidates[pick * 2 + 1]! + 0.5;
       const h = rng.range(0, Math.PI * 2);
       if (this.spawn(x, y, h) === null) break;
       added++;
@@ -103,19 +88,9 @@ export class Colony {
     }
   }
 
-  /**
-   * Decays collision counters and ticks state timers and ages. Called once
-   * per sim tick by the rules engine — kept here so all SoA bookkeeping
-   * lives next to the storage.
-   */
-  endOfTickBookkeeping(): void {
-    const decay = SIM.collisionDecayPerTick;
+  tickTimers(): void {
     for (let i = 0; i < this.count; i++) {
-      const c = this.collisionCount[i] - decay;
-      this.collisionCount[i] = c > 0 ? c : 0;
-      // Saturating increment for stateTimer and age.
-      if (this.stateTimer[i] < 0xfffe) this.stateTimer[i]++;
-      if (this.age[i] < 0xfffe) this.age[i]++;
+      if (this.stateTimer[i]! < 0xfffe) this.stateTimer[i]++;
     }
   }
 }

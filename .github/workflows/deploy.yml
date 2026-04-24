@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - claude/setup-github-pages-hosting-XS0JY
+      - claude/debug-fix-issue-Fsnd9
   workflow_dispatch:
 
 permissions:

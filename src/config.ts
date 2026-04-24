@@ -1,127 +1,97 @@
-// All tunable constants. See SPEC §13.
+// Single source of truth for all tunable constants.
+//
+// This is the "restart" config. Deliberately minimal:
+//   - no quality tiers, one profile only
+//   - 10 ants (observable scale; each ant individually renderable)
+//   - 30 Hz simulation, real-time (no speed multiplier anywhere else)
+//   - 1-minute day/night cycle
+//   - scientifically motivated behaviour parameters (ant speed based on
+//     published observations of Formicinae locomotion: ~2 cm/s ≈ 2
+//     cells/s at our grid scale)
 
-export type Quality = 'low' | 'medium' | 'high';
-
-export interface QualityProfile {
-  gridWidth: number;
-  gridHeight: number;
-  antCount: number;
-  simHz: number;
-}
-
-export const QUALITY_PROFILES: Record<Quality, QualityProfile> = {
-  low: { gridWidth: 320, gridHeight: 180, antCount: 200, simHz: 15 },
-  medium: { gridWidth: 480, gridHeight: 270, antCount: 500, simHz: 20 },
-  high: { gridWidth: 720, gridHeight: 405, antCount: 900, simHz: 24 },
-};
-
-export const SIM = {
-  // Soil starts at this normalized fraction from the top (0..1).
-  surfaceFraction: 0.18,
-  // Surface roughness amplitude in cells.
+export const CONFIG = {
+  // World geometry.
+  gridWidth: 240,
+  gridHeight: 135,
+  // Natural surface sits at this fraction from the top of the world.
+  // Above this: sky. Below: soil (before excavation).
+  surfaceFraction: 0.35,
+  // Amplitude (cells) of the wavy surface generator.
   surfaceRoughness: 2,
 
-  // Agent kinematics.
-  antSpeed: 1.6, // cells per simulation tick
-  antRadius: 0.45,
-  turnNoiseRad: 0.55, // per-tick gaussian-ish heading noise stddev (radians)
+  // Agents.
+  antCount: 10,
 
-  // Pheromone fields.
-  digPheromoneDeposit: 1.0,
-  digPheromoneEvap: 0.985,
-  digPheromoneDiffuse: 0.18, // fraction of cell's value that diffuses to neighbors
-  constructionPheromoneDeposit: 1.0,
-  constructionPheromoneEvap: 0.995,
-  constructionPheromoneDiffuse: 0.10,
+  // Simulation pacing. 30 Hz gives smooth motion with 33 ms per tick.
+  // 1 minute = 1800 ticks.
+  simHz: 30,
+  dayLengthTicks: 1800,
+
+  // Locomotion. 0.08 cells/tick × 30 Hz = 2.4 cells/sec — a believable
+  // "walking" speed for a body roughly 4 cells long.
+  antWalkSpeed: 0.08,
+  turnNoiseRad: 0.15, // gaussian per-tick heading perturbation stddev
 
   // Behaviour.
-  digProbBase: 0.018,
-  digProbPheromone: 0.55, // multiplier from local dig pheromone (pre-clamp)
-  digProbCollisionPenalty: 0.35,
-  digSensingRadius: 5, // cells, used for pheromone arc sampling
-  agitationThreshold: 4, // collisions needed in window to enter REST
-  agitationRestTicks: 30,
-  collisionDecayPerTick: 0.06, // per-tick decay on collisionCount float
+  // Probabilistic dig on soil contact, per Sudd 1970 observations of
+  // Lasius flavus: most contacts do nothing, a fraction become digs.
+  digProbPerSoilHit: 0.035,
+  // When carrying, ant turns toward up so it heads for surface.
+  carryUpBias: 0.25,
 
-  // Wandering biases.
-  downwardBias: 0.12,
-  surfaceUpBias: 0.20, // when carrying, head up
-  pheromoneFollowStrength: 1.6,
-
-  // Chamber widening — once a soil cell is "exposed" (adjacent to air w/ active
-  // pheromone) for this many ticks, lateral digging is favored.
-  chamberExposureThreshold: 90,
-  chamberLateralBias: 0.55,
-
-  // Grain disposal.
+  // Grain deposit physics.
   grainPileMax: 6,
-  grainPileGrowthRadius: 3,
+  grainAngleOfRepose: 1,
 
-  // Disturbance (mouse poke).
-  disturbanceRadius: 18,
-  disturbanceCollisionBoost: 8,
-  disturbanceDigPheromoneBoost: 2.0,
-
-  // Spawn.
-  initialQueenDepthFraction: 0.05, // ants spawn just below the surface
+  // Starter chamber (tiny — just enough for 10 ants to stand).
+  starterChamberHalfWidth: 6,
+  starterChamberDepth: 4,
 } as const;
 
+// Renderer constants.
 export const RENDER = {
-  // Background gradient.
-  skyTop: '#0a0c10',
-  skyBottom: '#13161e',
-  soilTop: '#7a583a',
-  soilBottom: '#3a2a1c',
-  soilEdge: '#5a3f28',
-  grainColor: '#a47a4d',
+  // Daytime sky gradient.
+  skyTopDay: '#4a7eb0',
+  skyBottomDay: '#bfd8ee',
+  // Night sky.
+  skyTopNight: '#0a1020',
+  skyBottomNight: '#1b1a35',
+  // Sun and moon.
+  sunColor: '#fff5c8',
+  moonColor: '#d8dcf0',
 
-  // Pheromone visualization (dev / subtle).
-  digPheromoneColor: [255, 220, 120] as const,
-  constructionPheromoneColor: [120, 200, 255] as const,
-  pheromoneVisAlpha: 0.22, // baseline; multiplied by config flag
+  // Terrain.
+  soilTop: '#7a5536',
+  soilBottom: '#3a2414',
+  soilEdge: '#8b6946',
+  // Tunnel interior — sub-surface air.
+  tunnelTop: '#c4a374',
+  tunnelBottom: '#7a5a38',
 
-  // Ants.
-  antBodyColor: '#1a1a1f',
-  antRestColor: '#3a3032',
-  antCarryColor: '#a47a4d',
-  antDigColor: '#26211e',
+  grassTop: '#6aa83e',
+  grassRoot: '#3e5c28',
+  grainColor: '#d4b076',
 
-  // Dev pheromone overlay strength (boolean toggled by overlay flag).
-  showPheromones: false,
+  // Ants — near-black for silhouette contrast against tan tunnels.
+  antBody: '#151017',
+  antHead: '#0a070b',
+  antLeg: '#201820',
 } as const;
 
 export interface Options {
-  quality: Quality;
   seed: number;
   showOverlay: boolean;
-  showPheromones: boolean;
-  speedMultiplier: number;
+  paused: boolean;
 }
 
-const DEFAULTS: Options = {
-  quality: 'medium',
-  seed: (Date.now() & 0xffffffff) >>> 0,
-  showOverlay: false,
-  showPheromones: false,
-  speedMultiplier: 1,
-};
-
-export function parseOptionsFromURL(search: string = location.search): Options {
-  const params = new URLSearchParams(search);
-  const opts: Options = { ...DEFAULTS };
-  const q = params.get('quality');
-  if (q === 'low' || q === 'medium' || q === 'high') opts.quality = q;
-  const seed = params.get('seed');
-  if (seed !== null) {
-    const n = Number(seed);
-    if (Number.isFinite(n)) opts.seed = (n | 0) >>> 0;
-  }
-  if (params.get('overlay') === '1') opts.showOverlay = true;
-  if (params.get('pheromones') === '1') opts.showPheromones = true;
-  const sp = params.get('speed');
-  if (sp !== null) {
-    const n = Number(sp);
-    if (Number.isFinite(n) && n > 0) opts.speedMultiplier = n;
-  }
-  return opts;
+export function parseOptions(search: string = location.search): Options {
+  const p = new URLSearchParams(search);
+  const seed = p.get('seed');
+  return {
+    seed: seed !== null && Number.isFinite(Number(seed))
+      ? (Number(seed) | 0) >>> 0
+      : (Date.now() & 0xffffffff) >>> 0,
+    showOverlay: p.get('overlay') === '1',
+    paused: false,
+  };
 }
