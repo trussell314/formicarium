@@ -481,7 +481,14 @@ export function stepSimulation(
         const face = findNearestDigFace(world, ix, iy, SOIL_SEARCH_RADIUS_CM * CELLS_PER_CM);
         if (face !== null) {
           const want = Math.atan2(face.y + 0.5 - colony.posY[i]!, face.x + 0.5 - colony.posX[i]!);
-          h += wrapAngle(want - h) * 0.35;
+          // Strong bias: 0.6 (was 0.35). Below-surface thigmotaxis
+          // was pulling ants tangent to the chamber floor and
+          // canceling out the seek bias, so ants walked back and
+          // forth along the floor never pushing into a wall to
+          // dig. We turn thigmotaxis off below-surface (see next
+          // block) and crank seek up to give a clear wall-bound
+          // heading.
+          h += wrapAngle(want - h) * 0.6;
         }
         // Foraging-recall does NOT apply below-surface — it was
         // pinning diggers near spawn. Above-surface ants still
@@ -489,10 +496,16 @@ export function stepSimulation(
       }
     }
     // Thigmotaxis (Dussutour et al. 2005): ants prefer to walk along
-    // walls rather than through open space. Applies to WANDER ants;
-    // CARRY ants are already goal-directed by path integration.
+    // walls rather than through open space. Above-surface this
+    // keeps ants on the surface; below-surface it actively starves
+    // digging — ants walk parallel to chamber floors instead of
+    // pushing into them — so we restrict it to above-surface only.
     if (state === STATE_WANDER) {
-      h += thigmotaxisBias(world, colony.posX[i]!, colony.posY[i]!, h);
+      const ix = colony.posX[i]! | 0;
+      const iy = colony.posY[i]! | 0;
+      if (iy < world.naturalSurface[ix]!) {
+        h += thigmotaxisBias(world, colony.posX[i]!, colony.posY[i]!, h);
+      }
     }
     if (state === STATE_CARRY) {
       // Carriers head UP to the surface to deposit excavation spoil
