@@ -79,11 +79,14 @@ export function tryStep(
 
 /**
  * Settle a single ant: extricate from any solid cell it's embedded in,
- * then fall one cell at a time until supported. Returns the new iy.
+ * then fall AT MOST ONE cell if currently unsupported. Returns the
+ * new iy.
  *
- * Callers apply this per-ant at the end of each tick so the final
- * state of every tick is physically valid (nothing embedded, nothing
- * floating).
+ * Single-cell gravity (vs the old iterative "fall until grounded")
+ * means an ant that walks off a ledge takes N ticks to drop N
+ * cells, so the renderer's per-tick interpolation shows a real
+ * falling arc instead of teleporting them to the bottom in a
+ * single frame.
  */
 export function settle(world: World, ix: number, iy: number): number {
   // Extricate upward through solid cells.
@@ -92,8 +95,10 @@ export function settle(world: World, ix: number, iy: number): number {
     if (k !== CELL_SOIL && k !== CELL_GRAIN) break;
     iy--;
   }
-  // Fall until grounded.
-  while (iy + 1 < world.height && !isSupported(world, ix, iy)) {
+  // Fall ONE cell if unsupported. Multiple ticks of falling produce
+  // visible descent; staying transiently unsupported between ticks
+  // is fine — the ant is mid-fall.
+  if (iy + 1 < world.height && !isSupported(world, ix, iy)) {
     iy++;
   }
   return iy;

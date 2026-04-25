@@ -28,11 +28,14 @@ import { CELLS_PER_CM } from '../scenario';
 import {
   Colony,
   STATE_CARRY,
+  STATE_HAUL,
   STATE_REST,
   STATE_WANDER,
 } from './colony';
 import {
   CELL_AIR,
+  CELL_FOOD,
+  CELL_FOOD_STORE,
   CELL_GRAIN,
   CELL_SOIL,
   World,
@@ -171,6 +174,35 @@ const FORAGING_RECALL_STRENGTH = 0.05;
 // heading to run PARALLEL to that surface instead of either ramming
 // it or flying off into open space.
 const THIGMOTAXIS_PROBE_CM = 0.05;
+
+/** Radius (cm) within which a surface ant detects food crumbs. */
+const FOOD_SEARCH_RADIUS_CM = 2.0;
+
+function findNearestFood(world: World, ix: number, iy: number, radiusCells: number): { x: number; y: number } | null {
+  const r = Math.ceil(radiusCells);
+  const r2 = radiusCells * radiusCells;
+  let bestX = -1;
+  let bestY = -1;
+  let bestD2 = Infinity;
+  const x0 = Math.max(0, ix - r);
+  const x1 = Math.min(world.width - 1, ix + r);
+  const y0 = Math.max(0, iy - r);
+  const y1 = Math.min(world.height - 1, iy + r);
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      if (world.cells[y * world.width + x] !== CELL_FOOD) continue;
+      const dx = x - ix;
+      const dy = y - iy;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2 && d2 <= r2) {
+        bestD2 = d2;
+        bestX = x;
+        bestY = y;
+      }
+    }
+  }
+  return bestX < 0 ? null : { x: bestX, y: bestY };
+}
 const THIGMOTAXIS_STRENGTH = 0.12;
 
 /**
@@ -236,6 +268,7 @@ export function stepSimulation(
   slabThicknessCm = 0.8,
   pheromones?: PheromoneState,
   cycle?: DayNightCycle,
+  foodSpawnEveryTicks = 120,
 ): void {
   world.tickCount++;
 
@@ -249,6 +282,24 @@ export function stepSimulation(
   // recent past).
   if (pheromones) {
     pheromones.dig.step(PHEROMONE_DIFFUSE, PHEROMONE_EVAP);
+  }
+
+  // Periodically drop a food crumb at a random above-ground spot
+  // (in the air cell directly above the natural surface). Ants
+  // foraging on the surface will encounter it and haul it home.
+  if (foodSpawnEveryTicks > 0 && world.tickCount % foodSpawnEveryTicks === 0) {
+    const tries = 8;
+    for (let t = 0; t < tries; t++) {
+      const fx = (rng.next() * world.width) | 0;
+      const surfY = world.naturalSurface[fx]!;
+      if (surfY <= 0 || surfY >= world.height) continue;
+      const fy = surfY - 1;
+      const idx = world.index(fx, fy);
+      if (world.cells[idx] === CELL_AIR) {
+        world.cells[idx] = CELL_FOOD as typeof CELL_AIR;
+        break;
+      }
+    }
   }
 
   for (let i = 0; i < colony.count; i++) {
@@ -325,23 +376,27 @@ export function stepSimulation(
         h += dh * bias;
       }
     }
-    // Above-surface return: WANDER ants whose y is above the
-    // natural surface (i.e., walking on the grass / hunting in the
-    // sky) get a STRONG heading bias toward straight-down. Surface
-    // is foreign territory; the colony lives below ground. Without
-    // this, ants surface to deposit grain and then wander on the
-    // grass for hundreds of ticks before drifting back down,
-    // burning the cycles that would otherwise be excavation.
-    // 0.6 per tick almost-snaps the heading down within a few
-    // ticks — fast enough that surface time is brief, slow enough
-    // that the path looks like an arc, not a teleport.
+    // Surface logic: WANDER ants above the natural surface either
+    // forage (head toward visible food) or, if none is in range,
+    // head back down to the nest. Real foragers don't dwell on
+    // the surface unless there's reason to.
     if (state === STATE_WANDER) {
       const ix = colony.posX[i]! | 0;
+      const iy = colony.posY[i]! | 0;
       const surfY = world.naturalSurface[ix]!;
-      if (colony.posY[i]! < surfY) {
-        const want = Math.PI / 2; // straight down
-        const dh = wrapAngle(want - h);
-        h += dh * 0.6;
+      if (iy < surfY) {
+        const food = findNearestFood(world, ix, iy, FOOD_SEARCH_RADIUS_CM * CELLS_PER_CM);
+        if (food !== null) {
+          // Head toward food — direct attraction.
+          const want = Math.atan2(food.y + 0.5 - colony.posY[i]!, food.x + 0.5 - colony.posX[i]!);
+          const dh = wrapAngle(want - h);
+          h += dh * 0.4;
+        } else {
+          // No food visible — head back down to the nest.
+          const want = Math.PI / 2; // straight down
+          const dh = wrapAngle(want - h);
+          h += dh * 0.6;
+        }
       }
     }
     // Foraging-recall (longer-range, lateral): WANDER ants far from
@@ -372,15 +427,21 @@ export function stepSimulation(
       // return — bringing dirt INTO the nest would defeat the
       // point). The home vector (used by the UI for "X cm from
       // home") still updates but doesn't drive heading.
-      //
-      // Lateral nudge toward home-x: an ant whose home is offset
-      // horizontally biases its surface-heading toward that x so
-      // grain piles cluster near the entrance instead of spreading
-      // wherever the ant happened to be when it dug.
       const homeXAhead = Math.abs(colony.homeX[i]!) > 2 ? Math.sign(colony.homeX[i]!) * 0.6 : 0;
       const want = Math.atan2(-1, homeXAhead);
       const dh = wrapAngle(want - h);
       h += dh * CONFIG.carryUpBias;
+    }
+    if (state === STATE_HAUL) {
+      // Foraging return: head straight toward home (path integration
+      // — Wehner). Food gets cached in the nest, not on the surface.
+      const hx = colony.homeX[i]!;
+      const hy = colony.homeY[i]!;
+      if (Math.hypot(hx, hy) > 1) {
+        const want = Math.atan2(hy, hx);
+        const dh = wrapAngle(want - h);
+        h += dh * 0.3;
+      }
     }
     h += rng.gauss() * noise;
     h = wrapAngle(h);
@@ -413,6 +474,26 @@ export function stepSimulation(
 
     const ix = nx | 0;
     const iy = ny | 0;
+
+    // Food pickup: a WANDER ant whose new cell is a food crumb
+    // grabs it and switches to HAUL (carrying food back to the
+    // nest). The crumb is consumed (cell → AIR).
+    if (state === STATE_WANDER) {
+      const cellHere = world.cells[world.index(ix, iy)];
+      if (cellHere === CELL_FOOD) {
+        world.cells[world.index(ix, iy)] = CELL_AIR;
+        colony.setState(i, STATE_HAUL);
+        colony.clearTarget(i);
+        // Head down toward home — path integration.
+        const hx = colony.homeX[i]!;
+        const hy = colony.homeY[i]!;
+        if (Math.hypot(hx, hy) > 1) {
+          colony.heading[i] = Math.atan2(hy, hx);
+        } else {
+          colony.heading[i] = Math.PI / 2; // straight down
+        }
+      }
+    }
 
     // WANDER + soil contact → maybe dig.
     if (state === STATE_WANDER && hitSoil) {
@@ -450,6 +531,27 @@ export function stepSimulation(
         colony.posY[i] = (ny2 < 0 ? 0 : ny2) + 0.5;
         // Head back down into the nest.
         colony.heading[i] = Math.PI / 2 + rng.range(-0.6, 0.6);
+      }
+    }
+
+    // HAUL → if home (path-integration mag small) and below
+    // surface, deposit food in the current cell. Cell becomes
+    // CELL_FOOD_STORE — visible food cache, walkable.
+    if (colony.state[i] === STATE_HAUL) {
+      const hx = colony.homeX[i]!;
+      const hy = colony.homeY[i]!;
+      const homeMag = Math.hypot(hx, hy);
+      const fx = colony.posX[i]! | 0;
+      const fy = colony.posY[i]! | 0;
+      const belowSurface = fy > world.naturalSurface[fx]!;
+      const cellHere = world.cells[world.index(fx, fy)];
+      if (homeMag < 4 && belowSurface && cellHere === CELL_AIR) {
+        world.cells[world.index(fx, fy)] = CELL_FOOD_STORE as typeof CELL_AIR;
+        colony.setState(i, STATE_WANDER);
+        colony.clearTarget(i);
+        // Head off in a fresh random direction so they don't
+        // immediately re-deposit on their own pile.
+        colony.heading[i] = rng.range(0, Math.PI * 2);
       }
     }
   }

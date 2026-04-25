@@ -83,6 +83,13 @@ export interface Scenario {
    */
   slabThicknessCm?: number;
 
+  /**
+   * Average wall-clock seconds between food crumbs appearing on the
+   * surface. The user sees food drop in, ants find it, ants haul it
+   * back to the nest. Default 4 s.
+   */
+  foodSpawnIntervalSec?: number;
+
   /** PRNG seed. Default Date.now()-derived. */
   seed?: number;
 
@@ -109,6 +116,7 @@ export interface ResolvedScenario {
   starterChamberWidthCm: number;
   starterChamberDepthCm: number;
   slabThicknessCm: number;
+  foodSpawnIntervalSec: number;
   seed: number;
   debugIntervalTicks: number;
   ants: Record<string, Required<Omit<AntTypeSpec, 'tag'>> & { tag?: string }>;
@@ -133,6 +141,7 @@ const DEFAULTS = {
   starterChamberWidthCm: 4,
   starterChamberDepthCm: 2,
   slabThicknessCm: 0.8,
+  foodSpawnIntervalSec: 4,
   debugIntervalTicks: 50,
 };
 
@@ -157,6 +166,7 @@ export function resolveScenario(s: Scenario): ResolvedScenario {
   const starterChamberWidthCm = s.starterChamberWidthCm ?? DEFAULTS.starterChamberWidthCm;
   const starterChamberDepthCm = s.starterChamberDepthCm ?? DEFAULTS.starterChamberDepthCm;
   const slabThicknessCm = s.slabThicknessCm ?? DEFAULTS.slabThicknessCm;
+  const foodSpawnIntervalSec = s.foodSpawnIntervalSec ?? DEFAULTS.foodSpawnIntervalSec;
   const dayDurationSec = s.dayDurationSec ?? DEFAULTS.dayDurationSec;
   const nightDurationSec = s.nightDurationSec ?? DEFAULTS.nightDurationSec;
 
@@ -189,6 +199,7 @@ export function resolveScenario(s: Scenario): ResolvedScenario {
     starterChamberWidthCm,
     starterChamberDepthCm,
     slabThicknessCm,
+    foodSpawnIntervalSec,
     seed: s.seed ?? ((Date.now() & 0xffffffff) >>> 0),
     debugIntervalTicks: s.debugIntervalTicks ?? DEFAULTS.debugIntervalTicks,
     ants,

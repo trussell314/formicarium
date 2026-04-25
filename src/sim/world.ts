@@ -14,12 +14,18 @@ export const CELL_AIR = 0;
 export const CELL_SOIL = 1;
 export const CELL_GRAIN = 2;
 export const CELL_BOUNDARY = 3;
+/** A food crumb on the surface, pickupable by foraging ants. */
+export const CELL_FOOD = 4;
+/** Food that's been deposited inside the nest (storage). Walkable. */
+export const CELL_FOOD_STORE = 5;
 
 export type CellKind =
   | typeof CELL_AIR
   | typeof CELL_SOIL
   | typeof CELL_GRAIN
-  | typeof CELL_BOUNDARY;
+  | typeof CELL_BOUNDARY
+  | typeof CELL_FOOD
+  | typeof CELL_FOOD_STORE;
 
 export class World {
   readonly width: number;

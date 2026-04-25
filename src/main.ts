@@ -35,43 +35,6 @@ function boot(): void {
     resolved.cellsPerCm,
   );
 
-  // WebGL ant renderer (3D model). Lazy-loaded so three.js (~600 KB)
-  // doesn't bloat the initial JS bundle — the 2D layer renders while
-  // we wait. Once the model is up, flip renderer.drawAnts off.
-  const canvas3d = document.getElementById('screen-3d') as HTMLCanvasElement | null;
-  type MeshRenderer = import('./render/ant-mesh').AntMeshRenderer;
-  let meshRenderer: MeshRenderer | null = null;
-  if (canvas3d) {
-    void import('./render/ant-mesh').then(async ({ AntMeshRenderer }) => {
-      const r = new AntMeshRenderer(canvas3d, world.width, world.height);
-      await r.load('/ant.glb');
-      meshRenderer = r;
-      fitMeshCanvas();
-      renderer.drawAnts = false;
-    }).catch((err) => {
-      console.warn('failed to load 3D ant layer, staying with 2D ants', err);
-    });
-  }
-
-  function fitMeshCanvas(): void {
-    if (!canvas3d || !meshRenderer) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas3d.width = Math.floor(window.innerWidth * dpr);
-    canvas3d.height = Math.floor(window.innerHeight * dpr);
-    // Use the same fit-rect math as the 2D canvas so the ants land
-    // on the dirt rather than getting letterboxed.
-    const ww = world.width;
-    const wh = world.height;
-    const s = Math.max(canvas3d.width / ww, canvas3d.height / wh);
-    const dw = ww * s;
-    const dh = wh * s;
-    const dx = (canvas3d.width - dw) * 0.5;
-    const dy = (canvas3d.height - dh) * 0.5;
-    meshRenderer.resize(canvas3d.width, canvas3d.height, { dx, dy, dw, dh });
-  }
-  fitMeshCanvas();
-  window.addEventListener('resize', fitMeshCanvas);
-
   const simHz = 1 / resolved.secondsPerTick;
   const loop = new Loop(simHz, {
     step: () => stepSimulation(
@@ -81,11 +44,9 @@ function boot(): void {
       resolved.slabThicknessCm,
       pheromones,
       { dayDurationTicks: resolved.dayDurationTicks, nightDurationTicks: resolved.nightDurationTicks },
+      Math.round(resolved.foodSpawnIntervalSec / resolved.secondsPerTick),
     ),
-    draw: (alpha: number) => {
-      renderer.draw(colony, alpha);
-      meshRenderer?.render(colony, alpha);
-    },
+    draw: (alpha: number) => renderer.draw(colony, alpha),
   });
 
   // Click / tap → select nearest ant within a reasonable radius.

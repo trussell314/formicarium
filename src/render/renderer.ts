@@ -12,10 +12,11 @@
 //      the per-frame cost is negligible.
 
 import { RENDER } from '../config';
-import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from '../sim/world';
+import { CELL_AIR, CELL_FOOD, CELL_FOOD_STORE, CELL_GRAIN, CELL_SOIL, World } from '../sim/world';
 import {
   Colony,
   STATE_CARRY,
+  STATE_HAUL,
   STATE_REST,
 } from '../sim/colony';
 
@@ -221,6 +222,15 @@ export class Renderer {
           const t = amt / 8;
           const scale = 0.65 + 0.25 * t;
           r = GRAIN[0] * scale; g = GRAIN[1] * scale; b = GRAIN[2] * scale;
+        } else if (k === CELL_FOOD) {
+          // Surface food crumb — bright reddish-brown so it pops
+          // against grass.
+          r = 200; g = 78; b = 42;
+        } else if (k === CELL_FOOD_STORE) {
+          // Cached food in the nest — warmer amber tone, slightly
+          // dimmer so it reads as "indoor stash" rather than "fresh
+          // crumb".
+          r = 168; g = 110; b = 56;
         } else {
           r = 0; g = 0; b = 0;
         }
@@ -396,6 +406,15 @@ export class Renderer {
       ctx.fillStyle = RENDER.grainColor;
       ctx.beginPath();
       ctx.arc(jaw[0], jaw[1], 0.08 * L, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Hauled food — distinct red crumb at the mandibles so foragers
+    // are visually distinguishable from soil-carriers at a glance.
+    if (state === STATE_HAUL) {
+      const jaw = pt(0.56, 0);
+      ctx.fillStyle = '#c84e2a';
+      ctx.beginPath();
+      ctx.arc(jaw[0], jaw[1], 0.10 * L, 0, Math.PI * 2);
       ctx.fill();
     }
 

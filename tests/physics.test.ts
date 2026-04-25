@@ -96,11 +96,15 @@ describe('settle', () => {
     expect(iy).toBe(4); // lands on top of soil
   });
 
-  it('drops an ant in free air to the floor', () => {
+  it('drops an ant by one cell per tick when unsupported (visible fall)', () => {
     const w = blank();
     for (let x = 0; x < w.width; x++) stamp(w, x, 10, CELL_SOIL);
-    const iy = settle(w, 5, 2);
-    expect(iy).toBe(9); // resting on floor
+    // Single tick → falls 1 cell.
+    expect(settle(w, 5, 2)).toBe(3);
+    // After enough ticks the ant reaches the floor.
+    let iy = 2;
+    for (let t = 0; t < 20; t++) iy = settle(w, 5, iy);
+    expect(iy).toBe(9);
   });
 
   it('keeps an ant already on a floor where it is', () => {
@@ -110,9 +114,10 @@ describe('settle', () => {
     expect(iy).toBe(9);
   });
 
-  it('lands on bottom of world if no floor exists', () => {
+  it('eventually lands on bottom of world if no floor exists', () => {
     const w = blank(10, 10);
-    const iy = settle(w, 5, 3);
+    let iy = 3;
+    for (let t = 0; t < 20; t++) iy = settle(w, 5, iy);
     expect(iy).toBe(9);
   });
 

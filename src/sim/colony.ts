@@ -9,10 +9,13 @@ import type { RNG } from './rng';
 
 export const STATE_WANDER = 0;
 export const STATE_DIG = 1;
+/** Carrying excavation soil up toward the surface. */
 export const STATE_CARRY = 2;
 export const STATE_REST = 3;
+/** Carrying food down toward the nest (foraging return). */
+export const STATE_HAUL = 4;
 
-export type AntState = 0 | 1 | 2 | 3;
+export type AntState = 0 | 1 | 2 | 3 | 4;
 
 export class Colony {
   readonly capacity: number;

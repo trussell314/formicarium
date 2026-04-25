@@ -8,6 +8,7 @@ import {
   Colony,
   STATE_CARRY,
   STATE_DIG,
+  STATE_HAUL,
   STATE_REST,
   STATE_WANDER,
 } from './sim/colony';
@@ -67,6 +68,19 @@ export function motivationOf(colony: Colony, i: number, world?: World): Motivati
         description = `hauling a grain up (~${cmDist.toFixed(1)} cm from home)`;
       } else {
         description = 'carrying a grain — heading up';
+      }
+      break;
+    }
+    case STATE_HAUL: {
+      stateLabel = 'HAUL';
+      const hx = colony.homeX[i]!;
+      const hy = colony.homeY[i]!;
+      const mag = Math.hypot(hx, hy);
+      if (mag > 4) {
+        const cmDist = mag / CELLS_PER_CM;
+        description = `hauling food home (~${cmDist.toFixed(1)} cm to go)`;
+      } else {
+        description = 'storing food in the nest';
       }
       break;
     }
