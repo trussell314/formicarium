@@ -177,6 +177,8 @@ const THIGMOTAXIS_PROBE_CM = 0.05;
 const FOOD_SEARCH_RADIUS_CM = 2.0;
 /** Radius (cm) within which a below-surface ant detects soil to dig. */
 const SOIL_SEARCH_RADIUS_CM = 1.5;
+/** Cap on simultaneous food crumbs visible on the surface. */
+const SURFACE_FOOD_MAX = 6;
 
 function findNearestFood(world: World, ix: number, iy: number, radiusCells: number): { x: number; y: number } | null {
   const r = Math.ceil(radiusCells);
@@ -328,17 +330,27 @@ export function stepSimulation(
   // Periodically drop a food crumb at a random above-ground spot
   // (in the air cell directly above the natural surface). Ants
   // foraging on the surface will encounter it and haul it home.
+  // Cap simultaneous on-surface crumbs: with 10 ants and a steady
+  // spawn, an unbounded surface buffer accumulates faster than ants
+  // can haul it, which pulls every CARRY-just-deposited ant straight
+  // back into HAUL and starves digging.
   if (foodSpawnEveryTicks > 0 && world.tickCount % foodSpawnEveryTicks === 0) {
-    const tries = 8;
-    for (let t = 0; t < tries; t++) {
-      const fx = (rng.next() * world.width) | 0;
-      const surfY = world.naturalSurface[fx]!;
-      if (surfY <= 0 || surfY >= world.height) continue;
-      const fy = surfY - 1;
-      const idx = world.index(fx, fy);
-      if (world.cells[idx] === CELL_AIR) {
-        world.cells[idx] = CELL_FOOD as typeof CELL_AIR;
-        break;
+    let onSurface = 0;
+    for (let k = 0; k < world.cells.length && onSurface < SURFACE_FOOD_MAX; k++) {
+      if (world.cells[k] === CELL_FOOD) onSurface++;
+    }
+    if (onSurface < SURFACE_FOOD_MAX) {
+      const tries = 8;
+      for (let t = 0; t < tries; t++) {
+        const fx = (rng.next() * world.width) | 0;
+        const surfY = world.naturalSurface[fx]!;
+        if (surfY <= 0 || surfY >= world.height) continue;
+        const fy = surfY - 1;
+        const idx = world.index(fx, fy);
+        if (world.cells[idx] === CELL_AIR) {
+          world.cells[idx] = CELL_FOOD as typeof CELL_AIR;
+          break;
+        }
       }
     }
   }
@@ -570,9 +582,14 @@ export function stepSimulation(
       }
     }
 
-    // HAUL → if home (path-integration mag small) and below
-    // surface, deposit food in the current cell. Cell becomes
-    // CELL_FOOD_STORE — visible food cache, walkable.
+    // HAUL → deposit when ant is below surface and within ~0.2 cm
+    // of the home spawn. Once the home cell itself becomes
+    // FOOD_STORE the next returning hauler can't deposit on it
+    // (it isn't AIR), so we look at the 3×3 around the ant for an
+    // AIR cell to drop in. If none is found and the ant is at home,
+    // just transition to WANDER — food merged into the existing
+    // pile. Without this, returning haulers paced forever and the
+    // colony stalled with most ants stuck in HAUL.
     if (colony.state[i] === STATE_HAUL) {
       const hx = colony.homeX[i]!;
       const hy = colony.homeY[i]!;
@@ -580,13 +597,31 @@ export function stepSimulation(
       const fx = colony.posX[i]! | 0;
       const fy = colony.posY[i]! | 0;
       const belowSurface = fy > world.naturalSurface[fx]!;
-      const cellHere = world.cells[world.index(fx, fy)];
-      if (homeMag < 4 && belowSurface && cellHere === CELL_AIR) {
-        world.cells[world.index(fx, fy)] = CELL_FOOD_STORE as typeof CELL_AIR;
+      if (homeMag < 8 && belowSurface) {
+        let dropX = -1, dropY = -1;
+        const cellHere = world.cells[world.index(fx, fy)];
+        if (cellHere === CELL_AIR) {
+          dropX = fx; dropY = fy;
+        } else {
+          for (let dy = -1; dy <= 1 && dropX < 0; dy++) {
+            for (let dx = -1; dx <= 1 && dropX < 0; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              const nx = fx + dx, ny = fy + dy;
+              if (!world.inBounds(nx, ny)) continue;
+              if (world.cells[world.index(nx, ny)] === CELL_AIR) {
+                dropX = nx; dropY = ny;
+              }
+            }
+          }
+        }
+        if (dropX >= 0) {
+          world.cells[world.index(dropX, dropY)] = CELL_FOOD_STORE as typeof CELL_AIR;
+        }
+        // Always release the ant from HAUL once it's at home, even
+        // if no AIR cell was found — otherwise we re-create the
+        // exact stuck-in-HAUL bug this fix is supposed to address.
         colony.setState(i, STATE_WANDER);
         colony.clearTarget(i);
-        // Head off in a fresh random direction so they don't
-        // immediately re-deposit on their own pile.
         colony.heading[i] = rng.range(0, Math.PI * 2);
       }
     }
