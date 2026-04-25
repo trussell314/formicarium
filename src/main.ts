@@ -39,7 +39,13 @@ function readSettings(): Settings {
     // but it reads as an ant farm rather than a smooth blob.
     width: Math.max(40, num('width', 140) | 0),
     height: Math.max(30, num('height', 80) | 0),
-    ants: Math.max(1, num('ants', 24) | 0),
+    // 16 ants in a 140-wide world is about 1 ant per 9 cm across.
+    // The previous 24 in a 200-wide world packed them tightly enough
+    // that pairwise repulsion overwhelmed any tunnel-front formation
+    // — they'd cluster at one wall and grind it back as a uniform
+    // chamber. Fewer ants spread across the same world give more
+    // room for distinct work fronts.
+    ants: Math.max(1, num('ants', 16) | 0),
     simStepsPerFrame: Math.max(1, num('speed', 8) | 0),
   };
 }
