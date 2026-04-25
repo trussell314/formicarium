@@ -93,8 +93,13 @@ function writePNG(path: string, width: number, height: number, rgb: Buffer): voi
 }
 
 /** Build the RGB pixel buffer (width*height*3 bytes). Used by both
- *  the PPM and PNG dumpers — color logic lives in one place. */
-function buildRGB(w: World, c: Colony): Buffer {
+ *  the PPM and PNG dumpers — color logic lives in one place. If
+ *  pheromone fields are passed, blend a translucent cyan/magenta
+ *  overlay on top of terrain (debug visualisation). */
+function buildRGB(
+  w: World, c: Colony,
+  fields?: { dig: { current: Float32Array }; build: { current: Float32Array } },
+): Buffer {
   const body = Buffer.alloc(w.width * w.height * 3);
   for (let y = 0; y < w.height; y++) {
     for (let x = 0; x < w.width; x++) {
@@ -137,6 +142,29 @@ function buildRGB(w: World, c: Colony): Buffer {
       body[o + 2] = Math.round(b) & 0xff;
     }
   }
+  // Pheromone overlay (cyan dig, magenta build) — same compositing
+  // as renderer.ts. Skipped for cells with negligible signal so the
+  // brown terrain shows through where ants haven't worked.
+  if (fields) {
+    const dig = fields.dig.current;
+    const build = fields.build.current;
+    const CAP = 0.5;
+    for (let i = 0; i < dig.length; i++) {
+      const dv = Math.min(1, dig[i]! / CAP);
+      const bv = Math.min(1, build[i]! / CAP);
+      if (dv < 0.01 && bv < 0.01) continue;
+      const o = i * 3;
+      const ar = body[o]!, ag = body[o + 1]!, ab = body[o + 2]!;
+      const aDig = dv * 0.55, aBuild = bv * 0.55;
+      let nr = ar * (1 - aDig);
+      let ng = ag * (1 - aDig) + 220 * aDig;
+      let nb = ab * (1 - aDig) + 220 * aDig;
+      nr = nr * (1 - aBuild) + 220 * aBuild;
+      ng = ng * (1 - aBuild);
+      nb = nb * (1 - aBuild) + 220 * aBuild;
+      body[o] = nr | 0; body[o + 1] = ng | 0; body[o + 2] = nb | 0;
+    }
+  }
   // Overlay ants as 1-pixel black dots.
   for (let i = 0; i < c.count; i++) {
     const ax = c.posX[i]! | 0;
@@ -148,13 +176,19 @@ function buildRGB(w: World, c: Colony): Buffer {
   return body;
 }
 
-function dumpPPM(path: string, w: World, c: Colony): void {
+function dumpPPM(
+  path: string, w: World, c: Colony,
+  fields?: { dig: { current: Float32Array }; build: { current: Float32Array } },
+): void {
   const header = `P6\n${w.width} ${w.height}\n255\n`;
-  writeFileSync(path, Buffer.concat([Buffer.from(header, 'ascii'), buildRGB(w, c)]));
+  writeFileSync(path, Buffer.concat([Buffer.from(header, 'ascii'), buildRGB(w, c, fields)]));
 }
 
-function dumpPNG(path: string, w: World, c: Colony): void {
-  writePNG(path, w.width, w.height, buildRGB(w, c));
+function dumpPNG(
+  path: string, w: World, c: Colony,
+  fields?: { dig: { current: Float32Array }; build: { current: Float32Array } },
+): void {
+  writePNG(path, w.width, w.height, buildRGB(w, c, fields));
 }
 
 const rng = new RNG(SEED);
@@ -186,7 +220,7 @@ for (let t = 1; t <= TICKS; t++) {
   prevSoil = s;
   if (DUMP_EVERY > 0 && t % DUMP_EVERY === 0) {
     const stem = `${DUMP_DIR}/formicarium-${String(t).padStart(7, '0')}`;
-    dumpPNG(stem + '.png', world, colony);
+    dumpPNG(stem + '.png', world, colony, { dig: digField, build: buildField });
     dumpPPM(stem + '.ppm', world, colony);
   }
   if (t % WINDOW === 0) {
@@ -274,6 +308,6 @@ for (let t = 1; t <= TICKS; t++) {
 // visible artifact. PNG is the format the in-session viewer can
 // render; PPM is portable to any image tool the user might have.
 const finalStem = `${DUMP_DIR}/formicarium-final`;
-dumpPNG(finalStem + '.png', world, colony);
+dumpPNG(finalStem + '.png', world, colony, { dig: digField, build: buildField });
 dumpPPM(finalStem + '.ppm', world, colony);
 console.log(`final state: ${finalStem}.{png,ppm} (${world.width}x${world.height})`);

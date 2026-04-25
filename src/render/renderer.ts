@@ -61,6 +61,12 @@ export class Renderer {
     this.buf = this.imageData.data;
   }
 
+  /** Toggleable pheromone-field overlay. Off by default; flip with
+   *  the 'p' key in the live UI. Two fields are blended with
+   *  translucent unused colours so they don't conflict with the
+   *  brown/green/tan terrain palette: cyan = dig, magenta = build. */
+  showPheromones = false;
+
   /** User zoom factor (1.0 = fit-to-screen). Mutated by main's pinch /
    *  wheel handlers. */
   zoom = 1;
@@ -118,7 +124,10 @@ export class Renderer {
     if (this.panY > maxPanY) this.panY = maxPanY;
   }
 
-  render(colony: Colony, alpha: number, particles?: ParticleSystem): void {
+  render(
+    colony: Colony, alpha: number, particles?: ParticleSystem,
+    pheromones?: { dig: { current: Float32Array }; build: { current: Float32Array } },
+  ): void {
     const w = this.world.width;
     const h = this.world.height;
     const cells = this.world.cells;
@@ -193,6 +202,37 @@ export class Renderer {
         data[o + 1] = g;
         data[o + 2] = b;
         data[o + 3] = 255;
+      }
+    }
+    // Optional pheromone overlay. Each field is alpha-blended into
+    // its pixel using a colour outside the terrain palette: cyan
+    // (dig) and magenta (build). The intensity is normalised to a
+    // soft cap so a single deposit doesn't blow out the picture.
+    if (this.showPheromones && pheromones) {
+      const dig = pheromones.dig.current;
+      const build = pheromones.build.current;
+      const CAP = 0.5;
+      for (let i = 0; i < dig.length; i++) {
+        const dv = Math.min(1, dig[i]! / CAP);
+        const bv = Math.min(1, build[i]! / CAP);
+        if (dv < 0.01 && bv < 0.01) continue;
+        const o = i * 4;
+        // Cyan = dig (boost B+G, dim R). Magenta = build (boost R+B, dim G).
+        const ar = data[o]!;
+        const ag = data[o + 1]!;
+        const ab = data[o + 2]!;
+        const aDig = dv * 0.55;
+        const aBuild = bv * 0.55;
+        // Compose dig over base, then build over that.
+        let nr = ar * (1 - aDig) + 0  * aDig;
+        let ng = ag * (1 - aDig) + 220 * aDig;
+        let nb = ab * (1 - aDig) + 220 * aDig;
+        nr = nr * (1 - aBuild) + 220 * aBuild;
+        ng = ng * (1 - aBuild) + 0   * aBuild;
+        nb = nb * (1 - aBuild) + 220 * aBuild;
+        data[o]     = nr | 0;
+        data[o + 1] = ng | 0;
+        data[o + 2] = nb | 0;
       }
     }
     this.offCtx.putImageData(this.imageData, 0, 0);

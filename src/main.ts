@@ -227,6 +227,9 @@ function main(): void {
         document.exitFullscreen().catch(() => {});
       }
     }
+    else if (e.key === 'p') {
+      renderer.showPheromones = !renderer.showPheromones;
+    }
     else if (e.key === 'r') {
       const s2 = { ...settings, seed: (settings.seed * 16807 + 1) >>> 0 };
       const built = build(s2);
@@ -259,7 +262,7 @@ function main(): void {
       alpha = 1;
     }
 
-    renderer.render(colony, alpha, particles);
+    renderer.render(colony, alpha, particles, { dig: digField, build: buildField });
 
     if (now - lastHud > 250) {
       lastHud = now;
