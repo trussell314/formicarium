@@ -55,10 +55,26 @@ export interface StepResult {
  * with their legs; this is the 2D abstraction of that anatomy, not
  * an engineering heuristic. Soil walls still block (and trigger the
  * hitSoil flag so the agent layer can decide whether to dig).
+ *
+ * Tarsal-claw cling cuts both ways: if the SOURCE cell has no solid
+ * 8-neighbour, the ant has no substrate to push against and cannot
+ * generate locomotive force. The only motion available is gravity —
+ * handled by `settle` at end-of-tick. Without this guard, an ant in
+ * mid-air can steer horizontally (or upward) through pure heading
+ * advection, producing the "hover and drift" failure mode the user
+ * reported.
  */
 export function tryStep(
   world: World, x: number, y: number, dx: number, dy: number,
 ): StepResult {
+  const cx = x | 0;
+  const cy = y | 0;
+  if (!isSupported(world, cx, cy)) {
+    // Free fall — locomotion is suppressed; settle handles vertical
+    // motion. Returning the original position keeps this an env-level
+    // primitive so the agent layer can't bypass it.
+    return { x, y, hitSoil: false };
+  }
   const nx = x + dx;
   const ny = y + dy;
   if (nx < 0 || ny < 0 || nx >= world.width || ny >= world.height) {
@@ -71,8 +87,6 @@ export function tryStep(
   if (k === CELL_SOIL) return { x, y, hitSoil: true };
   // GRAIN — try to climb up to 2 cells.
   const MAX_CLIMB = 2;
-  const cx = x | 0;
-  const cy = y | 0;
   for (let dh = 1; dh <= MAX_CLIMB; dh++) {
     const probeIy = iy - dh;
     const headIy = cy - dh;

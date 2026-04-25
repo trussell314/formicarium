@@ -314,8 +314,13 @@ export function step(
         const target = adjacentSoil(world, ax, ay, h);
         if (target !== null) {
           if (digCell(world, target.x, target.y, rng)) {
-            colony.posX[i] = target.x + 0.5;
-            colony.posY[i] = target.y + 0.5;
+            // Ant body stays put — mandibles do the reaching. A
+            // teleport into target+0.5 produced renderer artefacts
+            // (interpolated path through impossible space) and was
+            // never required by the cited mechanics: real diggers
+            // chip the wall from where they stand and back away with
+            // the load. The CARRY state's own movement (with negative
+            // geotaxis) carries the ant away from the new void.
             colony.setState(i, STATE_CARRY);
             digField.deposit(target.x, target.y, digDeposit);
             colony.heading[i] = -Math.PI / 2 + rng.range(-0.3, 0.3);
@@ -335,8 +340,10 @@ export function step(
       const target = adjacentGrain(world, ax, ay, rng);
       if (target !== null && rng.next() < colony.pickProb[i]!) {
         if (pickGrain(world, target.x, target.y, rng)) {
-          colony.posX[i] = target.x + 0.5;
-          colony.posY[i] = target.y + 0.5;
+          // No teleport — same reasoning as digCell above: the ant's
+          // body stays at its current cell, mandibles reach into the
+          // adjacent grain. Avoids a prev→pos straight-line jump
+          // through air during the renderer's interpolation.
           colony.setState(i, STATE_CARRY);
           // Picked-up grain isn't a fresh dig — don't deposit dig
           // pheromone; instead leave a small mark on the build
