@@ -14,6 +14,13 @@
         text-shadow: 0 1px 2px #000;
         pointer-events: none;
       }
+      #spark {
+        position: fixed; top: 8px; left: 8px;
+        margin-top: 60px;
+        opacity: 0.7;
+        pointer-events: none;
+        image-rendering: pixelated;
+      }
       #help {
         position: fixed; right: 12px; bottom: 12px;
         background: rgba(10, 6, 6, 0.78);
@@ -44,6 +51,7 @@
   <body>
     <canvas id="screen"></canvas>
     <div id="hud"></div>
+    <canvas id="spark" width="120" height="28"></canvas>
     <div id="help">
       <h1>FORMICARIUM</h1>
       <div><kbd>space</kbd> pause / resume</div>

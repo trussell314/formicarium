@@ -162,6 +162,43 @@ export class Renderer {
       this.ctx.beginPath();
       this.ctx.ellipse(px, py + radius * 0.85, radius * 1.3, radius * 0.4, 0, 0, Math.PI * 2);
       this.ctx.fill();
+      // Six legs, three per side. The walk phase comes from a hash of
+      // (id, tick, distance moved) so ants in motion shuffle their
+      // legs and stationary ants stay still. Lines are short and thin
+      // — at small scales they read as a leggy silhouette rather than
+      // distinct legs, which is what we want.
+      const dxMoved = colony.posX[i]! - colony.prevX[i]!;
+      const dyMoved = colony.posY[i]! - colony.prevY[i]!;
+      const speed = Math.hypot(dxMoved, dyMoved);
+      if (speed > 0.005) {
+        const phase = (this.world.tick + i * 7) * 0.6 + speed * 4;
+        const heading = colony.heading[i]!;
+        const cosH = Math.cos(heading);
+        const sinH = Math.sin(heading);
+        // Body-local coordinates: x along heading, y perpendicular.
+        const legLen = radius * 1.4;
+        this.ctx.strokeStyle = '#0f0805';
+        this.ctx.lineWidth = Math.max(0.8, scale * 0.12);
+        this.ctx.lineCap = 'round';
+        for (let leg = 0; leg < 3; leg++) {
+          const along = (leg - 1) * radius * 0.9;
+          const swing = Math.sin(phase + leg * 1.1) * 0.45;
+          for (const side of [-1, 1] as const) {
+            const lx = along + swing * radius * 0.4;
+            const ly = side * (radius * 0.6 + Math.abs(swing) * radius * 0.5);
+            const ex = px + cosH * lx - sinH * ly;
+            const ey = py + sinH * lx + cosH * ly;
+            // Hip is a tiny inset so legs anchor to the body silhouette.
+            const hx = px + cosH * along * 0.4 - sinH * (side * radius * 0.3);
+            const hy = py + sinH * along * 0.4 + cosH * (side * radius * 0.3);
+            this.ctx.beginPath();
+            this.ctx.moveTo(hx, hy);
+            this.ctx.lineTo(ex, ey);
+            this.ctx.stroke();
+          }
+        }
+        void legLen;
+      }
       this.ctx.fillStyle = '#1a0f08';
       this.ctx.beginPath();
       this.ctx.ellipse(px, py, radius * 1.4, radius, colony.heading[i]!, 0, Math.PI * 2);

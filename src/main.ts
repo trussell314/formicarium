@@ -68,8 +68,18 @@ function main(): void {
   const canvas = document.getElementById('screen') as HTMLCanvasElement;
   const hud = document.getElementById('hud') as HTMLDivElement;
   const help = document.getElementById('help') as HTMLDivElement;
+  const spark = document.getElementById('spark') as HTMLCanvasElement;
+  const sparkCtx = spark.getContext('2d')!;
   const renderer = new Renderer(canvas, world);
   const particles = new ParticleSystem(256);
+
+  // Rolling buffer of dig counts per frame; the sparkline shows the
+  // last SPARK_LEN samples. Gives the viewer an at-a-glance signal
+  // for "is the colony actively working?"
+  const SPARK_LEN = spark.width;
+  const sparkBuf = new Int16Array(SPARK_LEN);
+  let sparkHead = 0;
+  let prevSoil = world.countSoil();
 
   // Auto-hide the help panel after a few seconds so it doesn't clutter
   // the screensaver indefinitely. The `?` key brings it back.
@@ -114,6 +124,8 @@ function main(): void {
       colony = built.colony;
       // Hot-swap: rebuild renderer view of the new world.
       (renderer as unknown as { world: World }).world = world;
+      prevSoil = world.countSoil();
+      sparkBuf.fill(0);
     }
   });
 
@@ -137,15 +149,39 @@ function main(): void {
 
     renderer.render(colony, alpha, particles);
 
+    // Sparkline: dig events (soil cells lost) per render frame, in a
+    // ring buffer. Each new sample plots a vertical bar; old samples
+    // scroll left as the head advances.
+    const curSoil = world.countSoil();
+    const dug = Math.max(0, prevSoil - curSoil);
+    prevSoil = curSoil;
+    sparkBuf[sparkHead] = dug;
+    sparkHead = (sparkHead + 1) % SPARK_LEN;
+    let peak = 1;
+    for (let k = 0; k < SPARK_LEN; k++) {
+      if (sparkBuf[k]! > peak) peak = sparkBuf[k]!;
+    }
+    sparkCtx.clearRect(0, 0, spark.width, spark.height);
+    sparkCtx.fillStyle = 'rgba(216, 200, 168, 0.18)';
+    sparkCtx.fillRect(0, spark.height - 1, spark.width, 1);
+    sparkCtx.fillStyle = '#d8c8a8';
+    for (let k = 0; k < SPARK_LEN; k++) {
+      // Plot oldest sample on the left, newest on the right.
+      const idx = (sparkHead + k) % SPARK_LEN;
+      const v = sparkBuf[idx]!;
+      const h = Math.min(spark.height, Math.round((v / peak) * (spark.height - 2)));
+      if (h > 0) sparkCtx.fillRect(k, spark.height - h, 1, h);
+    }
+
     if (now - lastHud > 250) {
       lastHud = now;
-      const dug = world.initialSoilCells - world.countSoil();
+      const dugTotal = world.initialSoilCells - world.countSoil();
       const grains = world.countGrains();
       hud.textContent =
         `formicarium · seed 0x${settings.seed.toString(16)}` +
         `  ·  ${world.width}×${world.height}` +
         `  ·  ants ${colony.count}` +
-        `  ·  dug ${dug}  grains ${grains}` +
+        `  ·  dug ${dugTotal}  grains ${grains}` +
         `  ·  speed ${stepsPerFrame}×${paused ? '  ·  PAUSED' : ''}` +
         `  ·  ${(1000 / Math.max(1, dt)).toFixed(0)} fps`;
     }
