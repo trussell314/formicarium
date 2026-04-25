@@ -13,7 +13,15 @@ import { CELL_AIR, CELL_SOIL, World } from '../sim/world';
 
 const SKY_TOP: [number, number, number] = [22, 30, 50];
 const SKY_BOTTOM: [number, number, number] = [70, 75, 96];
-const TUNNEL: [number, number, number] = [38, 27, 18];
+// Tunnel air. Real ant-farm tunnels are LIGHTER than the surrounding
+// substrate — light enters from the top, dust on the gel reflects, the
+// dug area reads as paler than the dirt. The previous TUNNEL value
+// (38,27,18) was darker than mid-soil (70,42,22) so excavations
+// looked like ink stains. TUNNEL_NEAR is what air close to the
+// surface looks like; TUNNEL_DEEP is the deep-tunnel color the depth
+// fog blends toward.
+const TUNNEL_NEAR: [number, number, number] = [148, 110, 78];
+const TUNNEL_DEEP: [number, number, number] = [42, 28, 20];
 const SOIL_TOP: [number, number, number] = [108, 70, 38];
 const SOIL_BOTTOM: [number, number, number] = [70, 42, 22];
 const GRASS: [number, number, number] = [50, 92, 36];
@@ -131,14 +139,22 @@ export class Renderer {
           if (y < surfRow[x]!) {
             [r, g, b] = sky;
           } else {
-            [r, g, b] = TUNNEL;
+            // Below-surface air = tunnel. Lerp between TUNNEL_NEAR
+            // (light, near surface) and TUNNEL_DEEP (dark, deep
+            // underground). Real ant-farm tunnels read as paler than
+            // the surrounding substrate near the top because light
+            // gets in; deep down they go to shadow.
+            const sy = surfRow[x]!;
+            const depth = (y - sy) / Math.max(1, h - sy);
+            const tunnel = lerp3(TUNNEL_NEAR, TUNNEL_DEEP, Math.min(1, depth * 1.4));
+            r = tunnel[0]; g = tunnel[1]; b = tunnel[2];
             // Fresh dig: cells excavated within the last ~120 ticks
             // glow slightly lighter so the user can see WHERE the
             // colony is currently working.
             const age = tick - digTick[idx]!;
             if (age >= 0 && age < 120) {
               const t = 1 - age / 120;
-              const tint = lerp3([r, g, b], FRESH_DIG, 0.6 * t);
+              const tint = lerp3([r, g, b], FRESH_DIG, 0.5 * t);
               r = tint[0]; g = tint[1]; b = tint[2];
             }
           }

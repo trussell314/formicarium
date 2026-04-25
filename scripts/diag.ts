@@ -3,17 +3,24 @@
 // seed, prints dig count per 5k-tick window and the colony state.
 //
 // Run with: npx vite-node scripts/diag.ts
+//
+// Structural metrics:
+//   perim:area  high values mean tunnel-like (lots of edges per dug
+//               cell), low values mean blob-like
+//   tips        soil cells with exactly 1 air neighbour — count of
+//               active tunnel fronts
+//   bbox        smallest rectangle containing all dug cells
 import { Colony } from '../src/sim/colony';
 import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { ParticleSystem } from '../src/sim/particles';
 import { RNG } from '../src/sim/rng';
-import { CELL_SOIL, World } from '../src/sim/world';
+import { CELL_AIR, CELL_SOIL, World } from '../src/sim/world';
 
 const SEED = 0xc0ffee;
 const TICKS = Number(process.env.TICKS ?? 60000) | 0;
-const WIDTH = 200;
-const HEIGHT = 120;
-const ANTS = 24;
+const WIDTH = Number(process.env.WIDTH ?? 200) | 0;
+const HEIGHT = Number(process.env.HEIGHT ?? 120) | 0;
+const ANTS = Number(process.env.ANTS ?? 24) | 0;
 
 const rng = new RNG(SEED);
 const world = new World(WIDTH, HEIGHT);
@@ -76,11 +83,44 @@ for (let t = 1; t <= TICKS; t++) {
       if (colony.posY[i]! < minY) minY = colony.posY[i]!;
       if (colony.posY[i]! > maxY) maxY = colony.posY[i]!;
     }
+
+    // Structural metrics over the dug region.
+    let dugArea = 0, perim = 0, tips = 0;
+    let bbMinX = Infinity, bbMaxX = -Infinity, bbMinY = Infinity, bbMaxY = -Infinity;
+    for (let y = 1; y < world.height - 1; y++) {
+      for (let x = 1; x < world.width - 1; x++) {
+        const k = world.cells[y * world.width + x];
+        if (k === CELL_AIR && y >= world.naturalSurface[x]!) {
+          // Below-surface air cell — count it as dug
+          dugArea++;
+          if (x < bbMinX) bbMinX = x;
+          if (x > bbMaxX) bbMaxX = x;
+          if (y < bbMinY) bbMinY = y;
+          if (y > bbMaxY) bbMaxY = y;
+        }
+        if (k === CELL_SOIL) {
+          // Count air neighbours
+          let nA = 0;
+          if (world.cells[y * world.width + x - 1] === CELL_AIR) nA++;
+          if (world.cells[y * world.width + x + 1] === CELL_AIR) nA++;
+          if (world.cells[(y - 1) * world.width + x] === CELL_AIR) nA++;
+          if (world.cells[(y + 1) * world.width + x] === CELL_AIR) nA++;
+          if (nA > 0) perim++;
+          // Count "tunnel tips": this soil cell has exactly ONE air
+          // neighbour, meaning it sits at the end of a corridor.
+          if (nA === 1) tips++;
+        }
+      }
+    }
+    const perimRatio = dugArea > 0 ? (perim / dugArea).toFixed(2) : 'n/a';
+    const bbW = bbMaxX > bbMinX ? bbMaxX - bbMinX + 1 : 0;
+    const bbH = bbMaxY > bbMinY ? bbMaxY - bbMinY + 1 : 0;
     console.log(
       `t=${String(t).padStart(6)}  dug/${WINDOW}=${String(windowDigs).padStart(4)}  total=${totalDug}  grains=${grains}  ` +
       `W${wander}/C${carry}  below=${belowSurface}  y=${minY.toFixed(1)}..${maxY.toFixed(1)}  ` +
       `maxMound=${maxMound}  surfaceSoil=${surfaceSoil}  stuck=${stuck}/${colony.count}  ` +
-      `avg=(${avgX.toFixed(1)},${avgY.toFixed(1)})`,
+      `avg=(${avgX.toFixed(1)},${avgY.toFixed(1)})  ` +
+      `area=${dugArea} perim:area=${perimRatio} tips=${tips} bbox=${bbW}x${bbH}`,
     );
     windowDigs = 0;
   }
