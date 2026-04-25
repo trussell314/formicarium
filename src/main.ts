@@ -8,6 +8,7 @@
 
 import { Colony } from './sim/colony';
 import { DEFAULT_PARAMS, step } from './sim/ant-rules';
+import { ParticleSystem } from './sim/particles';
 import { RNG } from './sim/rng';
 import { World } from './sim/world';
 import { Renderer } from './render/renderer';
@@ -68,6 +69,7 @@ function main(): void {
   const hud = document.getElementById('hud') as HTMLDivElement;
   const help = document.getElementById('help') as HTMLDivElement;
   const renderer = new Renderer(canvas, world);
+  const particles = new ParticleSystem(256);
 
   // Auto-hide the help panel after a few seconds so it doesn't clutter
   // the screensaver indefinitely. The `?` key brings it back.
@@ -94,6 +96,16 @@ function main(): void {
         helpHideTimer = undefined;
       }
     }
+    else if (e.key === 'f') {
+      // Browsers require fullscreen requests to be tied to a user
+      // gesture — a keydown qualifies. Errors are non-fatal: a
+      // browser without permission just stays windowed.
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
     else if (e.key === 'r') {
       const s2 = { ...settings, seed: (settings.seed * 16807 + 1) >>> 0 };
       const built = build(s2);
@@ -115,7 +127,7 @@ function main(): void {
 
     if (!paused) {
       for (let i = 0; i < stepsPerFrame; i++) {
-        step(world, colony, rng, DEFAULT_PARAMS);
+        step(world, colony, rng, DEFAULT_PARAMS, particles);
       }
       // No fixed-timestep accumulator yet — render alpha=1 (no
       // interpolation) is fine while sub-stepping multiple sim ticks
@@ -123,7 +135,7 @@ function main(): void {
       alpha = 1;
     }
 
-    renderer.render(colony, alpha);
+    renderer.render(colony, alpha, particles);
 
     if (now - lastHud > 250) {
       lastHud = now;

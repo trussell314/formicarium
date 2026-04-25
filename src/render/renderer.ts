@@ -8,6 +8,7 @@
 // Renderer reads sim state. Never writes. (CLAUDE.md invariant.)
 
 import { Colony, STATE_CARRY } from '../sim/colony';
+import type { ParticleSystem } from '../sim/particles';
 import { CELL_AIR, CELL_SOIL, World } from '../sim/world';
 
 const SKY_TOP: [number, number, number] = [22, 30, 50];
@@ -61,7 +62,7 @@ export class Renderer {
     this.ctx.imageSmoothingEnabled = false;
   }
 
-  render(colony: Colony, alpha: number): void {
+  render(colony: Colony, alpha: number, particles?: ParticleSystem): void {
     const w = this.world.width;
     const h = this.world.height;
     const cells = this.world.cells;
@@ -104,10 +105,21 @@ export class Renderer {
             r = soil[0] * (1 + n);
             g = soil[1] * (1 + n);
             b = soil[2] * (1 + n);
+            // Depth fog: darken substrate below ~80% of the world
+            // height. Sells the cross-section as bottomless rather
+            // than a hard floor. Only applied below a threshold so
+            // the visible chamber stays bright.
+            const depth = (y - sy) / Math.max(1, h - sy);
+            if (depth > 0.55) {
+              const f = (depth - 0.55) / 0.45;
+              r *= 1 - 0.55 * f;
+              g *= 1 - 0.55 * f;
+              b *= 1 - 0.55 * f;
+            }
           }
         } else {
           // GRAIN
-          const n = (noise[idx]! / 255 - 0.5) * 0.18;
+          const n = (noise[idx]! / 255 - 0.5) * 0.22;
           r = GRAIN_COLOR[0] * (1 + n);
           g = GRAIN_COLOR[1] * (1 + n);
           b = GRAIN_COLOR[2] * (1 + n);
@@ -158,6 +170,23 @@ export class Renderer {
         this.ctx.fillStyle = GRAIN_COLOR_CSS;
         this.ctx.beginPath();
         this.ctx.arc(px, py - radius * 0.6, radius * 0.55, 0, Math.PI * 2);
+        this.ctx.fill();
+      }
+    }
+
+    // Dust particles. Drawn after ants so they render in front, with
+    // alpha proportional to remaining life.
+    if (particles) {
+      const dustR = Math.max(1, scale * 0.18);
+      for (let i = 0; i < particles.capacity; i++) {
+        const life = particles.life[i]!;
+        if (life <= 0) continue;
+        const t = life / Math.max(1, particles.maxLife[i]!);
+        this.ctx.fillStyle = `rgba(150, 110, 70, ${(t * 0.85).toFixed(3)})`;
+        const dx = ox + particles.posX[i]! * scale;
+        const dy = oy + particles.posY[i]! * scale;
+        this.ctx.beginPath();
+        this.ctx.arc(dx, dy, dustR, 0, Math.PI * 2);
         this.ctx.fill();
       }
     }

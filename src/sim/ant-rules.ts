@@ -12,6 +12,7 @@
 // way for ants to get stuck not digging.
 
 import { Colony, STATE_CARRY, STATE_WANDER, type AntState } from './colony';
+import type { ParticleSystem } from './particles';
 import { isSupported, settle, tryStep } from './physics';
 import type { RNG } from './rng';
 import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from './world';
@@ -79,7 +80,9 @@ function pickDigTarget(world: World, ix: number, iy: number, h: number): { x: nu
  *     columns place grain above the chamber air, and that grain hovers
  *     unsupported with no path back down.
  */
-function depositGrain(world: World, ix: number, iy: number): { x: number; y: number } | null {
+function depositGrain(
+  world: World, ix: number, iy: number,
+): { x: number; y: number } | null {
   const SEARCH_RADIUS = 64;
   const tryColumn = (cx: number): { x: number; y: number } | null => {
     if (cx < 0 || cx >= world.width) return null;
@@ -114,9 +117,11 @@ export function step(
   colony: Colony,
   rng: RNG,
   params: SimParams = DEFAULT_PARAMS,
+  particles?: ParticleSystem,
 ): void {
   world.tick++;
   const { walkSpeed, turnNoise, digProb, downBias, upBias } = params;
+  if (particles) particles.step();
   const subSteps = Math.max(2, Math.ceil(walkSpeed));
   const stepLen = walkSpeed / subSteps;
 
@@ -137,8 +142,13 @@ export function step(
       // equivalent without modelling thermotaxis.
       h += wrapAngle(Math.PI / 2 - h) * downBias;
     } else {
-      // CARRY heads up to the surface to dump the grain.
-      h += wrapAngle(-Math.PI / 2 - h) * upBias;
+      // CARRY heads up to the surface to dump the grain. Lateral
+      // bias toward the ORIGINAL dig column biases the ant to come
+      // up over the work site, so spoil mounds form over the
+      // actual excavation rather than scattering across the surface.
+      const dx = colony.lastDigX[i]! - colony.posX[i]!;
+      const want = Math.atan2(-1, Math.max(-2, Math.min(2, dx * 0.05)));
+      h += wrapAngle(want - h) * upBias;
     }
     h += rng.gauss() * turnNoise;
     h = wrapAngle(h);
@@ -182,8 +192,24 @@ export function step(
           colony.posX[i] = target.x + 0.5;
           colony.posY[i] = target.y + 0.5;
           colony.setState(i, STATE_CARRY);
+          colony.lastDigX[i] = target.x;
           // Head straight up after digging.
           colony.heading[i] = -Math.PI / 2 + rng.range(-0.3, 0.3);
+          // Spawn a small puff of dust so the dig is visible to the
+          // user as a discrete event rather than just a tint change.
+          if (particles) {
+            for (let p = 0; p < 3; p++) {
+              const a = rng.range(-Math.PI, 0);
+              const sp = rng.range(0.05, 0.18);
+              particles.spawn(
+                target.x + 0.5,
+                target.y + 0.3,
+                Math.cos(a) * sp,
+                Math.sin(a) * sp - 0.05,
+                28 + (rng.next() * 16) | 0,
+              );
+            }
+          }
         }
       }
     }
