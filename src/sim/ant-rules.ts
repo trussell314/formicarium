@@ -32,7 +32,10 @@ export interface SimParams {
 
 export const DEFAULT_PARAMS: SimParams = {
   walkSpeed: 0.6,
-  turnNoise: 0.25,
+  // Turn noise bumped from 0.25 → 0.55: ants reorient more often,
+  // which spreads them across the chamber instead of converging on
+  // a single working face. Required for emergent branching.
+  turnNoise: 0.55,
   digProb: 0.6,
   downBias: 0.15,
   upBias: 0.5,
@@ -48,47 +51,47 @@ function wrapAngle(a: number): number {
 
 /** Pick a soil cell adjacent to (ix, iy) to excavate, preferring the
  *  heading direction. Returns null if no orthogonal neighbour is soil. */
-/** Threshold (sample-ticks) at which a wall is "old" enough to lob
- *  out laterally rather than dig past. With EXPOSURE_INTERVAL=8 and
- *  ~30 sim steps/frame, real-world seconds to threshold scale by the
- *  speed slider. Tuned for visible chamber-widening within the first
- *  thousand frames. */
-const EXPOSURE_THRESHOLD = 90;
-
-function pickDigTarget(world: World, ix: number, iy: number, h: number): { x: number; y: number } | null {
+/** Score-based dig target selection. Each soil neighbour gets a
+ *  score from three factors:
+ *    - alignment: dot product with the ant's heading (so the ant
+ *      tends to dig forward, but doesn't HAVE to)
+ *    - exposure: accumulated air-frontedness on the candidate (old
+ *      walls are softer, Tschinkel mechanic)
+ *    - random:   a small per-call jitter so two ants in the same
+ *      situation don't always pick the same cell — emergent
+ *      branching needs symmetry-breaking
+ *  Highest-scoring soil neighbour wins. Returns null if the ant
+ *  isn't touching any soil. */
+const NEIGHBOURS: ReadonlyArray<readonly [number, number]> = [
+  [1, 0], [-1, 0], [0, 1], [0, -1],
+];
+function pickDigTarget(world: World, ix: number, iy: number, h: number, rng: RNG): { x: number; y: number } | null {
   const hx = Math.cos(h);
   const hy = Math.sin(h);
-  const prefer: [number, number] = Math.abs(hx) > Math.abs(hy)
-    ? (hx > 0 ? [1, 0] : [-1, 0])
-    : (hy > 0 ? [0, 1] : [0, -1]);
-  // Two routes to lateral preference:
-  //   1. Shallow depth (≤6 cells below the original surface) — the
-  //      classic Tschinkel "fan wider near the top" mechanic.
-  //   2. High accumulated exposure on a candidate cell (SPEC §6.5 —
-  //      walls that have been air-fronted for a long time are softer
-  //      and more easily widened, modelling chamber lobbing.)
   const surf = world.naturalSurface[ix]!;
   const depthBelow = iy - surf;
-  let lateral = depthBelow >= 0 && depthBelow < 6;
-  if (!lateral) {
-    // Check left/right exposure — if any lateral candidate is "old",
-    // prefer it over straight ahead.
-    const lIdx = world.index(Math.max(0, ix - 1), iy);
-    const rIdx = world.index(Math.min(world.width - 1, ix + 1), iy);
-    const exL = world.cells[lIdx] === CELL_SOIL ? world.exposure[lIdx]! : 0;
-    const exR = world.cells[rIdx] === CELL_SOIL ? world.exposure[rIdx]! : 0;
-    if (exL > EXPOSURE_THRESHOLD || exR > EXPOSURE_THRESHOLD) lateral = true;
-  }
-  const order: ReadonlyArray<readonly [number, number]> = lateral
-    ? [prefer, [-1, 0], [1, 0], [0, 1], [0, -1]]
-    : [prefer, [0, 1], [1, 0], [-1, 0], [0, -1]];
-  for (const [dx, dy] of order) {
+  // Shallow (within 6 cells of original surface): bias HARD against
+  // digging straight down — Tschinkel chambers fan wide near the top.
+  const shallow = depthBelow >= 0 && depthBelow < 6;
+  let bestX = -1, bestY = -1, bestScore = -Infinity;
+  for (const [dx, dy] of NEIGHBOURS) {
     const x = ix + dx;
     const y = iy + dy;
     if (!world.inBounds(x, y)) continue;
-    if (world.cells[world.index(x, y)] === CELL_SOIL) return { x, y };
+    const idx = world.index(x, y);
+    if (world.cells[idx] !== CELL_SOIL) continue;
+    const align = hx * dx + hy * dy;       // [-1, 1]
+    const expo = world.exposure[idx]! / 200; // 0..3+
+    const downward = dy > 0;
+    let score = align * 0.6 + Math.min(expo, 2) * 0.5 + rng.next() * 0.4;
+    if (shallow && downward) score -= 0.8;
+    if (score > bestScore) {
+      bestScore = score;
+      bestX = x;
+      bestY = y;
+    }
   }
-  return null;
+  return bestX < 0 ? null : { x: bestX, y: bestY };
 }
 
 /**
@@ -205,16 +208,17 @@ export function step(
 
     // Heading update: state-specific bias + Gaussian noise.
     if (stateIn === STATE_WANDER) {
-      // Downward bias keeps wanderers in the chamber, lightly. Real
-      // ants are attracted to the substrate; this is the moral
-      // equivalent without modelling thermotaxis. We taper the bias
-      // off once the ant is ~15 cells below the original surface so
-      // deep chambers tend to widen laterally rather than turn into
-      // monolithic vertical shafts (Tschinkel cross-section: shafts
-      // narrow with depth, not the other way around).
-      const depth = Math.max(0, iy - surfY);
-      const dwBias = depth > 15 ? downBias * 0.25 : downBias;
-      h += wrapAngle(Math.PI / 2 - h) * dwBias;
+      // Downward bias is applied ONLY when the ant is above the
+      // original surface — to gently send freshly-spawned ants down
+      // into the nest. Once below the surface, gravity already keeps
+      // them on the floor and an explicit downBias just keeps them
+      // staring at the floor forever, so they re-dig the same
+      // straight-down shaft on every contact. Removing the
+      // below-surface down bias breaks the vertical-tunnel attractor
+      // and lets ants drift laterally toward side walls.
+      if (!belowSurface) {
+        h += wrapAngle(Math.PI / 2 - h) * downBias;
+      }
     } else {
       // CARRY heads up to the surface to dump the grain. Lateral
       // bias toward the ORIGINAL dig column biases the ant to come
@@ -267,7 +271,7 @@ export function step(
 
     // WANDER → DIG → CARRY transition.
     if (stateIn === STATE_WANDER && hitSoil && belowSurface) {
-      const target = pickDigTarget(world, ax, ay, h);
+      const target = pickDigTarget(world, ax, ay, h, rng);
       // Refuse to undermine grain: if the cell directly above the
       // dig target is a grain pile, this excavation would leave it
       // floating, which violates the "grain only sits on solid"
@@ -339,18 +343,6 @@ export function step(
       }
     }
 
-    // End-of-tick settle: extricate + 1-cell gravity. Pass whether
-    // the ant moved UP this tick — that suppresses gravity for the
-    // tick so climbers can actually reach the surface (without this,
-    // CARRY ants get pulled down faster than they can ascend and
-    // freeze in a permanent in-flight state).
-    const sx = colony.posX[i]! | 0;
-    const sy = colony.posY[i]! | 0;
-    const climbedUp = colony.posY[i]! < colony.prevY[i]! - 0.05;
-    const settled = settle(world, sx, sy, climbedUp);
-    if (settled !== sy) {
-      colony.posY[i] = settled + 0.5;
-    }
   }
 
   // Pairwise repulsion. Ants in a real farm have body width — they
@@ -385,6 +377,22 @@ export function step(
       };
       tryMove(i, -ux * push, -uy * push);
       tryMove(j,  ux * push,  uy * push);
+    }
+  }
+
+  // End-of-tick settle for all ants — runs LAST, after every dig,
+  // deposit, and repulsion-push that might have embedded an ant in
+  // newly-placed grain or shifted them off support. Doing this in
+  // the per-ant loop wasn't enough: a deposit by a later-iterated
+  // ant could re-embed an earlier ant whose settle had already
+  // finished, breaking the "no embedded ants" invariant.
+  for (let i = 0; i < colony.count; i++) {
+    const sx = colony.posX[i]! | 0;
+    const sy = colony.posY[i]! | 0;
+    const climbedUp = colony.posY[i]! < colony.prevY[i]! - 0.05;
+    const settled = settle(world, sx, sy, climbedUp);
+    if (settled !== sy) {
+      colony.posY[i] = settled + 0.5;
     }
   }
 
