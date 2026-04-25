@@ -22,6 +22,10 @@ export class ParticleSystem {
   /** Lifetime at spawn — used by the renderer to compute fade. */
   readonly maxLife: Int16Array;
   private cursor = 0;
+  /** One past the highest occupied slot. step() and the renderer
+   *  iterate only [0, highWater) instead of the full capacity, so an
+   *  idle world (no recent digs) doesn't pay 256 iterations/tick. */
+  highWater = 0;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -50,10 +54,12 @@ export class ParticleSystem {
     this.velY[slot] = vy;
     this.life[slot] = life;
     this.maxLife[slot] = life;
+    if (slot + 1 > this.highWater) this.highWater = slot + 1;
   }
 
   step(): void {
-    for (let i = 0; i < this.capacity; i++) {
+    let newHigh = 0;
+    for (let i = 0; i < this.highWater; i++) {
       if (this.life[i]! <= 0) continue;
       this.posX[i]! += this.velX[i]!;
       this.posY[i]! += this.velY[i]!;
@@ -63,6 +69,8 @@ export class ParticleSystem {
       this.velX[i]! *= 0.96;
       this.velY[i]! *= 0.98;
       this.life[i]!--;
+      if (this.life[i]! > 0) newHigh = i + 1;
     }
+    this.highWater = newHigh;
   }
 }

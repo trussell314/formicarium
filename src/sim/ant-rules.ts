@@ -40,7 +40,7 @@
 import { Colony, STATE_CARRY, STATE_REST, STATE_WANDER, type AntState } from './colony';
 import type { ParticleSystem } from './particles';
 import { Pheromone } from './pheromone';
-import { digCell, isSupported, pickGrain, placeGrain, settle, tryStep } from './physics';
+import { digCell, pickGrain, placeGrain, settle, tryStep } from './physics';
 import type { RNG } from './rng';
 import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from './world';
 
@@ -92,6 +92,27 @@ const COLLISION_RADIUS = 1.0;
 /** Multiplicative decay applied to collisionCount each tick. ~50-tick
  *  half-life — collisions are recent indicators, not lifetime tally. */
 const COLLISION_DECAY = 0.985;
+
+// Spatial-bin scratch buffers for the collision pass. Hoisted to
+// module scope so we don't allocate w·h bytes every tick — that
+// allocation cost would dominate the actual collision work. Lazily
+// resized when the world or colony grows. fill(-1) at the start of
+// each tick is a single memset.
+let _binHead: Int16Array | null = null;
+let _binLink: Int16Array | null = null;
+let _binCells = 0;
+let _binAnts = 0;
+function getCollisionBins(cells: number, ants: number): { head: Int16Array; link: Int16Array } {
+  if (!_binHead || _binCells < cells) {
+    _binHead = new Int16Array(cells);
+    _binCells = cells;
+  }
+  if (!_binLink || _binAnts < ants) {
+    _binLink = new Int16Array(ants);
+    _binAnts = ants;
+  }
+  return { head: _binHead, link: _binLink };
+}
 
 const TWO_PI = Math.PI * 2;
 
@@ -176,23 +197,56 @@ export function step(
   const subSteps = Math.max(2, Math.ceil(walkSpeed));
   const stepLen = walkSpeed / subSteps;
 
-  // Pairwise collision pass — Aguilar et al. 2018 / Aina et al. 2023
-  // "agitation" model. Each ant's collisionCount decays each tick
-  // and is bumped by overlap with any other ant within
-  // COLLISION_RADIUS. WANDER ants whose count crosses their
-  // restThreshold withdraw into REST. O(n²); fine for n ≤ 200.
+  // Collision pass — Aguilar et al. 2018 / Aina et al. 2023 "agitation"
+  // model. Each ant's collisionCount decays each tick and is bumped
+  // by overlap with any other ant within COLLISION_RADIUS. WANDER
+  // ants whose count crosses their restThreshold withdraw into REST.
+  //
+  // Spatial-binned at COLLISION_RADIUS: each ant goes into its cell
+  // bucket, and we scan only the 3×3 cell neighbourhood for overlap
+  // candidates. O(n) average instead of O(n²); the chamber-floor
+  // pile-ups (where most ants cluster) get most of the speedup.
   for (let i = 0; i < colony.count; i++) {
     colony.collisionCount[i]! *= COLLISION_DECAY;
   }
   const cr2 = COLLISION_RADIUS * COLLISION_RADIUS;
+  // Same pattern as classical particle-grid neighbour search:
+  // a head-of-bucket array indexed by world cell, plus a per-ant
+  // next-pointer chain. Reset by filling head with -1 (single
+  // memset). Buffers are reused across ticks (module scope above).
+  const bw = world.width;
+  const bh = world.height;
+  const { head, link } = getCollisionBins(bw * bh, colony.count);
+  head.fill(-1, 0, bw * bh);
   for (let i = 0; i < colony.count; i++) {
-    for (let j = i + 1; j < colony.count; j++) {
-      const dx = colony.posX[j]! - colony.posX[i]!;
-      const dy = colony.posY[j]! - colony.posY[i]!;
-      const d2 = dx * dx + dy * dy;
-      if (d2 < cr2 && d2 > 1e-6) {
-        colony.collisionCount[i]! += 1;
-        colony.collisionCount[j]! += 1;
+    const bx = colony.posX[i]! | 0;
+    const by = colony.posY[i]! | 0;
+    if (bx < 0 || by < 0 || bx >= bw || by >= bh) { link[i] = -1; continue; }
+    const b = by * bw + bx;
+    link[i] = head[b]!;
+    head[b] = i;
+  }
+  for (let i = 0; i < colony.count; i++) {
+    const bx = colony.posX[i]! | 0;
+    const by = colony.posY[i]! | 0;
+    if (bx < 0 || by < 0 || bx >= bw || by >= bh) continue;
+    // Scan 3×3 buckets. Each pair counted once via j > i guard.
+    for (let oy = -1; oy <= 1; oy++) {
+      const ny = by + oy;
+      if (ny < 0 || ny >= bh) continue;
+      for (let ox = -1; ox <= 1; ox++) {
+        const nx = bx + ox;
+        if (nx < 0 || nx >= bw) continue;
+        for (let j = head[ny * bw + nx]!; j !== -1; j = link[j]!) {
+          if (j <= i) continue;
+          const dx = colony.posX[j]! - colony.posX[i]!;
+          const dy = colony.posY[j]! - colony.posY[i]!;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < cr2 && d2 > 1e-6) {
+            colony.collisionCount[i]! += 1;
+            colony.collisionCount[j]! += 1;
+          }
+        }
       }
     }
   }
@@ -248,7 +302,6 @@ export function step(
 
     // (1) Correlated random walk — Gaussian heading perturbation.
     h += rng.gauss() * colony.turnNoise[i]!;
-    void stateIn; // re-read below as state may have changed
 
     // (2) Stigmergy — bias toward the gradient of the field for our
     // current state. WANDER follows dig pheromone (recruit to active
@@ -423,7 +476,4 @@ export function step(
     const settled = settle(world, sx, sy);
     if (settled !== sy) colony.posY[i] = settled + 0.5;
   }
-
-  // Silence unused-import warnings.
-  void isSupported;
 }

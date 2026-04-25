@@ -20,24 +20,32 @@ npm run build    # Production build → dist/
 
 | Parameter | Values | Effect |
 |---|---|---|
-| `?quality=` | `low` \| `medium` \| `high` | Grid resolution and ant count |
 | `?seed=` | integer | Reproducible run (any integer; default time-seeded) |
-| `?overlay=1` | flag | Show FPS + ant-state stats overlay |
-| `?pheromones=1` | flag | Visualize the dig and construction pheromone fields |
-| `?speed=` | float | Simulation speed multiplier (default 1) |
+| `?width=` | integer | World width in cells (default 200) |
+| `?height=` | integer | World height in cells (default 100) |
+| `?ants=` | integer | Initial ant count (default 100) |
+| `?speed=` | integer | Sim sub-steps per render frame (default 8) |
 
 ## Keyboard
 
 - **space** — pause / resume
-- **h** — toggle overlay
-- **p** — toggle pheromone visualization
+- **+** / **-** — faster / slower (sub-steps per frame, doubles/halves)
 - **r** — reseed and rebuild the world
-- **c** — clear the world (regenerate soil, keep RNG state)
-- **n** — spawn a small burst of ants
+- **f** — toggle fullscreen
+- **0** — reset zoom + pan
+- **p** — toggle pheromone overlay (cyan = dig, magenta = build)
+- **?** — show / hide help panel
 
-## Mouse
+## Mouse / touch
 
-- **Click** — disturbance (boosts dig pheromone and agitates nearby ants).
+- **Wheel / pinch** — zoom (1× to 6×) anchored at the cursor / midpoint
+- **Drag** — pan (only when zoomed in)
+
+## On-screen controls
+
+A button cluster at the bottom of the viewport mirrors every keyboard
+binding, so the simulation is fully usable on devices without a
+keyboard (iOS in particular).
 
 ## How it works
 
@@ -50,38 +58,39 @@ phased implementation plan. The short version:
 - **Contact-based agitation** — collisions push ants into a brief REST state.
   This self-throttles crowded sites and reproduces the multi-stage
   excavation dynamics. (Aguilar et al. 2018; Aina et al. 2023)
-- **Chamber widening** — once a soil cell has been adjacent to active
-  pheromone for long enough, lateral digging is favoured over advancing.
-  This is what bends pencil shafts into lobed chambers. (Tschinkel cast
-  observations.)
-- **Grain disposal** — excavated grains are dropped at the surface,
-  building an entrance mound, biased by a longer-lived construction
-  pheromone.
+- **Per-ant heterogeneity** — each ant samples its dig probability,
+  pickup probability, stigmergy strength, turn noise, and rest
+  threshold from a Gaussian around the colony mean. (Beshers & Fewell
+  2001)
+- **Topochemistry** — local construction pheromone boosts the dig
+  probability when an ant is next to existing spoil. Each mound
+  becomes a hub for radiating tunnels. (Khuong et al. 2016)
+- **Granular dynamics** — excavated grains follow a Bak/Tang/Wiesenfeld
+  sandpile cascade (fall straight down through air, slump diagonally
+  on slopes). Angle-of-repose is emergent, not a hardcoded check.
+  Ants both deposit AND pick up grain, per the Theraulaz construction
+  model (1998).
 
 The simulation is deterministic for any given `?seed=` — handy for tests
 and reproducible bugs.
 
 ## Performance notes
 
-- Default (medium) tier: 480×270 grid, 500 ants, 20 Hz logical sim.
-- The pheromone field uses a separable diffusion stencil with explicit
+- Default: 200×100 grid, 100 ants, 30 Hz logical sim with 8 sim
+  sub-steps per render frame.
+- Pheromone field uses a 5-point diffusion stencil with explicit
   micro-zero clamping; sparse neighbourhoods stay sparse.
 - Renderer uses a single `putImageData` per frame at sim resolution,
-  scaled to viewport with nearest-neighbour. Ants are drawn in vector pass
-  on top so they stay crisp at any window size.
+  scaled to viewport with nearest-neighbour. Ants are drawn in vector
+  pass on top so they stay crisp at any window size.
 
-## Status / roadmap
+## Status
 
-The MVP covers SPEC §6 phases 0–3, 5–7. Notable deferrals:
-
-- Phase 4 (GPU pheromone via WebGL2 ping-pong FBOs) is **not yet ported** —
-  the CPU implementation is fast enough at default quality. Migrate when
-  HIGH quality (720×405) starts dropping frames.
-- Phase 8 packaging recipes (Lively / Plash / WebViewScreenSaver / xwinwrap)
-  live in `packaging/` as documentation; the actual `.zip` for Lively can
-  be produced with `scripts/package-lively.sh` after a build.
-- Phase 9 stretch features (age stratification, foraging, day/night) are
-  not implemented.
+Currently shipped: per-ant Beshers-Fewell heterogeneity, Sudd
+contact-triggered dig, Theraulaz pickup, Khuong topochemistry, Aguilar/
+Aina collision-driven REST, sandpile granular settling, in-app zoom +
+pan, on-screen controls. Foraging, day/night, multiple queens, and
+caste are out of scope.
 
 ## License
 

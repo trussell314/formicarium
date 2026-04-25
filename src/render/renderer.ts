@@ -43,7 +43,11 @@ export class Renderer {
   private readonly offCtx: CanvasRenderingContext2D;
   private readonly imageData: ImageData;
   private readonly buf: Uint8ClampedArray;
-  private readonly world: World;
+  /** Bound world. Mutable via setWorld() — the reseed action in
+   *  main.ts swaps in a freshly-generated world without rebuilding
+   *  the whole renderer. Width/height are assumed unchanged across
+   *  the swap (the offscreen canvas is sized at construction). */
+  private world: World;
 
   constructor(canvas: HTMLCanvasElement, world: World) {
     this.canvas = canvas;
@@ -73,6 +77,12 @@ export class Renderer {
   /** User pan in viewport pixels. Reset to (0,0) when zoom returns to 1. */
   panX = 0;
   panY = 0;
+
+  /** Swap in a freshly-generated World. Width and height must match
+   *  the existing offscreen canvas; the renderer assumes that. */
+  setWorld(world: World): void {
+    this.world = world;
+  }
 
   resize(w: number, h: number): void {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -288,8 +298,6 @@ export class Renderer {
         const heading = colony.heading[i]!;
         const cosH = Math.cos(heading);
         const sinH = Math.sin(heading);
-        // Body-local coordinates: x along heading, y perpendicular.
-        const legLen = radius * 1.4;
         this.ctx.strokeStyle = '#0f0805';
         this.ctx.lineWidth = Math.max(0.8, scale * 0.12);
         this.ctx.lineCap = 'round';
@@ -310,7 +318,6 @@ export class Renderer {
             this.ctx.stroke();
           }
         }
-        void legLen;
       }
       this.ctx.fillStyle = '#1a0f08';
       this.ctx.beginPath();
@@ -328,7 +335,10 @@ export class Renderer {
     // alpha proportional to remaining life.
     if (particles) {
       const dustR = Math.max(1, scale * 0.18);
-      for (let i = 0; i < particles.capacity; i++) {
+      // highWater is one past the last live slot; iterating to it
+      // skips the bulk of the ring buffer when there's no recent
+      // dig activity (no allocation, no draws).
+      for (let i = 0; i < particles.highWater; i++) {
         const life = particles.life[i]!;
         if (life <= 0) continue;
         const t = life / Math.max(1, particles.maxLife[i]!);

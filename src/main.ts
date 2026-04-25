@@ -229,8 +229,7 @@ function main(): void {
       colony = built.colony;
       digField = built.digField;
       buildField = built.buildField;
-      // Hot-swap: rebuild renderer view of the new world.
-      (renderer as unknown as { world: World }).world = world;
+      renderer.setWorld(world);
     },
   };
 
