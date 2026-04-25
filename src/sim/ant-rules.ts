@@ -48,21 +48,38 @@ function wrapAngle(a: number): number {
 
 /** Pick a soil cell adjacent to (ix, iy) to excavate, preferring the
  *  heading direction. Returns null if no orthogonal neighbour is soil. */
+/** Threshold (sample-ticks) at which a wall is "old" enough to lob
+ *  out laterally rather than dig past. With EXPOSURE_INTERVAL=8 and
+ *  ~30 sim steps/frame, real-world seconds to threshold scale by the
+ *  speed slider. Tuned for visible chamber-widening within the first
+ *  thousand frames. */
+const EXPOSURE_THRESHOLD = 90;
+
 function pickDigTarget(world: World, ix: number, iy: number, h: number): { x: number; y: number } | null {
   const hx = Math.cos(h);
   const hy = Math.sin(h);
   const prefer: [number, number] = Math.abs(hx) > Math.abs(hy)
     ? (hx > 0 ? [1, 0] : [-1, 0])
     : (hy > 0 ? [0, 1] : [0, -1]);
-  // Shallow-dig bias: ants near the original surface prefer LATERAL
-  // expansion (digging sideways) over digging deeper. This reproduces
-  // the Tschinkel cross-section where chambers fan wide near the top
-  // and pencil into shafts further down. Without it the colony just
-  // mines straight down.
+  // Two routes to lateral preference:
+  //   1. Shallow depth (≤6 cells below the original surface) — the
+  //      classic Tschinkel "fan wider near the top" mechanic.
+  //   2. High accumulated exposure on a candidate cell (SPEC §6.5 —
+  //      walls that have been air-fronted for a long time are softer
+  //      and more easily widened, modelling chamber lobbing.)
   const surf = world.naturalSurface[ix]!;
   const depthBelow = iy - surf;
-  const shallow = depthBelow >= 0 && depthBelow < 6;
-  const order: ReadonlyArray<readonly [number, number]> = shallow
+  let lateral = depthBelow >= 0 && depthBelow < 6;
+  if (!lateral) {
+    // Check left/right exposure — if any lateral candidate is "old",
+    // prefer it over straight ahead.
+    const lIdx = world.index(Math.max(0, ix - 1), iy);
+    const rIdx = world.index(Math.min(world.width - 1, ix + 1), iy);
+    const exL = world.cells[lIdx] === CELL_SOIL ? world.exposure[lIdx]! : 0;
+    const exR = world.cells[rIdx] === CELL_SOIL ? world.exposure[rIdx]! : 0;
+    if (exL > EXPOSURE_THRESHOLD || exR > EXPOSURE_THRESHOLD) lateral = true;
+  }
+  const order: ReadonlyArray<readonly [number, number]> = lateral
     ? [prefer, [-1, 0], [1, 0], [0, 1], [0, -1]]
     : [prefer, [0, 1], [1, 0], [-1, 0], [0, -1]];
   for (const [dx, dy] of order) {
@@ -101,17 +118,19 @@ function depositGrain(
     if (below !== CELL_SOIL && below !== CELL_GRAIN) return null;
     // Ant must be near (vertically) — within 3 cells.
     if (iy < cy - 3 || iy > cy + 3) return null;
-    // Distance-weighted acceptance: closer to the dig column is more
-    // likely to take this column as a deposit site, even if it's the
-    // first valid candidate. Concentrates spoil mounds over the work
-    // zone without losing the lateral spread when a tall pile blocks
-    // the immediate column.
-    //   p = 1 / (1 + 0.06 * |cx - originX|)
-    // Always accept once the search has had to walk >24 cells (the
-    // graceful fallback that prevents pathological no-deposit loops).
+    // Distance-weighted acceptance with mound-height falloff:
+    //   - Distance term: 1 / (1 + 0.06 * |cx - originX|) concentrates
+    //     spoil over the work zone without losing the lateral spread
+    //     when an immediate column is blocked.
+    //   - Mound term: 1 / (1 + 0.04 * mound[cx]) discourages an ant
+    //     from stacking on an already-tall pile; in real ant farms
+    //     spoil disperses sideways rather than spiring straight up.
+    //   - Beyond 24 cells the gates lift entirely (graceful fallback
+    //     so we never pathologically refuse to deposit).
     const dist = Math.abs(cx - originX);
+    const moundH = world.mound[cx]!;
     if (dist <= 24) {
-      const p = 1 / (1 + 0.06 * dist);
+      const p = (1 / (1 + 0.06 * dist)) * (1 / (1 + 0.04 * moundH));
       if (rng.next() > p) return null;
     }
     world.cells[world.index(cx, cy)] = CELL_GRAIN;
@@ -132,6 +151,34 @@ function depositGrain(
   return null;
 }
 
+/**
+ * Sweep the soil cells whose exposure counter we want to advance: any
+ * SOIL cell with at least one orthogonal AIR neighbour gains 1.
+ * Sampled every EXPOSURE_INTERVAL ticks (not every tick) since the
+ * field changes slowly and full-grid scans are cheap but not free.
+ */
+const EXPOSURE_INTERVAL = 8;
+function tickExposure(world: World): void {
+  if (world.tick % EXPOSURE_INTERVAL !== 0) return;
+  const w = world.width;
+  const h = world.height;
+  const cells = world.cells;
+  const expo = world.exposure;
+  for (let y = 1; y < h - 1; y++) {
+    const row = y * w;
+    for (let x = 1; x < w - 1; x++) {
+      const i = row + x;
+      if (cells[i] !== CELL_SOIL) continue;
+      const exposed =
+        cells[i - 1] === CELL_AIR ||
+        cells[i + 1] === CELL_AIR ||
+        cells[i - w] === CELL_AIR ||
+        cells[i + w] === CELL_AIR;
+      if (exposed && expo[i]! < 0xffff) expo[i]!++;
+    }
+  }
+}
+
 export function step(
   world: World,
   colony: Colony,
@@ -140,6 +187,7 @@ export function step(
   particles?: ParticleSystem,
 ): void {
   world.tick++;
+  tickExposure(world);
   const { walkSpeed, turnNoise, digProb, downBias, upBias } = params;
   if (particles) particles.step();
   const subSteps = Math.max(2, Math.ceil(walkSpeed));

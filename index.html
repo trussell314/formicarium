@@ -2,12 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <title>Formicarium</title>
     <style>
       html, body { margin: 0; padding: 0; height: 100%; background: #0a0606; overflow: hidden; }
       body { font-family: ui-sans-serif, system-ui, sans-serif; color: #d8c8a8; }
-      canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; image-rendering: crisp-edges; }
+      canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; image-rendering: crisp-edges; touch-action: none; }
+      html, body { touch-action: none; overscroll-behavior: none; }
       #hud {
         position: fixed; top: 8px; left: 8px;
         font-size: 12px; line-height: 1.4; opacity: 0.7;

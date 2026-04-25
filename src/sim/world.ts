@@ -22,6 +22,14 @@ export class World {
   readonly soilNoise: Uint8Array;
   /** Tick at which each cell was last carved (for "fresh dig" highlight). */
   readonly digTick: Int32Array;
+  /**
+   * Cumulative exposure: how many sample-ticks each soil cell has had
+   * with at least one air neighbour. Drives chamber-widening: walls
+   * exposed for a long time are more likely to be lobbed sideways
+   * (Tschinkel) than freshly-fronted soil. Saturates at 0xffff so we
+   * don't have to worry about Int32 wraparound on long runs.
+   */
+  readonly exposure: Uint16Array;
   initialSoilCells = 0;
   tick = 0;
 
@@ -34,6 +42,7 @@ export class World {
     this.soilNoise = new Uint8Array(width * height);
     this.digTick = new Int32Array(width * height);
     this.digTick.fill(-1_000_000);
+    this.exposure = new Uint16Array(width * height);
   }
 
   index(x: number, y: number): number {
