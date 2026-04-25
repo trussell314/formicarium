@@ -91,6 +91,94 @@ function main(): void {
   window.addEventListener('resize', onResize);
   onResize();
 
+  // Camera (zoom + pan) handling. Pinch on mobile, wheel on desktop,
+  // single-pointer drag to pan when zoomed in. We can't rely on
+  // browser-native pinch-zoom — it scales the page chrome (HUD,
+  // sparkline) and reflows the canvas to a smaller pixel size; the
+  // simulation has to own its own camera.
+  const ZOOM_MIN = 1;
+  const ZOOM_MAX = 6;
+  const activePointers = new Map<number, { x: number; y: number }>();
+  let pinchStartDist = 0;
+  let pinchStartZoom = 1;
+  let pinchAnchor = { x: 0, y: 0 };
+  let panLastX = 0;
+  let panLastY = 0;
+  const clampZoom = (z: number) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+  const zoomAtPoint = (newZoom: number, sx: number, sy: number) => {
+    const zClamped = clampZoom(newZoom);
+    const old = renderer.zoom;
+    if (zClamped === old) return;
+    // Anchor: keep the world point under (sx, sy) fixed across the
+    // zoom change. Adjust pan so that screenToWorld at (sx, sy) maps
+    // to the same world coordinate before and after.
+    const before = renderer.screenToWorld(sx, sy);
+    renderer.zoom = zClamped;
+    const after = renderer.screenToWorld(sx, sy);
+    // shift in WORLD cells; convert back to viewport CSS pixels.
+    const cw = canvas.width;
+    const w = world.width;
+    const h = world.height;
+    const ch = canvas.height;
+    const dpr = cw / parseFloat(canvas.style.width || `${cw}`);
+    const baseScale = Math.min(cw / w, ch / h);
+    const scale = baseScale * renderer.zoom;
+    renderer.panX += (after.x - before.x) * scale / dpr;
+    renderer.panY += (after.y - before.y) * scale / dpr;
+    if (renderer.zoom === 1) { renderer.panX = 0; renderer.panY = 0; }
+    renderer.clampPan();
+  };
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    // 1-step click of a typical mouse wheel ≈ 100 px; pinch trackpads
+    // emit much smaller deltas. Multiply by a gentle factor.
+    const factor = Math.exp(-e.deltaY * 0.0015);
+    zoomAtPoint(renderer.zoom * factor, e.clientX, e.clientY);
+  }, { passive: false });
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (activePointers.size === 1) {
+      panLastX = e.clientX;
+      panLastY = e.clientY;
+    } else if (activePointers.size === 2) {
+      const [a, b] = Array.from(activePointers.values());
+      pinchStartDist = Math.hypot(a!.x - b!.x, a!.y - b!.y);
+      pinchStartZoom = renderer.zoom;
+      pinchAnchor = { x: (a!.x + b!.x) * 0.5, y: (a!.y + b!.y) * 0.5 };
+    }
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!activePointers.has(e.pointerId)) return;
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (activePointers.size === 1 && renderer.zoom > 1.001) {
+      // Drag to pan only when zoomed in. At zoom=1 the world fills
+      // the screen and panning would just push it off-edge.
+      renderer.panX += e.clientX - panLastX;
+      renderer.panY += e.clientY - panLastY;
+      panLastX = e.clientX;
+      panLastY = e.clientY;
+      renderer.clampPan();
+    } else if (activePointers.size === 2) {
+      const [a, b] = Array.from(activePointers.values());
+      const dist = Math.hypot(a!.x - b!.x, a!.y - b!.y);
+      if (pinchStartDist > 0) {
+        const ratio = dist / pinchStartDist;
+        zoomAtPoint(pinchStartZoom * ratio, pinchAnchor.x, pinchAnchor.y);
+      }
+    }
+  });
+  const onPointerEnd = (e: PointerEvent) => {
+    activePointers.delete(e.pointerId);
+    if (activePointers.size < 2) pinchStartDist = 0;
+    if (activePointers.size === 1) {
+      const [p] = Array.from(activePointers.values());
+      panLastX = p!.x; panLastY = p!.y;
+    }
+  };
+  canvas.addEventListener('pointerup', onPointerEnd);
+  canvas.addEventListener('pointercancel', onPointerEnd);
+
   let paused = false;
   let stepsPerFrame = settings.simStepsPerFrame;
   let lastHud = 0;
@@ -105,6 +193,11 @@ function main(): void {
         window.clearTimeout(helpHideTimer);
         helpHideTimer = undefined;
       }
+    }
+    else if (e.key === '0') {
+      renderer.zoom = 1;
+      renderer.panX = 0;
+      renderer.panY = 0;
     }
     else if (e.key === 'f') {
       // Browsers require fullscreen requests to be tied to a user

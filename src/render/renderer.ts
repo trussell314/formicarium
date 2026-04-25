@@ -53,6 +53,13 @@ export class Renderer {
     this.buf = this.imageData.data;
   }
 
+  /** User zoom factor (1.0 = fit-to-screen). Mutated by main's pinch /
+   *  wheel handlers. */
+  zoom = 1;
+  /** User pan in viewport pixels. Reset to (0,0) when zoom returns to 1. */
+  panX = 0;
+  panY = 0;
+
   resize(w: number, h: number): void {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.canvas.width = Math.round(w * dpr);
@@ -60,6 +67,47 @@ export class Renderer {
     this.canvas.style.width = `${w}px`;
     this.canvas.style.height = `${h}px`;
     this.ctx.imageSmoothingEnabled = false;
+  }
+
+  /** Convert a viewport-pixel coordinate to a world-cell coordinate
+   *  given the current zoom + pan. Used by input handlers (e.g. to
+   *  anchor a pinch zoom around the focal point). */
+  screenToWorld(px: number, py: number): { x: number; y: number } {
+    const cw = this.canvas.width;
+    const ch = this.canvas.height;
+    const w = this.world.width;
+    const h = this.world.height;
+    const dpr = cw / parseFloat(this.canvas.style.width || `${cw}`);
+    const baseScale = Math.min(cw / w, ch / h);
+    const scale = baseScale * this.zoom;
+    const ow = w * scale;
+    const oh = h * scale;
+    const ox = (cw - ow) * 0.5 + this.panX * dpr;
+    const oy = (ch - oh) * 0.5 + this.panY * dpr;
+    return { x: (px * dpr - ox) / scale, y: (py * dpr - oy) / scale };
+  }
+
+  /** Clamp pan so the world stays at least partially on-screen. */
+  clampPan(): void {
+    const cw = this.canvas.width;
+    const ch = this.canvas.height;
+    const w = this.world.width;
+    const h = this.world.height;
+    const dpr = cw / parseFloat(this.canvas.style.width || `${cw}`);
+    const baseScale = Math.min(cw / w, ch / h);
+    const scale = baseScale * this.zoom;
+    const ow = w * scale;
+    const oh = h * scale;
+    // Allow the world's edge to scroll up to half-screen off; any
+    // further loses too much context.
+    const slackX = Math.max(0, (ow - cw) * 0.5 + cw * 0.25);
+    const slackY = Math.max(0, (oh - ch) * 0.5 + ch * 0.25);
+    const maxPanX = slackX / dpr;
+    const maxPanY = slackY / dpr;
+    if (this.panX < -maxPanX) this.panX = -maxPanX;
+    if (this.panX > maxPanX) this.panX = maxPanX;
+    if (this.panY < -maxPanY) this.panY = -maxPanY;
+    if (this.panY > maxPanY) this.panY = maxPanY;
   }
 
   render(colony: Colony, alpha: number, particles?: ParticleSystem): void {
@@ -137,11 +185,16 @@ export class Renderer {
     // canonical aspect ratio (e.g. 12:7) we don't want to distort.
     const cw = this.canvas.width;
     const ch = this.canvas.height;
-    const scale = Math.min(cw / w, ch / h);
+    // baseScale is the fit-to-screen scale; the user's zoom multiplies
+    // it. Pan is in CSS pixels and is multiplied to canvas pixels by
+    // the device pixel ratio.
+    const dpr = cw / parseFloat(this.canvas.style.width || `${cw}`);
+    const baseScale = Math.min(cw / w, ch / h);
+    const scale = baseScale * this.zoom;
     const ow = w * scale;
     const oh = h * scale;
-    const ox = (cw - ow) * 0.5;
-    const oy = (ch - oh) * 0.5;
+    const ox = (cw - ow) * 0.5 + this.panX * dpr;
+    const oy = (ch - oh) * 0.5 + this.panY * dpr;
     this.ctx.fillStyle = '#000';
     this.ctx.fillRect(0, 0, cw, ch);
     this.ctx.imageSmoothingEnabled = false;
