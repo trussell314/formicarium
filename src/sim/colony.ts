@@ -32,6 +32,14 @@ export class Colony {
   readonly posZ: Float32Array;
   readonly prevZ: Float32Array;
   readonly heading: Float32Array;
+  /**
+   * Heading at the start of the current tick. Updated by
+   * stepSimulation alongside prevX/prevY so the renderer can
+   * interpolate orientation between ticks — without it the body
+   * angle snapped at the sim rate, which read as choppy on the
+   * 3D model.
+   */
+  readonly prevHeading: Float32Array;
   readonly state: Uint8Array;
   readonly stateTimer: Uint16Array;
   /** Stable per-ant ID, equal to spawn index; never reused. */
@@ -82,6 +90,7 @@ export class Colony {
     this.posZ = new Float32Array(capacity);
     this.prevZ = new Float32Array(capacity);
     this.heading = new Float32Array(capacity);
+    this.prevHeading = new Float32Array(capacity);
     this.state = new Uint8Array(capacity);
     this.stateTimer = new Uint16Array(capacity);
     this.id = new Uint32Array(capacity);
@@ -150,6 +159,7 @@ export class Colony {
     this.posZ[i] = behaviour?.posZ ?? 0.4;
     this.prevZ[i] = this.posZ[i]!;
     this.heading[i] = heading;
+    this.prevHeading[i] = heading;
     this.state[i] = STATE_WANDER;
     this.stateTimer[i] = 0;
     this.id[i] = i;

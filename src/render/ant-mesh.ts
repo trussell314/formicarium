@@ -24,8 +24,8 @@ export class AntMeshRenderer {
   private readonly pool: THREE.Object3D[] = [];
   /** Bounding-box max axis of the loaded model in model units. */
   private templateLengthUnits = 1;
-  /** Yaw offset to align the model's nose with +x in world space. */
-  private modelYawOffset = 0;
+  /** Yaw offset added to per-instance heading (radians). */
+  modelYawOffset = -Math.PI / 2;
 
   constructor(canvas: HTMLCanvasElement, worldWidth: number, worldHeight: number) {
     this.canvas = canvas;
@@ -130,8 +130,17 @@ export class AntMeshRenderer {
       const bodyCells = colony.bodyLengthCells[i]!;
       const s = bodyCells / this.templateLengthUnits;
       inst.scale.set(s, s, s);
-      // Yaw around z to face heading. Heading 0 = +x.
-      inst.rotation.set(0, 0, colony.heading[i]! + this.modelYawOffset);
+      // Heading interpolated between prev and current so 30 Hz sim
+      // doesn't snap the body angle every tick — important for
+      // detail-rich 3D models. Wrap-aware: take the shorter rotation
+      // arc.
+      const h0 = colony.prevHeading[i]!;
+      const h1 = colony.heading[i]!;
+      let dh = h1 - h0;
+      if (dh > Math.PI) dh -= 2 * Math.PI;
+      else if (dh < -Math.PI) dh += 2 * Math.PI;
+      const headingLerp = h0 + dh * alpha;
+      inst.rotation.set(0, 0, headingLerp + this.modelYawOffset);
     }
 
     this.renderer.render(this.scene, this.camera);

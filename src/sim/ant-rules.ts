@@ -267,6 +267,7 @@ export function stepSimulation(
     colony.prevX[i] = colony.posX[i];
     colony.prevY[i] = colony.posY[i];
     colony.prevZ[i] = colony.posZ[i];
+    colony.prevHeading[i] = colony.heading[i];
   }
 
   for (let i = 0; i < colony.count; i++) {

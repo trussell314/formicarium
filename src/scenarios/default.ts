@@ -8,25 +8,32 @@ import type { Scenario } from '../scenario';
 export const DEFAULT_SCENARIO: Scenario = {
   name: 'default-web',
 
-  // 10 ticks/sec — small enough that per-tick ant motion is a
-  // fraction of a cell so motion animates smoothly between ticks.
-  secondsPerTick: 0.1,
-  // 60 s of daylight, then 60 s of night. 2-minute cycle.
+  // 30 Hz sim. At 10 Hz the heading-snap was visible as choppy
+  // motion on the detail-rich 3D ant model; 30 Hz × interpolation
+  // between prev and current = smooth.
+  secondsPerTick: 1 / 30,
+  // Day/night durations stay in seconds; resolver derives ticks.
   dayDurationSec: 60,
   nightDurationSec: 60,
 
-  // 36 cm wide × 20 cm tall. At 20 cells/cm that's a 720 × 400 grid.
-  worldWidthCm: 36,
-  worldHeightCm: 20,
-  surfaceFromTopCm: 5,
+  // Smaller world (12 × 7 cm) so the chamber fills more of the
+  // screen — the previous 36 × 20 cm world made the ants feel like
+  // tiny dots in a big field.
+  worldWidthCm: 12,
+  worldHeightCm: 7,
+  surfaceFromTopCm: 2,
 
-  // Starter chamber: 4 cm wide × 2 cm deep. With 10 workers that's
-  // roughly 8 cells of chamber area per ant — not crowded.
+  // Starter chamber: 4 cm wide × 1.5 cm deep, ~1/3 of the world's
+  // width — visibly the focal point.
   starterChamberWidthCm: 4,
-  starterChamberDepthCm: 2,
+  starterChamberDepthCm: 1.5,
 
-  // Print a debug summary every 5 seconds of sim time (50 ticks).
-  debugIntervalTicks: 50,
+  // Ant slab depth (z dimension).
+  slabThicknessCm: 0.8,
+
+  // Print a debug summary every 5 seconds of sim time (150 ticks
+  // at 30 Hz).
+  debugIntervalTicks: 150,
 
   ants: {
     worker: {
