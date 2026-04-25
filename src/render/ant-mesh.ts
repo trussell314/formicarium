@@ -10,6 +10,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import type { Colony } from '../sim/colony';
 
 export class AntMeshRenderer {
@@ -60,6 +61,10 @@ export class AntMeshRenderer {
   /** Begin loading the model. Returns when ready. */
   async load(url: string): Promise<void> {
     const loader = new GLTFLoader();
+    // EXT_meshopt_compression decoder — required because we ran the
+    // model through `gltf-transform optimize` which compresses
+    // geometry buffers with meshopt.
+    loader.setMeshoptDecoder(MeshoptDecoder);
     const gltf = await loader.loadAsync(url);
     this.template = gltf.scene;
     // Measure the model so we can scale instances by per-ant

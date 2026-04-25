@@ -8,7 +8,6 @@ import { DEFAULT_SCENARIO } from './scenarios/default';
 import { stepSimulation } from './sim/ant-rules';
 import { createPheromones } from './sim/pheromone';
 import { Renderer } from './render/renderer';
-import { AntMeshRenderer } from './render/ant-mesh';
 import { Loop } from './runtime/loop';
 import { bindVisibilityPause } from './runtime/visibility';
 import { antName } from './names';
@@ -36,19 +35,21 @@ function boot(): void {
     resolved.cellsPerCm,
   );
 
-  // WebGL ant renderer (3D model). Loads asynchronously; until it's
-  // ready, the 2D Renderer keeps drawing procedural ants. Once
-  // loaded, we flip renderer.drawAnts off and the 3D layer takes
-  // over.
+  // WebGL ant renderer (3D model). Lazy-loaded so three.js (~600 KB)
+  // doesn't bloat the initial JS bundle — the 2D layer renders while
+  // we wait. Once the model is up, flip renderer.drawAnts off.
   const canvas3d = document.getElementById('screen-3d') as HTMLCanvasElement | null;
-  const meshRenderer = canvas3d
-    ? new AntMeshRenderer(canvas3d, world.width, world.height)
-    : null;
-  if (meshRenderer) {
-    meshRenderer.load('/ant.glb').then(() => {
+  type MeshRenderer = import('./render/ant-mesh').AntMeshRenderer;
+  let meshRenderer: MeshRenderer | null = null;
+  if (canvas3d) {
+    void import('./render/ant-mesh').then(async ({ AntMeshRenderer }) => {
+      const r = new AntMeshRenderer(canvas3d, world.width, world.height);
+      await r.load('/ant.glb');
+      meshRenderer = r;
+      fitMeshCanvas();
       renderer.drawAnts = false;
     }).catch((err) => {
-      console.warn('failed to load /ant.glb, staying with 2D ants', err);
+      console.warn('failed to load 3D ant layer, staying with 2D ants', err);
     });
   }
 
