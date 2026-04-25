@@ -217,7 +217,11 @@ export class Renderer {
     this.ctx.drawImage(this.off, 0, 0, w, h, ox, oy, ow, oh);
 
     // Ant overlay.
-    const radius = Math.max(1.5, scale * 0.35);
+    // Ant body radius. 0.55 of a scaled cell makes ants clearly
+    // readable as creatures at any zoom; the previous 0.35 produced
+    // sub-pixel legs at typical screen sizes and the ants got lost
+    // against the substrate.
+    const radius = Math.max(2, scale * 0.55);
     for (let i = 0; i < colony.count; i++) {
       const x = colony.prevX[i]! + (colony.posX[i]! - colony.prevX[i]!) * alpha;
       const y = colony.prevY[i]! + (colony.posY[i]! - colony.prevY[i]!) * alpha;

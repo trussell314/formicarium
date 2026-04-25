@@ -32,8 +32,13 @@ function readSettings(): Settings {
   };
   return {
     seed: num('seed', (Date.now() & 0xffffffff) >>> 0),
-    width: Math.max(40, num('width', 200) | 0),
-    height: Math.max(30, num('height', 120) | 0),
+    // Smaller default world: at 200×120 each cell rendered as ~9 px on
+    // a 1080-tall viewport and the ants were sub-5-pixel dots, almost
+    // invisible. 140×80 puts each cell at ~13 px and lifts the ant
+    // sprite into visible territory. The chamber detail is coarser
+    // but it reads as an ant farm rather than a smooth blob.
+    width: Math.max(40, num('width', 140) | 0),
+    height: Math.max(30, num('height', 80) | 0),
     ants: Math.max(1, num('ants', 24) | 0),
     simStepsPerFrame: Math.max(1, num('speed', 8) | 0),
   };
