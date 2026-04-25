@@ -46,7 +46,7 @@ describe('physics', () => {
     // Floor at y=8.
     for (let x = 0; x < w.width; x++) w.cells[w.index(x, 9)] = CELL_SOIL;
     // Ant in mid-air at y=4.
-    const after = settle(w, 5, 4);
+    const after = settle(w, 5, 4, false);
     expect(after).toBe(5);
   });
 
@@ -55,7 +55,7 @@ describe('physics', () => {
     for (let x = 0; x < w.width; x++) w.cells[w.index(x, 9)] = CELL_SOIL;
     w.cells[w.index(5, 8)] = CELL_SOIL;
     // Embedded at (5, 8). settle should pop it up.
-    const after = settle(w, 5, 8);
+    const after = settle(w, 5, 8, false);
     expect(after).toBe(7);
   });
 });

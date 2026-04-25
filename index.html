@@ -18,10 +18,12 @@
       #spark {
         position: fixed; top: 8px; left: 8px;
         margin-top: 60px;
-        opacity: 0.7;
+        opacity: 0;
+        transition: opacity 800ms ease;
         pointer-events: none;
         image-rendering: pixelated;
       }
+      #spark.live { opacity: 0.55; }
       #help {
         position: fixed; right: 12px; bottom: 12px;
         background: rgba(10, 6, 6, 0.78);

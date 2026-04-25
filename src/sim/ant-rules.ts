@@ -339,10 +339,15 @@ export function step(
       }
     }
 
-    // End-of-tick settle: extricate + 1-cell gravity.
+    // End-of-tick settle: extricate + 1-cell gravity. Pass whether
+    // the ant moved UP this tick — that suppresses gravity for the
+    // tick so climbers can actually reach the surface (without this,
+    // CARRY ants get pulled down faster than they can ascend and
+    // freeze in a permanent in-flight state).
     const sx = colony.posX[i]! | 0;
     const sy = colony.posY[i]! | 0;
-    const settled = settle(world, sx, sy);
+    const climbedUp = colony.posY[i]! < colony.prevY[i]! - 0.05;
+    const settled = settle(world, sx, sy, climbedUp);
     if (settled !== sy) {
       colony.posY[i] = settled + 0.5;
     }

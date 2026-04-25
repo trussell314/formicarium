@@ -71,16 +71,27 @@ export function tryStep(
 /**
  * One-cell-per-tick gravity. Extricate from any solid the ant ended up
  * inside (e.g. dug cell that was just filled), then drop one row if
- * unsupported. Walking off a ledge produces a visible falling arc instead
- * of a single-frame teleport to the bottom.
+ * unsupported AND the ant didn't already climb upward this tick.
+ *
+ * The "didn't climb upward" caveat is critical. Without it, gravity
+ * drops a cell each tick while movement only buys ~0.4 cells of
+ * upward travel — net descent. CARRY ants stranded mid-chamber can't
+ * climb to the surface and never deposit, freezing the colony in
+ * permanent CARRY. Ants that DID move upward this tick are presumed
+ * to be actively climbing or scrambling and aren't subjected to a
+ * gravity tick that frame; the next stationary tick will catch them
+ * if they end up unsupported.
+ *
+ * Walking off a ledge still produces visible falls: a horizontally-
+ * moving ant won't have a negative dy and so gravity kicks in.
  */
-export function settle(world: World, ix: number, iy: number): number {
+export function settle(world: World, ix: number, iy: number, climbedUp: boolean): number {
   while (iy >= 0 && iy < world.height) {
     const k = world.cells[iy * world.width + ix]!;
     if (k !== CELL_SOIL && k !== CELL_GRAIN) break;
     iy--;
   }
   if (iy < 0) iy = 0;
-  if (iy + 1 < world.height && !isSupported(world, ix, iy)) iy++;
+  if (!climbedUp && iy + 1 < world.height && !isSupported(world, ix, iy)) iy++;
   return iy;
 }

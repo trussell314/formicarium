@@ -80,6 +80,7 @@ function main(): void {
   const sparkBuf = new Int16Array(SPARK_LEN);
   let sparkHead = 0;
   let prevSoil = world.countSoil();
+  let sparkSamples = 0;
 
   // Auto-hide the help panel after a few seconds so it doesn't clutter
   // the screensaver indefinitely. The `?` key brings it back.
@@ -219,6 +220,8 @@ function main(): void {
       (renderer as unknown as { world: World }).world = world;
       prevSoil = world.countSoil();
       sparkBuf.fill(0);
+      sparkSamples = 0;
+      spark.classList.remove('live');
     }
   });
 
@@ -242,29 +245,48 @@ function main(): void {
 
     renderer.render(colony, alpha, particles);
 
-    // Sparkline: dig events (soil cells lost) per render frame, in a
-    // ring buffer. Each new sample plots a vertical bar; old samples
-    // scroll left as the head advances.
+    // Sparkline: dig events (soil cells lost) per render frame, in
+    // a ring buffer. Rendered as a single smoothed polyline — the
+    // earlier vertical-bar implementation produced a busy
+    // "scrolling histogram" that read as motion crossing the
+    // screen rather than as a quiet readout.
     const curSoil = world.countSoil();
     const dug = Math.max(0, prevSoil - curSoil);
     prevSoil = curSoil;
     sparkBuf[sparkHead] = dug;
     sparkHead = (sparkHead + 1) % SPARK_LEN;
+    sparkSamples++;
+    // Don't fade the sparkline in until the buffer is full — otherwise
+    // the empty-half of the ring sweeps across the screen as a
+    // low-flat line emerging from nothing, which reads as a moving
+    // bar to a casual viewer.
+    if (sparkSamples === SPARK_LEN) spark.classList.add('live');
     let peak = 1;
     for (let k = 0; k < SPARK_LEN; k++) {
       if (sparkBuf[k]! > peak) peak = sparkBuf[k]!;
     }
     sparkCtx.clearRect(0, 0, spark.width, spark.height);
-    sparkCtx.fillStyle = 'rgba(216, 200, 168, 0.18)';
+    // Faint baseline so the sparkline still has visual anchorage
+    // even when the colony is idle.
+    sparkCtx.fillStyle = 'rgba(216, 200, 168, 0.10)';
     sparkCtx.fillRect(0, spark.height - 1, spark.width, 1);
-    sparkCtx.fillStyle = '#d8c8a8';
+    sparkCtx.strokeStyle = 'rgba(216, 200, 168, 0.7)';
+    sparkCtx.lineWidth = 1;
+    sparkCtx.beginPath();
     for (let k = 0; k < SPARK_LEN; k++) {
-      // Plot oldest sample on the left, newest on the right.
-      const idx = (sparkHead + k) % SPARK_LEN;
-      const v = sparkBuf[idx]!;
-      const h = Math.min(spark.height, Math.round((v / peak) * (spark.height - 2)));
-      if (h > 0) sparkCtx.fillRect(k, spark.height - h, 1, h);
+      // Plot oldest sample on the left, newest on the right. Apply a
+      // 3-tap smoothing to take the edge off single-frame spikes
+      // (each dig is one frame; smoothing makes the line read as a
+      // dig-rate curve instead of dense flicker).
+      const idx0 = (sparkHead + k) % SPARK_LEN;
+      const idxL = (sparkHead + Math.max(0, k - 1)) % SPARK_LEN;
+      const idxR = (sparkHead + Math.min(SPARK_LEN - 1, k + 1)) % SPARK_LEN;
+      const v = (sparkBuf[idxL]! + sparkBuf[idx0]! * 2 + sparkBuf[idxR]!) * 0.25;
+      const yy = spark.height - 0.5 - (v / peak) * (spark.height - 2);
+      if (k === 0) sparkCtx.moveTo(k + 0.5, yy);
+      else sparkCtx.lineTo(k + 0.5, yy);
     }
+    sparkCtx.stroke();
 
     if (now - lastHud > 250) {
       lastHud = now;
