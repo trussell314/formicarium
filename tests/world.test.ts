@@ -20,17 +20,17 @@ describe('World.generate', () => {
     expect(w.cells[w.index(cx, 22)]).toBe(CELL_AIR);
   });
 
-  it('does not leave grass floating over the chamber', () => {
+  it('starter divot is approximately circular and centred on cx', () => {
     const rng = new RNG(2);
     const w = new World(80, 60);
     w.generate(rng, 20, 6, 4);
-    // For each chamber column, the natural-surface row is AIR (carved).
     const cx = w.width >> 1;
-    for (let dx = -5; dx <= 5; dx++) {
-      const x = cx + dx;
-      const sy = w.naturalSurface[x]!;
-      expect(w.cells[w.index(x, sy)]).toBe(CELL_AIR);
-    }
+    // The cell directly under the centre at the natural surface row
+    // should always be AIR (the divot's top).
+    const surfHere = w.naturalSurface[cx]!;
+    expect(w.cells[w.index(cx, surfHere)]).toBe(CELL_AIR);
+    // Two cells outside the divot (radius ~5 here) should still be soil.
+    expect(w.cells[w.index(cx + 12, surfHere + 2)]).toBe(CELL_SOIL);
   });
 
   it('initialSoilCells matches the actual soil count', () => {

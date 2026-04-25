@@ -60,11 +60,15 @@ function build(s: Settings) {
 
   const colony = new Colony(s.ants);
   const cx = world.width >> 1;
+  // Spawn ants in the BOTTOM half of the divot (deeper rows) — they
+  // get a few digs in before the random heading walks any of them
+  // out the top. The divot radius matches what world.generate uses.
+  const divotR = Math.max(4, Math.min(halfW, depth + 3));
   colony.spawnInRect(
-    cx - halfW + 1,
-    surfaceRow + 1,
-    cx + halfW - 1,
-    surfaceRow + depth,
+    cx - divotR + 1,
+    surfaceRow + divotR - 1,
+    cx + divotR - 1,
+    surfaceRow + 2 * divotR - 1,
     s.ants,
     rng,
     (x, y) => world.cells[world.index(x, y)] === 0 /* AIR */,

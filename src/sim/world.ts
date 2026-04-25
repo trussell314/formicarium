@@ -85,26 +85,36 @@ export class World {
       }
     }
 
-    // Carve the starter chamber. Indexing from the per-column natural
-    // surface (not a flat baseline) means waved-up columns still get
-    // their grass row carved, so the chamber doesn't end up with floating
-    // grass over open space.
+    // Starter divot — a small circular pocket the colony has to break
+    // out of. The legacy wide trapezoid gave ants too much pre-carved
+    // real estate to lazily widen; this version forces tunnel
+    // formation by giving them barely enough room to spawn into.
+    // chamberHalfWidth / chamberDepth are repurposed as size hints.
     const cx = this.width >> 1;
-    for (let dx = -chamberHalfWidth; dx <= chamberHalfWidth; dx++) {
-      const x = cx + dx;
-      if (x < 0 || x >= this.width) continue;
-      const taper = 1 - Math.abs(dx) / (chamberHalfWidth + 1);
-      const depth = Math.round(chamberDepth * taper);
-      const top = this.naturalSurface[x]!;
-      const bottom = top + depth;
-      for (let y = top; y <= bottom; y++) {
+    const divotRadius = Math.max(4, Math.min(chamberHalfWidth, chamberDepth + 3));
+    const divotRadius2 = divotRadius * divotRadius;
+    const surfHere = this.naturalSurface[cx]!;
+    // Place the divot so most of it sits BELOW the surface line, with
+    // just the topmost cell breaking through (so spawned ants are
+    // already underground and have walls to dig).
+    const centerY = surfHere + divotRadius;
+    const x0 = Math.max(0, cx - divotRadius);
+    const x1 = Math.min(this.width - 1, cx + divotRadius);
+    const yLo = Math.max(0, surfHere);
+    const yHi = Math.min(this.height - 1, centerY + divotRadius);
+    for (let y = yLo; y <= yHi; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const ddx = x - cx;
+        const ddy = y - centerY;
+        if (ddx * ddx + ddy * ddy > divotRadius2) continue;
         const idx = y * this.width + x;
-        if (y < this.height && this.cells[idx] === CELL_SOIL) {
+        if (this.cells[idx] === CELL_SOIL) {
           this.cells[idx] = CELL_AIR;
           soil--;
         }
       }
     }
+    void chamberDepth;
 
     for (let i = 0; i < this.soilNoise.length; i++) {
       this.soilNoise[i] = (rng.next() * 256) | 0;

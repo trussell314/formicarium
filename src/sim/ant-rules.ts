@@ -70,6 +70,7 @@ const NEIGHBOURS: ReadonlyArray<readonly [number, number]> = [
   [1, 0], [-1, 0], [0, 1], [0, -1],
 ];
 const RECENCY_TICKS = 180;
+const HEADING_TIMER_MAX = 60;
 function pickDigTarget(world: World, ix: number, iy: number, h: number, rng: RNG): { x: number; y: number } | null {
   const hx = Math.cos(h);
   const hy = Math.sin(h);
@@ -153,12 +154,20 @@ function pickDigTarget(world: World, ix: number, iy: number, h: number, rng: RNG
  *     columns place grain above the chamber air, and that grain hovers
  *     unsupported with no path back down.
  */
+const MOUND_MAX = 4;
+const MOUND_HARD_MAX = 8;
 function depositGrain(
   world: World, ix: number, iy: number, rng: RNG, originX: number,
 ): { x: number; y: number } | null {
   const SEARCH_RADIUS = 64;
-  const tryColumn = (cx: number): { x: number; y: number } | null => {
+  // Two-pass search: first pass refuses columns at MOUND_MAX (spoil
+  // spreads laterally), second pass lifts the cap to MOUND_HARD_MAX
+  // so a CARRY ant can always deposit *somewhere*. The hard cap
+  // keeps mounds from going so tall the ant lands on top with no
+  // descent path.
+  const tryColumn = (cx: number, cap: number): { x: number; y: number } | null => {
     if (cx < 0 || cx >= world.width) return null;
+    if (world.mound[cx]! >= cap) return null;
     const surfRow = world.naturalSurface[cx]!;
     const cy = surfRow - 1 - world.mound[cx]!;
     if (cy <= 0 || cy >= world.height) return null;
@@ -166,7 +175,12 @@ function depositGrain(
     const below = world.cells[world.index(cx, cy + 1)];
     if (below !== CELL_SOIL && below !== CELL_GRAIN) return null;
     // Ant must be near (vertically) — within 3 cells.
-    if (iy < cy - 3 || iy > cy + 3) return null;
+    // Vertical proximity used to gate deposit, but with mound
+    // heights of 6-9 cells the gate locked CARRY ants out of every
+    // valid deposit column. The distance + mound falloff terms
+    // still keep deposits concentrated near the work zone; the
+    // hard vertical check was redundant. Drop it.
+    void iy;
     // Distance-weighted acceptance with mound-height falloff:
     //   - Distance term: 1 / (1 + 0.06 * |cx - originX|) concentrates
     //     spoil over the work zone without losing the lateral spread
@@ -186,15 +200,17 @@ function depositGrain(
     world.mound[cx] = (world.mound[cx] ?? 0) + 1;
     return { x: cx, y: cy };
   };
-  for (let r = 0; r <= SEARCH_RADIUS; r++) {
-    if (r === 0) {
-      const here = tryColumn(ix);
-      if (here !== null) return here;
-    } else {
-      const a = tryColumn(ix - r);
-      if (a !== null) return a;
-      const b = tryColumn(ix + r);
-      if (b !== null) return b;
+  for (const cap of [MOUND_MAX, MOUND_HARD_MAX]) {
+    for (let r = 0; r <= SEARCH_RADIUS; r++) {
+      if (r === 0) {
+        const here = tryColumn(ix, cap);
+        if (here !== null) return here;
+      } else {
+        const a = tryColumn(ix - r, cap);
+        if (a !== null) return a;
+        const b = tryColumn(ix + r, cap);
+        if (b !== null) return b;
+      }
     }
   }
   return null;
@@ -254,16 +270,31 @@ export function step(
 
     // Heading update: state-specific bias + Gaussian noise.
     if (stateIn === STATE_WANDER) {
-      // Downward bias is applied ONLY when the ant is above the
-      // original surface — to gently send freshly-spawned ants down
-      // into the nest. Once below the surface, gravity already keeps
-      // them on the floor and an explicit downBias just keeps them
-      // staring at the floor forever, so they re-dig the same
-      // straight-down shaft on every contact. Removing the
-      // below-surface down bias breaks the vertical-tunnel attractor
-      // and lets ants drift laterally toward side walls.
       if (!belowSurface) {
+        // Above-surface ants get a strong "go home" bias — heading
+        // toward the cell they spawned in. Without this, ants who
+        // wander out the top of the divot keep walking laterally
+        // along the grass forever (above-surface WANDER doesn't
+        // dig and downBias alone is too weak to find the small
+        // chamber opening). Real ants navigate via path integration
+        // / pheromone trails; this is the cheap stand-in.
+        const dxh = colony.homeX[i]! - colony.posX[i]!;
+        const dyh = colony.homeY[i]! - colony.posY[i]!;
+        const want = Math.atan2(dyh, dxh);
+        h += wrapAngle(want - h) * 0.4;
+        // Plus the original gentle downward push so even ants right
+        // over the chamber drift in.
         h += wrapAngle(Math.PI / 2 - h) * downBias;
+      }
+      // Heading stickiness: while the ant has a fresh "preferred
+      // heading" (set on dig), pull the wandering heading toward
+      // it. Decays over ~60 ticks. Keeps a digger committed to the
+      // tunnel direction it's working instead of being scattered
+      // by repulsion + noise after every soil contact.
+      if (colony.headingTimer[i]! > 0) {
+        const t = colony.headingTimer[i]! / HEADING_TIMER_MAX;
+        h += wrapAngle(colony.preferredHeading[i]! - h) * (0.4 * t);
+        colony.headingTimer[i]!--;
       }
     } else {
       // CARRY heads up to the surface to dump the grain. Lateral
@@ -351,6 +382,13 @@ export function step(
           colony.posY[i] = target.y + 0.5;
           colony.setState(i, STATE_CARRY);
           colony.lastDigX[i] = target.x;
+          // Record the direction the ant was facing when it dug, so
+          // that when it returns from CARRY-deposit it remembers the
+          // tunnel direction it was working and resumes pushing
+          // that wall rather than wandering off into a different
+          // chamber face. Stickiness decays over HEADING_TIMER_MAX.
+          colony.preferredHeading[i] = h;
+          colony.headingTimer[i] = HEADING_TIMER_MAX;
           // Head straight up after digging.
           colony.heading[i] = -Math.PI / 2 + rng.range(-0.3, 0.3);
           // Spawn a small puff of dust so the dig is visible to the
