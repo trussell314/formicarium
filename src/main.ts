@@ -80,6 +80,7 @@ function build(s: Settings) {
     s.ants,
     rng,
     (x, y) => world.cells[world.index(x, y)] === 0 /* AIR */,
+    DEFAULT_PARAMS,
   );
   return { rng, world, colony, digField, buildField };
 }

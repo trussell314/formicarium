@@ -150,7 +150,10 @@ export function step(
   digField.step();
   buildField.step();
 
-  const { walkSpeed, turnNoise, digProb, pickProb, stigmergy, geotaxis, digDeposit, buildDeposit } = params;
+  // walkSpeed, geotaxis, and the deposit amounts stay as colony-wide
+  // constants; the per-ant heterogeneity (digProb, pickProb,
+  // stigmergy, turnNoise) is sampled at spawn into Colony arrays.
+  const { walkSpeed, geotaxis, digDeposit, buildDeposit } = params;
   const subSteps = Math.max(2, Math.ceil(walkSpeed));
   const stepLen = walkSpeed / subSteps;
 
@@ -163,7 +166,7 @@ export function step(
     const iy = colony.posY[i]! | 0;
 
     // (1) Correlated random walk — Gaussian heading perturbation.
-    h += rng.gauss() * turnNoise;
+    h += rng.gauss() * colony.turnNoise[i]!;
 
     // (2) Stigmergy — bias toward the gradient of the field for our
     // current state.
@@ -172,7 +175,7 @@ export function step(
     const gMag = Math.hypot(grad.dx, grad.dy);
     if (gMag > 1e-6) {
       const want = Math.atan2(grad.dy, grad.dx);
-      h += wrapAngle(want - h) * stigmergy;
+      h += wrapAngle(want - h) * colony.stigmergy[i]!;
     }
 
     // (4) Negative geotaxis — laden ants bias upward against gravity.
@@ -213,7 +216,7 @@ export function step(
     // soil cell; the env handles any granular cascade. Drop dig
     // pheromone at the new air cell so other ants are recruited.
     if (stateIn === STATE_WANDER && hitSoil) {
-      if (rng.next() < digProb) {
+      if (rng.next() < colony.digProb[i]!) {
         const target = adjacentSoil(world, ax, ay, h);
         if (target !== null) {
           if (digCell(world, target.x, target.y, rng)) {
@@ -236,7 +239,7 @@ export function step(
     // already become CARRY this tick (one transition per tick).
     if (colony.state[i] === STATE_WANDER) {
       const target = adjacentGrain(world, ax, ay, rng);
-      if (target !== null && rng.next() < pickProb) {
+      if (target !== null && rng.next() < colony.pickProb[i]!) {
         if (pickGrain(world, target.x, target.y, rng)) {
           colony.posX[i] = target.x + 0.5;
           colony.posY[i] = target.y + 0.5;

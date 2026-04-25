@@ -23,6 +23,7 @@ function makeSim(seed: number) {
     cx - 6, 25, cx + 6, 28, 20,
     rng,
     (x, y) => world.cells[world.index(x, y)] === 0,
+    DEFAULT_PARAMS,
   );
   const dig = new Pheromone(world.width, world.height, 0.12, 0.992);
   const build = new Pheromone(world.width, world.height, 0.10, 0.997);

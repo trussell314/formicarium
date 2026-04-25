@@ -171,6 +171,7 @@ const divotR = Math.max(4, Math.min(halfW, depth + 3));
 colony.spawnInRect(
   cx - divotR + 1, surfaceRow + divotR - 1, cx + divotR - 1, surfaceRow + 2 * divotR - 1,
   ANTS, rng, (x, y) => world.cells[world.index(x, y)] === 0,
+  DEFAULT_PARAMS,
 );
 const digField = new Pheromone(world.width, world.height, 0.12, 0.992);
 const buildField = new Pheromone(world.width, world.height, 0.10, 0.997);
