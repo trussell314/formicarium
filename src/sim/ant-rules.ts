@@ -51,28 +51,33 @@ function wrapAngle(a: number): number {
 
 /** Pick a soil cell adjacent to (ix, iy) to excavate, preferring the
  *  heading direction. Returns null if no orthogonal neighbour is soil. */
-/** Score-based dig target selection. Each soil neighbour gets a
- *  score from three factors:
- *    - alignment: dot product with the ant's heading (so the ant
- *      tends to dig forward, but doesn't HAVE to)
- *    - exposure: accumulated air-frontedness on the candidate (old
- *      walls are softer, Tschinkel mechanic)
- *    - random:   a small per-call jitter so two ants in the same
- *      situation don't always pick the same cell — emergent
- *      branching needs symmetry-breaking
- *  Highest-scoring soil neighbour wins. Returns null if the ant
- *  isn't touching any soil. */
+/** Score-based dig target selection. Five terms:
+ *    - alignment: dot product with the ant's heading
+ *    - exposure:  accumulated air-frontedness (Tschinkel soft soil)
+ *    - random:    symmetry-breaking jitter
+ *    - tip-shape: BIG bonus for soil with exactly one air neighbour,
+ *                 modest bonus for two, ZERO for three. A "tip" cell
+ *                 sits at the end of a corridor; a "wall" cell sits
+ *                 on a wide chamber face. Without this term every
+ *                 dig erodes the chamber perimeter uniformly and the
+ *                 excavation grows as a blob, not as tunnels.
+ *    - recency:   bonus if any cardinal neighbour was dug in the
+ *                 last RECENCY_TICKS — concentrates new digs at
+ *                 active fronts, the lightweight pheromone-free
+ *                 stand-in for "follow the work crew".
+ *  Highest score wins. Returns null if the ant isn't touching soil. */
 const NEIGHBOURS: ReadonlyArray<readonly [number, number]> = [
   [1, 0], [-1, 0], [0, 1], [0, -1],
 ];
+const RECENCY_TICKS = 180;
 function pickDigTarget(world: World, ix: number, iy: number, h: number, rng: RNG): { x: number; y: number } | null {
   const hx = Math.cos(h);
   const hy = Math.sin(h);
   const surf = world.naturalSurface[ix]!;
   const depthBelow = iy - surf;
-  // Shallow (within 6 cells of original surface): bias HARD against
-  // digging straight down — Tschinkel chambers fan wide near the top.
   const shallow = depthBelow >= 0 && depthBelow < 6;
+  const w = world.width;
+  const tick = world.tick;
   let bestX = -1, bestY = -1, bestScore = -Infinity;
   for (const [dx, dy] of NEIGHBOURS) {
     const x = ix + dx;
@@ -80,11 +85,52 @@ function pickDigTarget(world: World, ix: number, iy: number, h: number, rng: RNG
     if (!world.inBounds(x, y)) continue;
     const idx = world.index(x, y);
     if (world.cells[idx] !== CELL_SOIL) continue;
+    // 3×3 air count for the candidate. Cardinal counts alone don't
+    // discriminate a tunnel tip (1 cardinal air, but only ~3 of 8
+    // surrounding cells are air — the corridor) from a chamber wall
+    // (also 1 cardinal air, but ~5+ of 8 are air because the chamber
+    // sits there). Counting the diagonals fixes the discrimination.
+    let nAir3x3 = 0;
+    let nAirCardinal = 0;
+    for (let oy = -1; oy <= 1; oy++) {
+      for (let ox = -1; ox <= 1; ox++) {
+        if (ox === 0 && oy === 0) continue;
+        const xx = x + ox;
+        const yy = y + oy;
+        if (xx < 0 || xx >= w || yy < 0 || yy >= world.height) continue;
+        if (world.cells[yy * w + xx] === CELL_AIR) {
+          nAir3x3++;
+          if (ox === 0 || oy === 0) nAirCardinal++;
+        }
+      }
+    }
+    // Recency: any cardinal neighbour dug in the last few hundred
+    // ticks gives this candidate a boost. Most fronts are walked-
+    // adjacent to a cell that was just opened, so this lights up
+    // the working face and dim the rest of the chamber wall.
+    const recDug =
+      (x > 0 && tick - world.digTick[idx - 1]! < RECENCY_TICKS) ||
+      (x < w - 1 && tick - world.digTick[idx + 1]! < RECENCY_TICKS) ||
+      (y > 0 && tick - world.digTick[idx - w]! < RECENCY_TICKS) ||
+      (y < world.height - 1 && tick - world.digTick[idx + w]! < RECENCY_TICKS);
     const align = hx * dx + hy * dy;       // [-1, 1]
     const expo = world.exposure[idx]! / 200; // 0..3+
     const downward = dy > 0;
-    let score = align * 0.6 + Math.min(expo, 2) * 0.5 + rng.next() * 0.4;
+    // Tip shape (3×3): few surrounding air cells = corridor tip;
+    // many = chamber wall to widen. Strong negative slope so the
+    // bonus is large for true tips (2-3 air around) and clearly
+    // negative for chamber walls (6-8 air).
+    const tipBonus = (3 - nAir3x3) * 0.6;
+    let score = align * 0.5
+      + Math.min(expo, 2) * 0.3
+      + tipBonus
+      + (recDug ? 0.7 : 0)
+      + rng.next() * 0.4;
     if (shallow && downward) score -= 0.8;
+    // Cardinal count is the soil-contact prerequisite; if the
+    // candidate has zero cardinal air, the ant can't actually
+    // dig into it from where it stands. Skip.
+    if (nAirCardinal === 0) continue;
     if (score > bestScore) {
       bestScore = score;
       bestX = x;
