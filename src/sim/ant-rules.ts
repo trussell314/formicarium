@@ -310,6 +310,13 @@ export function stepSimulation(
         const p = (s * s) / (s * s + theta * theta) * REST_PROB_PER_TICK;
         if (rng.next() < p) {
           colony.setState(i, STATE_REST);
+          // Snap to a flat resting pose. Real ants don't sleep
+          // standing on their gaster pointed at the sky — they
+          // lower their bodies parallel to the substrate. We pick
+          // whichever horizontal heading (0 or π) is closer to the
+          // ant's current direction so the transition isn't jarring.
+          const hh = colony.heading[i]!;
+          colony.heading[i] = Math.abs(hh) < Math.PI / 2 ? 0 : Math.PI;
           continue;
         }
       }

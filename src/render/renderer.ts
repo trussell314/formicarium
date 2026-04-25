@@ -584,11 +584,14 @@ export class Renderer {
       const depthAlpha = 1 - zNorm * 0.35;
       ctx.save();
       ctx.globalAlpha = depthAlpha;
+      // RESTing ants don't animate their legs — pin gait phase to
+      // a static value so they stop pedalling.
+      const legPhase = colony.state[i] === STATE_REST ? 0 : gaitT + i * 0.7;
       this.drawAnt(
         nx,
         ny,
         colony.heading[i]!,
-        gaitT + i * 0.7,
+        legPhase,
         colony.state[i]!,
         colony.bodyLengthCells[i]! * depthScale,
         colony.id[i] === this.selectedAntId,

@@ -78,7 +78,7 @@ function boot(): void {
       antInfoEl.classList.add('hidden');
       return;
     }
-    const m = motivationOf(colony, id);
+    const m = motivationOf(colony, id, world);
     const xCm = (colony.posX[id]! / CELLS_PER_CM).toFixed(2);
     const yCm = (colony.posY[id]! / CELLS_PER_CM).toFixed(2);
     const dest = m.destinationCm
