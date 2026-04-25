@@ -54,10 +54,17 @@ function pickDigTarget(world: World, ix: number, iy: number, h: number): { x: nu
   const prefer: [number, number] = Math.abs(hx) > Math.abs(hy)
     ? (hx > 0 ? [1, 0] : [-1, 0])
     : (hy > 0 ? [0, 1] : [0, -1]);
-  const order: ReadonlyArray<readonly [number, number]> = [
-    prefer,
-    [0, 1], [1, 0], [-1, 0], [0, -1],
-  ];
+  // Shallow-dig bias: ants near the original surface prefer LATERAL
+  // expansion (digging sideways) over digging deeper. This reproduces
+  // the Tschinkel cross-section where chambers fan wide near the top
+  // and pencil into shafts further down. Without it the colony just
+  // mines straight down.
+  const surf = world.naturalSurface[ix]!;
+  const depthBelow = iy - surf;
+  const shallow = depthBelow >= 0 && depthBelow < 6;
+  const order: ReadonlyArray<readonly [number, number]> = shallow
+    ? [prefer, [-1, 0], [1, 0], [0, 1], [0, -1]]
+    : [prefer, [0, 1], [1, 0], [-1, 0], [0, -1]];
   for (const [dx, dy] of order) {
     const x = ix + dx;
     const y = iy + dy;
@@ -81,7 +88,7 @@ function pickDigTarget(world: World, ix: number, iy: number, h: number): { x: nu
  *     unsupported with no path back down.
  */
 function depositGrain(
-  world: World, ix: number, iy: number,
+  world: World, ix: number, iy: number, rng: RNG, originX: number,
 ): { x: number; y: number } | null {
   const SEARCH_RADIUS = 64;
   const tryColumn = (cx: number): { x: number; y: number } | null => {
@@ -94,6 +101,19 @@ function depositGrain(
     if (below !== CELL_SOIL && below !== CELL_GRAIN) return null;
     // Ant must be near (vertically) — within 3 cells.
     if (iy < cy - 3 || iy > cy + 3) return null;
+    // Distance-weighted acceptance: closer to the dig column is more
+    // likely to take this column as a deposit site, even if it's the
+    // first valid candidate. Concentrates spoil mounds over the work
+    // zone without losing the lateral spread when a tall pile blocks
+    // the immediate column.
+    //   p = 1 / (1 + 0.06 * |cx - originX|)
+    // Always accept once the search has had to walk >24 cells (the
+    // graceful fallback that prevents pathological no-deposit loops).
+    const dist = Math.abs(cx - originX);
+    if (dist <= 24) {
+      const p = 1 / (1 + 0.06 * dist);
+      if (rng.next() > p) return null;
+    }
     world.cells[world.index(cx, cy)] = CELL_GRAIN;
     world.mound[cx] = (world.mound[cx] ?? 0) + 1;
     return { x: cx, y: cy };
@@ -218,7 +238,7 @@ export function step(
     if (colony.state[i] === STATE_CARRY) {
       const cx = colony.posX[i]! | 0;
       const cy = colony.posY[i]! | 0;
-      const dropped = depositGrain(world, cx, cy);
+      const dropped = depositGrain(world, cx, cy, rng, colony.lastDigX[i]!);
       if (dropped !== null) {
         colony.setState(i, STATE_WANDER);
         // Hop to the cell directly above the new grain, then head
