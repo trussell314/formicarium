@@ -32,7 +32,7 @@ export const DEFAULT_SCENARIO: Scenario = {
     worker: {
       count: 10,
       walkSpeedCmPerSec: 2.4,
-      digProbPerSoilHit: 0.035,
+      digProbPerSoilHit: 0.12,
       turnNoiseRadPerSec: 1.2,
       bodyLengthCm: 0.6,
     },

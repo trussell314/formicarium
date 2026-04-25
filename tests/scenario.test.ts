@@ -18,7 +18,7 @@ describe('scenario DSL', () => {
     expect(r.surfaceFromTopCm).toBe(5);
     expect(r.totalAnts).toBe(5);
     expect(r.ants.worker!.walkSpeedCmPerSec).toBeCloseTo(2.4);
-    expect(r.ants.worker!.digProbPerSoilHit).toBeCloseTo(0.035);
+    expect(r.ants.worker!.digProbPerSoilHit).toBeCloseTo(0.12);
     expect(r.ants.worker!.bodyLengthCm).toBeCloseTo(0.6);
   });
 

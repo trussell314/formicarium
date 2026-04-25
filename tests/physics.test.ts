@@ -58,20 +58,16 @@ describe('tryStep (strict no-flying rule)', () => {
     expect(r.y).toBeCloseTo(5.5);
   });
 
-  it('refuses moving off a cliff into unsupported air', () => {
+  it('walks off a cliff into open air (gravity will catch it next tick)', () => {
+    // tryStep no longer refuses unsupported destinations. Ants can
+    // walk off a ledge; the end-of-tick settle drops them to support.
+    // This was changed because the old strict rule was trapping ants
+    // on tiny diagonal-supported corners.
     const w = blank();
-    // Floor from x=0..5 only at y=6. Beyond x=5, no floor.
     for (let x = 0; x <= 5; x++) stamp(w, x, 6, CELL_SOIL);
-    // Ant at the last supported cell (5, 5) stepping right:
-    // destination (6, 5) has (6, 6) air, (7, 6) air, (5, 6) soil (diag).
-    // That DIAG support still counts — one cell gap is fine.
-    const r1 = tryStep(w, 5.5, 5.5, 1, 0);
-    expect(r1.x).toBeGreaterThan(5.5);
-    // But stepping to (7, 5) with (5.5, 5.5) start + dx=2, destination
-    // (7, 5.5) → (7, 5) cell, support check fails (neighbours all air).
-    const r2 = tryStep(w, 5.5, 5.5, 2, 0);
-    expect(r2.x).toBe(5.5);
-    expect(r2.y).toBe(5.5);
+    const r = tryStep(w, 5.5, 5.5, 2, 0);
+    expect(r.x).toBe(7.5);
+    expect(r.y).toBe(5.5);
   });
 
   it('refuses moving into solid and reports hitSoil', () => {

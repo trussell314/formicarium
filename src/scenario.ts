@@ -135,7 +135,10 @@ const DEFAULTS = {
 
 const ANT_DEFAULTS = {
   walkSpeedCmPerSec: 2.4,
-  digProbPerSoilHit: 0.035,
+  // Ant-on-soil dig probability per contact. Real Lasius / Formica
+  // workers dig much more readily than the original 0.035 (Sudd 1970
+  // observed 5–15% per contact). Bumped so the nest actually grows.
+  digProbPerSoilHit: 0.12,
   turnNoiseRadPerSec: 1.2,
   bodyLengthCm: 0.6,
   variation: 0.15,

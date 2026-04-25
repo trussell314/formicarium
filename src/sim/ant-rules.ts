@@ -158,9 +158,25 @@ const PHEROMONE_FOLLOW_STRENGTH = 0.35;
 // θ = this ant's restThreshold. Per-tick engage probability is
 // further throttled by REST_PROB_PER_TICK so transitions don't
 // snap-chatter at every frame.
+//
+// Tuning: REST_PROB_PER_TICK was 0.04 but at 10Hz that left too
+// many ants parked too long; sim looked frozen. 0.012 keeps the
+// effect visible (some ants pause in crowds) without killing
+// global activity.
 const REST_CROWD_RADIUS_CELLS = 3.0;
-const REST_PROB_PER_TICK = 0.04;
-const REST_DURATION_TICKS = 50;
+const REST_PROB_PER_TICK = 0.012;
+const REST_DURATION_TICKS = 30;
+
+/**
+ * Foraging-recall bias. WANDER ants that have drifted far from
+ * their spawn point (home vector magnitude in cells) get a
+ * heading nudge back toward home. Real foragers don't wander
+ * indefinitely; they return after a search loop. Without this
+ * bias, ants emerging onto the surface wander out of the field
+ * of interest forever.
+ */
+const FORAGING_RECALL_DIST_CELLS = 30;
+const FORAGING_RECALL_STRENGTH = 0.05;
 
 // Thigmotaxis (wall-following). Ants preferentially walk along
 // surfaces (Dussutour et al. 2005). We sample one cell out on each
@@ -306,11 +322,39 @@ export function stepSimulation(
     if (state === STATE_WANDER && pheromones) {
       const g = pheromoneGradientHeading(pheromones.dig, colony.posX[i]!, colony.posY[i]!);
       if (g.magnitude > 0) {
-        // Bias strength scales with the local gradient magnitude
-        // (capped so strong-trail cells don't pin heading instantly).
         const bias = Math.min(0.5, g.magnitude) * PHEROMONE_FOLLOW_STRENGTH;
         const dh = wrapAngle(g.angle - h);
         h += dh * bias;
+      }
+    }
+    // Above-surface return: WANDER ants whose y is above the
+    // natural surface (i.e., walking on the grass / hunting in the
+    // sky) get a strong heading bias toward straight-down. Surface
+    // is foreign territory; the colony lives below ground. Without
+    // this, ants that surface to deposit grain just keep walking
+    // along the grass and never return to dig.
+    if (state === STATE_WANDER) {
+      const ix = colony.posX[i]! | 0;
+      const surfY = world.naturalSurface[ix]!;
+      if (colony.posY[i]! < surfY) {
+        const want = Math.PI / 2; // straight down
+        const dh = wrapAngle(want - h);
+        h += dh * 0.25;
+      }
+    }
+    // Foraging-recall (longer-range, lateral): WANDER ants far from
+    // their home spawn get a gentler nudge back toward home in
+    // both x and y. Real foragers patrol around the nest, not
+    // off into infinity.
+    if (state === STATE_WANDER) {
+      const hxV = colony.homeX[i]!;
+      const hyV = colony.homeY[i]!;
+      const mag = Math.hypot(hxV, hyV);
+      if (mag > FORAGING_RECALL_DIST_CELLS) {
+        const want = Math.atan2(hyV, hxV);
+        const dh = wrapAngle(want - h);
+        const k = Math.min(1, (mag - FORAGING_RECALL_DIST_CELLS) / FORAGING_RECALL_DIST_CELLS);
+        h += dh * (FORAGING_RECALL_STRENGTH * k);
       }
     }
     // Thigmotaxis (Dussutour et al. 2005): ants prefer to walk along
@@ -320,22 +364,18 @@ export function stepSimulation(
       h += thigmotaxisBias(world, colony.posX[i]!, colony.posY[i]!, h);
     }
     if (state === STATE_CARRY) {
-      // Path integration (Wehner 1996): the home vector points from
-      // the ant back toward its spawn point. Bias heading toward
-      // that direction so carrying ants return home along an
-      // efficient straight line instead of a random walk biased
-      // upward. If the ant is very close to home (|home| < 2 cells)
-      // the vector is noise-dominated — fall back to "head up"
-      // which at least reaches the surface.
-      const hxV = colony.homeX[i]!;
-      const hyV = colony.homeY[i]!;
-      const mag = Math.hypot(hxV, hyV);
-      let want: number;
-      if (mag > 2) {
-        want = Math.atan2(hyV, hxV);
-      } else {
-        want = -Math.PI / 2;
-      }
+      // Carriers head UP to the surface to deposit excavation spoil
+      // outside the nest (this is spoil disposal, not foraging
+      // return — bringing dirt INTO the nest would defeat the
+      // point). The home vector (used by the UI for "X cm from
+      // home") still updates but doesn't drive heading.
+      //
+      // Lateral nudge toward home-x: an ant whose home is offset
+      // horizontally biases its surface-heading toward that x so
+      // grain piles cluster near the entrance instead of spreading
+      // wherever the ant happened to be when it dug.
+      const homeXAhead = Math.abs(colony.homeX[i]!) > 2 ? Math.sign(colony.homeX[i]!) * 0.6 : 0;
+      const want = Math.atan2(-1, homeXAhead);
       const dh = wrapAngle(want - h);
       h += dh * CONFIG.carryUpBias;
     }
@@ -343,14 +383,19 @@ export function stepSimulation(
     h = wrapAngle(h);
     colony.heading[i] = h;
 
-    // Movement. Two half-steps; heading reflects on a hit so the ant
-    // doesn't grind into the wall indefinitely.
+    // Movement. Sub-stepped at ≤1 cell per check so we never skip
+    // over a soil interface (the previous 2-half-step approach
+    // missed soil contacts at any speed > 2 cells/tick: ants flew
+    // through walls without registering a hit, so they couldn't
+    // dig).
     let nx = colony.posX[i];
     let ny = colony.posY[i];
     let hitSoil = false;
-    for (let half = 0; half < 2; half++) {
-      const dx = Math.cos(h) * speed * 0.5;
-      const dy = Math.sin(h) * speed * 0.5;
+    const subSteps = Math.max(2, Math.ceil(speed));
+    const stepLen = speed / subSteps;
+    for (let step = 0; step < subSteps; step++) {
+      const dx = Math.cos(h) * stepLen;
+      const dy = Math.sin(h) * stepLen;
       const r = tryStep(world, nx, ny, dx, dy);
       nx = r.x;
       ny = r.y;

@@ -39,21 +39,23 @@ describe('path integration', () => {
     expect(colony.homeY[0]).toBeCloseTo(-netDy, 3);
   });
 
-  it('CARRY heading rotates toward home after one tick', () => {
-    // Unit test the heading-update rule directly, avoiding the rest
-    // of the tick loop (which involves floor collisions etc.). One
-    // tick of carryUpBias should noticeably rotate a wrong-facing
-    // ant toward its home direction.
+  it('CARRY heading rotates upward (toward surface) regardless of home', () => {
+    // CARRY semantics: ants haul excavation spoil OUT of the nest.
+    // Heading update biases toward straight-up (-π/2) so the ant
+    // climbs to the surface to deposit, with a small lateral nudge
+    // toward home-x so spoil piles cluster near the entrance.
     const { world, colony, rng } = sandbox();
-    // Very slow walk + no noise so we just observe the heading update.
+    // Cap the deposit column so tryDepositGrain returns null and
+    // the CARRY→WANDER transition doesn't fire mid-test.
+    for (let x = 0; x < world.width; x++) world.surfaceMound[x] = 99;
     colony.spawn(20.5, 38.5, 0, { walkSpeedCellsPerTick: 0.01, turnNoiseRadPerTick: 0 });
-    colony.homeX[0] = -20;
+    colony.homeX[0] = 0;
     colony.homeY[0] = 0;
     colony.setState(0, STATE_CARRY);
-    colony.heading[0] = 0; // facing right, AWAY from home
+    colony.heading[0] = 0; // facing right
     stepSimulation(world, colony, rng);
     const h = colony.heading[0]!;
-    // After one tick we should have rotated at least partway toward π.
-    expect(h).toBeGreaterThan(0.3);
+    // After one tick heading should have rotated TOWARD -π/2 (up).
+    expect(h).toBeLessThan(0);
   });
 });

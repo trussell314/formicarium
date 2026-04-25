@@ -47,7 +47,14 @@ export function isSupported(world: World, ix: number, iy: number): boolean {
  * A step is refused if:
  *   - destination is out of bounds
  *   - destination cell is solid (SOIL or GRAIN)
- *   - destination cell is air but unsupported (no-fly rule)
+ *
+ * Note: we do NOT refuse stepping into unsupported air. The
+ * end-of-tick gravity settle drops any unsupported ant to its
+ * nearest support (with prev-snap to keep the renderer's interp
+ * from flashing through midair). Refusing unsupported steps in
+ * tryStep was previously trapping ants on tiny diagonal-supported
+ * corners — they could see daylight in every direction but every
+ * step was "unsupported", so they sat rotating their heads forever.
  */
 export function tryStep(
   world: World,
@@ -66,9 +73,6 @@ export function tryStep(
   const k = world.cells[iy * world.width + ix]!;
   if (k === CELL_SOIL || k === CELL_GRAIN) {
     return { x, y, hitSoil: k === CELL_SOIL };
-  }
-  if (!isSupported(world, ix, iy)) {
-    return { x, y, hitSoil: false };
   }
   return { x: nx, y: ny, hitSoil: false };
 }

@@ -248,6 +248,14 @@ export class Renderer {
   private drawAnt(
     cx: number, cy: number, heading: number, t: number, state: number,
     bodyLengthCells: number, selected: boolean,
+    /**
+     * Direction (in world coords, unit-ish) toward the surface the
+     * ant is standing on. Legs are drawn extending in this direction
+     * from each shoulder. Defaults to world-down for ants in open
+     * space; the renderer caller computes it from local cell state.
+     */
+    legDirX = 0,
+    legDirY = 1,
   ): void {
     const ctx = this.ctx;
     const cos = Math.cos(heading);
@@ -268,28 +276,28 @@ export class Renderer {
     const petiole = pt(-0.08, 0);
     const gaster = pt(-0.30, 0);
 
-    // Legs reach toward world-down (gravity) regardless of heading
-    // so an ant on a horizontal floor always looks like it's
-    // standing on its feet, not its hind legs. For side-view
-    // cross-section, we render 3 visible legs (front / mid / rear) —
-    // the 3 legs on the far side would just overlap these, and
-    // showing only one set reads more cleanly.
-    //
-    // Shoulder sits on the body axis; foot is directly below
-    // (world-down) plus a small swing along the body axis so the
-    // gait animates. Knee bends forward of the shoulder–foot line.
+    // Legs reach in the leg-direction (toward the substrate the ant
+    // is on) regardless of heading. So an ant climbing a vertical
+    // wall has its feet pointed AT the wall, not down at the floor.
+    // Shoulder sits on the body axis; foot is in legDir from
+    // shoulder plus a small swing along the body axis so the gait
+    // animates.
     const legReach = 0.24 * L;
+    // Normalise so the configured reach length is correct regardless
+    // of the input vector magnitude.
+    const legNorm = Math.hypot(legDirX, legDirY) || 1;
+    const ldx = legDirX / legNorm;
+    const ldy = legDirY / legNorm;
     const drawLeg = (forwardFrac: number, phase: number) => {
       const shoulderX = cx + cos * forwardFrac * L;
       const shoulderY = cy + sin * forwardFrac * L;
       const swing = phase * 0.08 * L;
-      const footX = shoulderX + cos * swing;
-      const footY = shoulderY + sin * swing + legReach;
-      // Knee: world-space midpoint lifted slightly along the body
-      // axis toward the leg's stride direction, giving a visible
-      // kink. For horizontal ants this shows as an above-foot bend.
-      const midX = (shoulderX + footX) * 0.5 + cos * 0.02 * L;
-      const midY = (shoulderY + footY) * 0.5 + sin * 0.02 * L - 0.03 * L;
+      const footX = shoulderX + cos * swing + ldx * legReach;
+      const footY = shoulderY + sin * swing + ldy * legReach;
+      // Knee: world-space midpoint lifted slightly OUT from the
+      // surface (opposite legDir) to give a visible kink.
+      const midX = (shoulderX + footX) * 0.5 - ldx * 0.03 * L;
+      const midY = (shoulderY + footY) * 0.5 - ldy * 0.03 * L;
       ctx.beginPath();
       ctx.moveTo(shoulderX, shoulderY);
       ctx.lineTo(midX, midY);
@@ -554,6 +562,21 @@ export class Renderer {
       const py = colony.prevY[i]!;
       const nx = colony.posX[i]! * alpha + px * (1 - alpha);
       const ny = colony.posY[i]! * alpha + py * (1 - alpha);
+      // Compute leg direction = toward the nearest solid surface
+      // among 4 cardinals. Default to world-down. Result: ant on a
+      // floor has feet down, ant on a left wall has feet pointing
+      // right into the wall, etc. Stops vertical-heading ants from
+      // looking like they're standing on hind legs.
+      const ix = nx | 0;
+      const iy = ny | 0;
+      let ldx = 0;
+      let ldy = 1; // default: down
+      if (this.world.isSolid(ix, iy + 1)) { ldx = 0; ldy = 1; }
+      else if (this.world.isSolid(ix - 1, iy)) { ldx = -1; ldy = 0; }
+      else if (this.world.isSolid(ix + 1, iy)) { ldx = 1; ldy = 0; }
+      else if (this.world.isSolid(ix, iy - 1)) { ldx = 0; ldy = -1; }
+      else if (this.world.isSolid(ix - 1, iy + 1)) { ldx = -0.7; ldy = 0.7; }
+      else if (this.world.isSolid(ix + 1, iy + 1)) { ldx = 0.7; ldy = 0.7; }
       // Depth cue: ants farther back (higher posZ) render slightly
       // smaller and dimmer. Front ants sit at full size and contrast.
       const zNorm = colony.posZ[i]! / maxZ; // 0 = front, 1 = back
@@ -569,6 +592,8 @@ export class Renderer {
         colony.state[i]!,
         colony.bodyLengthCells[i]! * depthScale,
         colony.id[i] === this.selectedAntId,
+        ldx,
+        ldy,
       );
       ctx.restore();
     }
