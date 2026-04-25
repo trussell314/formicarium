@@ -92,10 +92,16 @@ function tryDepositGrain(world: World, ix: number, iy: number): { x: number; y: 
     const rm = cx < world.width - 1 ? world.surfaceMound[cx + 1]! : world.surfaceMound[cx]!;
     const minN = lm < rm ? lm : rm;
     if (world.surfaceMound[cx]! >= minN + CONFIG.grainAngleOfRepose) return null;
-    // Place on top of the column's current surface.
-    const sy = world.surfaceY(cx);
-    if (sy <= 0 || sy >= world.height) return null;
-    const cy = sy - 1;
+    // Place ABOVE the original natural surface, not at surfaceY().
+    // surfaceY() returns the topmost solid cell — for chamber
+    // columns that's the chamber floor *below* the chamber air, so
+    // grain ended up dumped *inside* the chamber, blocking ants
+    // and stalling the dig cycle. Grain must always pile up on the
+    // outside (above ground), regardless of what's been carved
+    // below.
+    const surfRow = world.naturalSurface[cx]!;
+    const cy = surfRow - 1 - world.surfaceMound[cx]!;
+    if (cy <= 0 || cy >= world.height) return null;
     if (world.cells[world.index(cx, cy)] !== CELL_AIR) return null;
     // Ant must be near the drop site (within 2 cells vertically).
     if (iy > cy + 2) return null;
