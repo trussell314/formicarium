@@ -30,6 +30,15 @@ const window = 30000;
 let windowDigs = 0;
 let firstDigTick = -1;
 let lastDigTick = -1;
+// Track HAUL transitions so I can see whether ants ever pick up
+// food and ever finish a haul. State changes don't have a built-in
+// counter — observe by sampling state[i] each tick and counting
+// edges into / out of HAUL.
+const STATE_HAUL_VAL = 4;
+let totalHaulPickups = 0;
+let totalHaulDeposits = 0;
+const prevState = new Uint8Array(colony.count);
+for (let i = 0; i < colony.count; i++) prevState[i] = colony.state[i];
 
 // Snapshot of original chamber boundary cells so we know which
 // soil cells were the V's perimeter at t=0.
@@ -67,6 +76,13 @@ for (let t = 1; t <= 300000; t++) {
     lastDigTick = t;
   }
   prevSoil = s;
+  for (let i = 0; i < colony.count; i++) {
+    const cur = colony.state[i];
+    const prv = prevState[i];
+    if (cur === STATE_HAUL_VAL && prv !== STATE_HAUL_VAL) totalHaulPickups++;
+    if (prv === STATE_HAUL_VAL && cur !== STATE_HAUL_VAL) totalHaulDeposits++;
+    prevState[i] = cur;
+  }
 
   if (t % window === 0) {
     let states = [0, 0, 0, 0, 0];
@@ -99,8 +115,8 @@ for (let t = 1; t <= 300000; t++) {
       `t=${String(t).padStart(6)} digs/${window}=${String(windowDigs).padStart(4)}  total=${String(totalDigs).padStart(5)}  ` +
       `W${states[0]}/D${states[1]}/C${states[2]}/R${states[3]}/H${states[4]}  ` +
       `below=${belowSurface} wB=${wanderBelow}  ` +
-      `V-perim dug=${vDug}/${vCellSet.size}  avgHome=${(avgFromHome/CELLS_PER_CM).toFixed(2)}cm  ` +
-      `food=${foodOnSurf}/${foodStored}`,
+      `V-perim=${vDug}/${vCellSet.size}  avgHome=${(avgFromHome/CELLS_PER_CM).toFixed(2)}cm  ` +
+      `food=${foodOnSurf}/${foodStored}  haul-in/out=${totalHaulPickups}/${totalHaulDeposits}`,
     );
     windowDigs = 0;
   }
