@@ -222,11 +222,22 @@ function findNearestDigFace(world: World, ix: number, iy: number, radiusCells: n
   let bestD2 = Infinity;
   const x0 = Math.max(1, ix - r);
   const x1 = Math.min(world.width - 2, ix + r);
-  const y0 = Math.max(1, iy - r);
+  // Don't search ABOVE the ant — the chamber's ceiling is the
+  // natural-surface row of neighbouring columns, and ants steered
+  // toward it cross the surface line and then get classified
+  // above-surface, where they go look for food instead of
+  // returning to dig. Restricting the seek box to y >= iy keeps
+  // the dig effort pointed *into* the substrate.
+  const y0 = Math.max(1, iy);
   const y1 = Math.min(world.height - 2, iy + r);
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
       if (world.cells[y * w + x] !== CELL_SOIL) continue;
+      // Skip the natural-surface (grass) row entirely so the seeker
+      // doesn't chase the chamber's lateral lip. That cell has
+      // air-above (sky) so it always passes the hasAir check
+      // otherwise.
+      if (y <= world.naturalSurface[x]!) continue;
       // Must have at least one air neighbour (exposed face).
       const hasAir =
         world.cells[y * w + x - 1] === CELL_AIR ||
