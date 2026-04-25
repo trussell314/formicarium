@@ -207,8 +207,14 @@ export function step(
     if (stateIn === STATE_WANDER) {
       // Downward bias keeps wanderers in the chamber, lightly. Real
       // ants are attracted to the substrate; this is the moral
-      // equivalent without modelling thermotaxis.
-      h += wrapAngle(Math.PI / 2 - h) * downBias;
+      // equivalent without modelling thermotaxis. We taper the bias
+      // off once the ant is ~15 cells below the original surface so
+      // deep chambers tend to widen laterally rather than turn into
+      // monolithic vertical shafts (Tschinkel cross-section: shafts
+      // narrow with depth, not the other way around).
+      const depth = Math.max(0, iy - surfY);
+      const dwBias = depth > 15 ? downBias * 0.25 : downBias;
+      h += wrapAngle(Math.PI / 2 - h) * dwBias;
     } else {
       // CARRY heads up to the surface to dump the grain. Lateral
       // bias toward the ORIGINAL dig column biases the ant to come
@@ -229,9 +235,19 @@ export function step(
     let nx = colony.posX[i]!;
     let ny = colony.posY[i]!;
     let hitSoil = false;
-    for (let s = 0; s < subSteps; s++) {
-      const dx = Math.cos(h) * stepLen;
-      const dy = Math.sin(h) * stepLen;
+    // Loaded-ant penalty: CARRY ants haul a grain of substrate that
+    // can be a substantial fraction of their body mass, and real
+    // foragers measurably slow when laden. Trim 30% off both the
+    // sub-step length and the substep count so the cost is real
+    // without breaking soil-hit detection.
+    const carryFactor = stateIn === STATE_CARRY ? 0.7 : 1.0;
+    const localStepLen = stepLen * carryFactor;
+    const localSubSteps = stateIn === STATE_CARRY
+      ? Math.max(2, Math.ceil(subSteps * carryFactor))
+      : subSteps;
+    for (let s = 0; s < localSubSteps; s++) {
+      const dx = Math.cos(h) * localStepLen;
+      const dy = Math.sin(h) * localStepLen;
       const r = tryStep(world, nx, ny, dx, dy);
       nx = r.x;
       ny = r.y;
@@ -251,12 +267,28 @@ export function step(
 
     // WANDER → DIG → CARRY transition.
     if (stateIn === STATE_WANDER && hitSoil && belowSurface) {
-      if (rng.next() < digProb) {
-        const target = pickDigTarget(world, ax, ay, h);
-        if (target !== null) {
-          const idx = world.index(target.x, target.y);
-          world.cells[idx] = CELL_AIR;
-          world.digTick[idx] = world.tick;
+      const target = pickDigTarget(world, ax, ay, h);
+      // Refuse to undermine grain: if the cell directly above the
+      // dig target is a grain pile, this excavation would leave it
+      // floating, which violates the "grain only sits on solid"
+      // invariant. Detected here as a guard so we never produce a
+      // hovering pile under any combination of biases.
+      const undermines = target !== null && target.y > 0
+        && world.cells[world.index(target.x, target.y - 1)] === CELL_GRAIN;
+      if (target !== null && !undermines) {
+        // Exposure scaling: walls that have been air-fronted for a
+        // long time are softer (Tschinkel observations) — boost the
+        // dig probability above the base value as exposure rises,
+        // saturating at +50%. Cells freshly exposed dig at the base
+        // rate. This produces visible chamber widening rates
+        // accelerating once a wall is established.
+        const tIdx = world.index(target.x, target.y);
+        const expo = world.exposure[tIdx]!;
+        const expoBoost = 1 + 0.5 * Math.min(1, expo / 200);
+        if (rng.next() < digProb * expoBoost) {
+          world.cells[tIdx] = CELL_AIR;
+          world.digTick[tIdx] = world.tick;
+          world.exposure[tIdx] = 0;
           colony.posX[i] = target.x + 0.5;
           colony.posY[i] = target.y + 0.5;
           colony.setState(i, STATE_CARRY);
