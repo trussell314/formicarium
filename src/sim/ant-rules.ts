@@ -179,6 +179,8 @@ const FOOD_SEARCH_RADIUS_CM = 2.0;
 const SOIL_SEARCH_RADIUS_CM = 1.5;
 /** Cap on simultaneous food crumbs visible on the surface. */
 const SURFACE_FOOD_MAX = 6;
+/** Half-width of the column range food spawns into, centred on the chamber. */
+const FOOD_SPAWN_HALF_WIDTH_CM = 2.0;
 
 function findNearestFood(world: World, ix: number, iy: number, radiusCells: number): { x: number; y: number } | null {
   const r = Math.ceil(radiusCells);
@@ -351,9 +353,21 @@ export function stepSimulation(
       if (world.cells[k] === CELL_FOOD) onSurface++;
     }
     if (onSurface < SURFACE_FOOD_MAX) {
+      // Bias the drop toward the chamber columns. Above-surface ants
+      // from the spawn area only roam within ~SOIL_SEARCH×2 of
+      // chamber-center, so spawning food across the whole 12-cm
+      // world stranded most crumbs in remote columns ants never
+      // visited (haul-in/out=1/0 over 30 k ticks). Picking from a
+      // ~4-cm window centred on the chamber keeps food in foraging
+      // reach.
+      const spawnHalfWidth = (FOOD_SPAWN_HALF_WIDTH_CM * CELLS_PER_CM) | 0;
+      const cx = world.width >> 1;
+      const lo = Math.max(0, cx - spawnHalfWidth);
+      const hi = Math.min(world.width - 1, cx + spawnHalfWidth);
+      const span = hi - lo + 1;
       const tries = 8;
       for (let t = 0; t < tries; t++) {
-        const fx = (rng.next() * world.width) | 0;
+        const fx = lo + ((rng.next() * span) | 0);
         const surfY = world.naturalSurface[fx]!;
         if (surfY <= 0 || surfY >= world.height) continue;
         const fy = surfY - 1;
