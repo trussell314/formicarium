@@ -1,6 +1,10 @@
-// Struct-of-arrays agent storage. Per CLAUDE.md, never an array of class
-// instances — parallel TypedArrays so iteration is hot-loop friendly and
-// the renderer can sweep them as arrays.
+// Agent storage. Pure SoA — nothing here decides anything; that's
+// ant-rules.ts. Per CLAUDE.md, never an array of class instances.
+//
+// State is just the position, heading, and a two-state machine:
+// WANDER (looking around / picking dig sites) vs CARRY (transporting
+// excavated material to the surface). Anything more elaborate has
+// historically been a vector for deadlocks.
 
 import type { RNG } from './rng';
 
@@ -19,25 +23,6 @@ export class Colony {
   readonly heading: Float32Array;
   readonly state: Uint8Array;
   readonly stateTicks: Int32Array;
-  /** Cell column where the most recent dig happened. Used by CARRY ants
-   *  to bias their deposit search back toward the active work zone,
-   *  and (with lastDigY) by post-deposit WANDER ants to head straight
-   *  back to the tunnel they were extending. */
-  readonly lastDigX: Int16Array;
-  readonly lastDigY: Int16Array;
-  /** Spawn position. Above-surface WANDER ants are biased toward this
-   *  point so they return to the nest opening rather than wandering
-   *  off across the surface forever. */
-  readonly homeX: Float32Array;
-  readonly homeY: Float32Array;
-  /** Preferred heading per ant, in radians. Set when the ant commits
-   *  to a tunnel direction (e.g. just dug a cell) and gradually
-   *  decays in influence over `headingTimer` ticks. Without this
-   *  every ant's heading is dominated by repulsion + noise, so they
-   *  bounce off their own tunnel walls and lose their tunnel
-   *  identity within a few ticks. */
-  readonly preferredHeading: Float32Array;
-  readonly headingTimer: Int16Array;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -47,12 +32,6 @@ export class Colony {
     this.prevY = new Float32Array(capacity);
     this.heading = new Float32Array(capacity);
     this.state = new Uint8Array(capacity);
-    this.lastDigX = new Int16Array(capacity);
-    this.lastDigY = new Int16Array(capacity);
-    this.homeX = new Float32Array(capacity);
-    this.homeY = new Float32Array(capacity);
-    this.preferredHeading = new Float32Array(capacity);
-    this.headingTimer = new Int16Array(capacity);
     this.stateTicks = new Int32Array(capacity);
   }
 
@@ -65,10 +44,6 @@ export class Colony {
     this.prevY[i] = y;
     this.heading[i] = heading;
     this.state[i] = STATE_WANDER;
-    this.lastDigX[i] = x | 0;
-    this.lastDigY[i] = y | 0;
-    this.homeX[i] = x;
-    this.homeY[i] = y;
     this.stateTicks[i] = 0;
     return i;
   }
@@ -78,7 +53,7 @@ export class Colony {
     this.stateTicks[i] = 0;
   }
 
-  /** Spawn `n` ants in random AIR cells inside the given inclusive rect. */
+  /** Spawn `n` ants at random AIR positions inside an inclusive rect. */
   spawnInRect(
     x0: number, y0: number, x1: number, y1: number,
     n: number, rng: RNG, isAir: (x: number, y: number) => boolean,

@@ -15,7 +15,7 @@ import { writeFileSync } from 'fs';
 import { deflateSync } from 'zlib';
 import { Colony } from '../src/sim/colony';
 import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
-import { ParticleSystem } from '../src/sim/particles';
+import { Pheromone } from '../src/sim/pheromone';
 import { RNG } from '../src/sim/rng';
 import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from '../src/sim/world';
 
@@ -172,13 +172,14 @@ colony.spawnInRect(
   cx - divotR + 1, surfaceRow + divotR - 1, cx + divotR - 1, surfaceRow + 2 * divotR - 1,
   ANTS, rng, (x, y) => world.cells[world.index(x, y)] === 0,
 );
-const particles = new ParticleSystem(256);
+const digField = new Pheromone(world.width, world.height, 0.12, 0.992);
+const buildField = new Pheromone(world.width, world.height, 0.10, 0.997);
 
 let prevSoil = world.countSoil();
 const WINDOW = 5000;
 let windowDigs = 0;
 for (let t = 1; t <= TICKS; t++) {
-  step(world, colony, rng, DEFAULT_PARAMS, particles);
+  step(world, colony, digField, buildField, rng, DEFAULT_PARAMS);
   const s = world.countSoil();
   if (s < prevSoil) windowDigs += prevSoil - s;
   prevSoil = s;

@@ -9,6 +9,7 @@
 import { Colony } from './sim/colony';
 import { DEFAULT_PARAMS, step } from './sim/ant-rules';
 import { ParticleSystem } from './sim/particles';
+import { Pheromone } from './sim/pheromone';
 import { RNG } from './sim/rng';
 import { World } from './sim/world';
 import { Renderer } from './render/renderer';
@@ -58,11 +59,18 @@ function build(s: Settings) {
   const depth = Math.max(4, Math.floor(s.height * 0.05));
   world.generate(rng, surfaceRow, halfW, depth);
 
+  // Two pheromone fields. Parameters are at the conservative end of
+  // the literature ranges: diffusion 0.12 (slow horizontal spread,
+  // gradients stay sharp), dig evaporation 0.992 (~half-life of
+  // ~85 ticks), build evaporation 0.997 (longer-lived because spoil
+  // mounds are persistent landmarks).
+  const digField = new Pheromone(world.width, world.height, 0.12, 0.992);
+  const buildField = new Pheromone(world.width, world.height, 0.10, 0.997);
+
   const colony = new Colony(s.ants);
   const cx = world.width >> 1;
-  // Spawn ants in the BOTTOM half of the divot (deeper rows) — they
-  // get a few digs in before the random heading walks any of them
-  // out the top. The divot radius matches what world.generate uses.
+  // Spawn ants in the BOTTOM half of the divot (deeper rows) — the
+  // divot radius matches what world.generate uses.
   const divotR = Math.max(4, Math.min(halfW, depth + 3));
   colony.spawnInRect(
     cx - divotR + 1,
@@ -73,12 +81,12 @@ function build(s: Settings) {
     rng,
     (x, y) => world.cells[world.index(x, y)] === 0 /* AIR */,
   );
-  return { rng, world, colony };
+  return { rng, world, colony, digField, buildField };
 }
 
 function main(): void {
   const settings = readSettings();
-  let { rng, world, colony } = build(settings);
+  let { rng, world, colony, digField, buildField } = build(settings);
 
   const canvas = document.getElementById('screen') as HTMLCanvasElement;
   const hud = document.getElementById('hud') as HTMLDivElement;
@@ -220,6 +228,8 @@ function main(): void {
       rng = built.rng;
       world = built.world;
       colony = built.colony;
+      digField = built.digField;
+      buildField = built.buildField;
       // Hot-swap: rebuild renderer view of the new world.
       (renderer as unknown as { world: World }).world = world;
     }
@@ -235,8 +245,9 @@ function main(): void {
 
     if (!paused) {
       for (let i = 0; i < stepsPerFrame; i++) {
-        step(world, colony, rng, DEFAULT_PARAMS, particles);
+        step(world, colony, digField, buildField, rng, DEFAULT_PARAMS);
       }
+      void particles;
       // No fixed-timestep accumulator yet — render alpha=1 (no
       // interpolation) is fine while sub-stepping multiple sim ticks
       // per frame, since the visible motion comes from the sim itself.
