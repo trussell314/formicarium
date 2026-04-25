@@ -8,6 +8,7 @@ import { DEFAULT_SCENARIO } from './scenarios/default';
 import { stepSimulation } from './sim/ant-rules';
 import { createPheromones } from './sim/pheromone';
 import { Renderer } from './render/renderer';
+import { AntMeshRenderer } from './render/ant-mesh';
 import { Loop } from './runtime/loop';
 import { bindVisibilityPause } from './runtime/visibility';
 import { antName } from './names';
@@ -35,6 +36,41 @@ function boot(): void {
     resolved.cellsPerCm,
   );
 
+  // WebGL ant renderer (3D model). Loads asynchronously; until it's
+  // ready, the 2D Renderer keeps drawing procedural ants. Once
+  // loaded, we flip renderer.drawAnts off and the 3D layer takes
+  // over.
+  const canvas3d = document.getElementById('screen-3d') as HTMLCanvasElement | null;
+  const meshRenderer = canvas3d
+    ? new AntMeshRenderer(canvas3d, world.width, world.height)
+    : null;
+  if (meshRenderer) {
+    meshRenderer.load('/ant.glb').then(() => {
+      renderer.drawAnts = false;
+    }).catch((err) => {
+      console.warn('failed to load /ant.glb, staying with 2D ants', err);
+    });
+  }
+
+  function fitMeshCanvas(): void {
+    if (!canvas3d || !meshRenderer) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas3d.width = Math.floor(window.innerWidth * dpr);
+    canvas3d.height = Math.floor(window.innerHeight * dpr);
+    // Use the same fit-rect math as the 2D canvas so the ants land
+    // on the dirt rather than getting letterboxed.
+    const ww = world.width;
+    const wh = world.height;
+    const s = Math.max(canvas3d.width / ww, canvas3d.height / wh);
+    const dw = ww * s;
+    const dh = wh * s;
+    const dx = (canvas3d.width - dw) * 0.5;
+    const dy = (canvas3d.height - dh) * 0.5;
+    meshRenderer.resize(canvas3d.width, canvas3d.height, { dx, dy, dw, dh });
+  }
+  fitMeshCanvas();
+  window.addEventListener('resize', fitMeshCanvas);
+
   const simHz = 1 / resolved.secondsPerTick;
   const loop = new Loop(simHz, {
     step: () => stepSimulation(
@@ -45,7 +81,10 @@ function boot(): void {
       pheromones,
       { dayDurationTicks: resolved.dayDurationTicks, nightDurationTicks: resolved.nightDurationTicks },
     ),
-    draw: (alpha: number) => renderer.draw(colony, alpha),
+    draw: (alpha: number) => {
+      renderer.draw(colony, alpha);
+      meshRenderer?.render(colony, alpha);
+    },
   });
 
   // Click / tap → select nearest ant within a reasonable radius.

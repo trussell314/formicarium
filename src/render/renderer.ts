@@ -494,6 +494,13 @@ export class Renderer {
 
   /** Selected ant id to highlight; -1 for none. */
   selectedAntId = -1;
+  /**
+   * When true, the 2D renderer skips drawing ants — used once the
+   * WebGL ant layer has loaded its model. Until then, 2D ants
+   * render as a fallback so the user sees something while the
+   * 12 MB glTF downloads.
+   */
+  drawAnts = true;
 
   draw(colony: Colony, alpha: number): void {
     const ctx = this.ctx;
@@ -538,6 +545,9 @@ export class Renderer {
       const sy = archHorizonY - Math.cos(sunAng) * archSpanY;
       this.drawCrescentMoon(mx, my, discR * 0.9, sx, sy);
     }
+
+    // Skip the 2D ant pass once the WebGL ant renderer has taken over.
+    if (!this.drawAnts) return;
 
     // Ants — world-space coordinates scaled to canvas.
     // Render back-to-front in z so the front ants occlude those
