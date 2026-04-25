@@ -165,8 +165,6 @@ const PHEROMONE_FOLLOW_STRENGTH = 0.35;
 const REST_CROWD_RADIUS_CM = 0.5;
 const REST_PROB_PER_TICK = 0.012;
 const REST_DURATION_TICKS = 30;
-const FORAGING_RECALL_DIST_CM = 1.5;
-const FORAGING_RECALL_STRENGTH = 0.05;
 
 // Thigmotaxis (wall-following). Ants preferentially walk along
 // surfaces (Dussutour et al. 2005). We sample one cell out on each
@@ -177,6 +175,8 @@ const THIGMOTAXIS_PROBE_CM = 0.05;
 
 /** Radius (cm) within which a surface ant detects food crumbs. */
 const FOOD_SEARCH_RADIUS_CM = 2.0;
+/** Radius (cm) within which a below-surface ant detects soil to dig. */
+const SOIL_SEARCH_RADIUS_CM = 1.5;
 
 function findNearestFood(world: World, ix: number, iy: number, radiusCells: number): { x: number; y: number } | null {
   const r = Math.ceil(radiusCells);
@@ -191,6 +191,47 @@ function findNearestFood(world: World, ix: number, iy: number, radiusCells: numb
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
       if (world.cells[y * world.width + x] !== CELL_FOOD) continue;
+      const dx = x - ix;
+      const dy = y - iy;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2 && d2 <= r2) {
+        bestD2 = d2;
+        bestX = x;
+        bestY = y;
+      }
+    }
+  }
+  return bestX < 0 ? null : { x: bestX, y: bestY };
+}
+
+/**
+ * Locate the nearest soil cell that's adjacent to an air cell (a
+ * dig face — soil with at least one exposed side). Below-surface
+ * WANDER ants steer toward the nearest such face; without this they
+ * stay pinned near the chamber centre by the path-integration
+ * recall and never reach a wall to dig.
+ */
+function findNearestDigFace(world: World, ix: number, iy: number, radiusCells: number): { x: number; y: number } | null {
+  const r = Math.ceil(radiusCells);
+  const r2 = radiusCells * radiusCells;
+  const w = world.width;
+  let bestX = -1;
+  let bestY = -1;
+  let bestD2 = Infinity;
+  const x0 = Math.max(1, ix - r);
+  const x1 = Math.min(world.width - 2, ix + r);
+  const y0 = Math.max(1, iy - r);
+  const y1 = Math.min(world.height - 2, iy + r);
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      if (world.cells[y * w + x] !== CELL_SOIL) continue;
+      // Must have at least one air neighbour (exposed face).
+      const hasAir =
+        world.cells[y * w + x - 1] === CELL_AIR ||
+        world.cells[y * w + x + 1] === CELL_AIR ||
+        world.cells[(y - 1) * w + x] === CELL_AIR ||
+        world.cells[(y + 1) * w + x] === CELL_AIR;
+      if (!hasAir) continue;
       const dx = x - ix;
       const dy = y - iy;
       const d2 = dx * dx + dy * dy;
@@ -376,43 +417,38 @@ export function stepSimulation(
         h += dh * bias;
       }
     }
-    // Surface logic: WANDER ants above the natural surface either
-    // forage (head toward visible food) or, if none is in range,
-    // head back down to the nest. Real foragers don't dwell on
-    // the surface unless there's reason to.
+    // WANDER targeting: behaviour depends on whether the ant is
+    // above ground (forager territory) or below ground (digger
+    // territory).
     if (state === STATE_WANDER) {
       const ix = colony.posX[i]! | 0;
       const iy = colony.posY[i]! | 0;
       const surfY = world.naturalSurface[ix]!;
       if (iy < surfY) {
+        // Above the surface: head toward visible food, or back
+        // down to the nest if none in range.
         const food = findNearestFood(world, ix, iy, FOOD_SEARCH_RADIUS_CM * CELLS_PER_CM);
         if (food !== null) {
-          // Head toward food — direct attraction.
           const want = Math.atan2(food.y + 0.5 - colony.posY[i]!, food.x + 0.5 - colony.posX[i]!);
-          const dh = wrapAngle(want - h);
-          h += dh * 0.4;
+          h += wrapAngle(want - h) * 0.4;
         } else {
-          // No food visible — head back down to the nest.
-          const want = Math.PI / 2; // straight down
-          const dh = wrapAngle(want - h);
-          h += dh * 0.6;
+          h += wrapAngle(Math.PI / 2 - h) * 0.6;
         }
-      }
-    }
-    // Foraging-recall (longer-range, lateral): WANDER ants far from
-    // their home spawn get a gentler nudge back toward home in
-    // both x and y. Real foragers patrol around the nest, not
-    // off into infinity.
-    if (state === STATE_WANDER) {
-      const hxV = colony.homeX[i]!;
-      const hyV = colony.homeY[i]!;
-      const mag = Math.hypot(hxV, hyV);
-      const recallCells = FORAGING_RECALL_DIST_CM * CELLS_PER_CM;
-      if (mag > recallCells) {
-        const want = Math.atan2(hyV, hxV);
-        const dh = wrapAngle(want - h);
-        const k = Math.min(1, (mag - recallCells) / recallCells);
-        h += dh * (FORAGING_RECALL_STRENGTH * k);
+      } else {
+        // Below the surface: head toward the nearest exposed
+        // soil face. This is the fix for "ants huddle in chamber
+        // centre and never dig" — without active soil-seeking,
+        // the foraging-recall pinned ants near home (~1 cm
+        // from spawn) and they couldn't reach the chamber walls
+        // (~2+ cm away).
+        const face = findNearestDigFace(world, ix, iy, SOIL_SEARCH_RADIUS_CM * CELLS_PER_CM);
+        if (face !== null) {
+          const want = Math.atan2(face.y + 0.5 - colony.posY[i]!, face.x + 0.5 - colony.posX[i]!);
+          h += wrapAngle(want - h) * 0.35;
+        }
+        // Foraging-recall does NOT apply below-surface — it was
+        // pinning diggers near spawn. Above-surface ants still
+        // get pulled home through the surface-return rule above.
       }
     }
     // Thigmotaxis (Dussutour et al. 2005): ants prefer to walk along

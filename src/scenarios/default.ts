@@ -37,6 +37,11 @@ export const DEFAULT_SCENARIO: Scenario = {
   // at 30 Hz).
   debugIntervalTicks: 150,
 
+  // Food drops every 12 s of sim time (was 4 s). With 10 ants the
+  // previous rate kept ~9/10 of them stuck in HAUL trips at any
+  // moment, leaving almost nobody free to dig.
+  foodSpawnIntervalSec: 12,
+
   ants: {
     worker: {
       count: 10,

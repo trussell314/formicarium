@@ -52,16 +52,23 @@ describe('circadian modulation', () => {
   it('no cycle passed → no modulation (full-speed always)', () => {
     const rng = new RNG(1);
     const { world, colony } = sandbox();
-    // Set the natural surface ABOVE the ant so the new "above-
-    // surface return" rule doesn't fire and tilt the ant downward.
+    // Set the natural surface ABOVE the ant so the "above-surface
+    // return" rule doesn't fire. Clear ALL soil so the new
+    // below-surface dig-face seeker doesn't aim the ant into a
+    // wall it can't push through — the invariant under test is
+    // "moves at full speed", not "moves in a particular direction".
     for (let x = 0; x < world.width; x++) world.naturalSurface[x] = 10;
+    world.cells.fill(CELL_AIR);
     colony.spawn(20.5, 19.5, 0, {
       walkSpeedCellsPerTick: 0.2, turnNoiseRadPerTick: 0,
       restThreshold: 9,
     });
     const startX = colony.posX[0]!;
+    const startY = colony.posY[0]!;
     for (let t = 0; t < 50; t++) stepSimulation(world, colony, rng);
-    const moved = Math.abs(colony.posX[0]! - startX);
+    const moved = Math.hypot(
+      colony.posX[0]! - startX, colony.posY[0]! - startY,
+    );
     expect(moved).toBeGreaterThan(3);
   });
 });
