@@ -247,7 +247,9 @@ export function step(
     void stateIn; // re-read below as state may have changed
 
     // (2) Stigmergy — bias toward the gradient of the field for our
-    // current state.
+    // current state. WANDER follows dig pheromone (recruit to active
+    // dig sites); CARRY follows build pheromone (recruit to existing
+    // mounds for deposit).
     const field = stateIn === STATE_WANDER ? digField : buildField;
     const grad = field.gradient(ix, iy);
     const gMag = Math.hypot(grad.dx, grad.dy);
@@ -294,7 +296,21 @@ export function step(
     // soil cell; the env handles any granular cascade. Drop dig
     // pheromone at the new air cell so other ants are recruited.
     if (stateIn === STATE_WANDER && hitSoil) {
-      if (rng.next() < colony.digProb[i]!) {
+      // Khuong et al. 2016 topochemistry: ants are MORE LIKELY to
+      // dig at a site that's already been "marked" by construction
+      // activity in the immediate vicinity. Local build pheromone
+      // signals "the colony's already working here, stay and dig
+      // outward." Without this, every new dig site competes from
+      // scratch with the dominant front; with it, lateral
+      // expansion next to existing mounds becomes self-reinforcing
+      // and tunnels can branch off into side chambers.
+      //
+      //   Khuong, A., Gautrais, J., Perna, A., et al. (2016).
+      //   Stigmergic construction and topochemical information
+      //   shape ant nest architecture. PNAS 113(5): 1303–1308.
+      const local = buildField.sample(ax, ay);
+      const khuongBoost = 1 + Math.min(1.5, local * 1.5);
+      if (rng.next() < colony.digProb[i]! * khuongBoost) {
         const target = adjacentSoil(world, ax, ay, h);
         if (target !== null) {
           if (digCell(world, target.x, target.y, rng)) {
