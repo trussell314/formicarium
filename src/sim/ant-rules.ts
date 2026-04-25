@@ -103,6 +103,13 @@ function tryDepositGrain(world: World, ix: number, iy: number): { x: number; y: 
     const cy = surfRow - 1 - world.surfaceMound[cx]!;
     if (cy <= 0 || cy >= world.height) return null;
     if (world.cells[world.index(cx, cy)] !== CELL_AIR) return null;
+    // The cell BELOW the deposit target must be solid — otherwise
+    // the grain hovers above chamber air. Floating grain piles
+    // formed when CARRY ants tried to deposit on chamber columns
+    // (whose surfRow cell is AIR, not grass), and ants ended up
+    // marooned on top of those floaters with no path back down.
+    const below = world.cells[world.index(cx, cy + 1)];
+    if (below !== CELL_SOIL && below !== CELL_GRAIN) return null;
     // Ant must be near the drop site (within 2 cells vertically).
     if (iy > cy + 2) return null;
     world.cells[world.index(cx, cy)] = CELL_GRAIN;
