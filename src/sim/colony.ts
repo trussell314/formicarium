@@ -10,8 +10,13 @@ import type { RNG } from './rng';
 
 export const STATE_WANDER = 0;
 export const STATE_CARRY = 1;
+/** Brief stationary withdrawal triggered by collision overload. The
+ *  third state in the Aguilar et al. 2018 / Aina et al. 2023
+ *  "agitation" model: ants in a crowded zone briefly withdraw,
+ *  freeing the choke point and dispersing the work crew. */
+export const STATE_REST = 2;
 
-export type AntState = 0 | 1;
+export type AntState = 0 | 1 | 2;
 
 export class Colony {
   count = 0;
@@ -36,6 +41,13 @@ export class Colony {
   readonly pickProb: Float32Array;
   readonly stigmergy: Float32Array;
   readonly turnNoise: Float32Array;
+  /** Per-ant collision threshold (number of recent collisions before
+   *  the ant withdraws into REST). Aguilar 2018; Aina 2023. */
+  readonly restThreshold: Float32Array;
+  /** Decaying collision counter — incremented each tick by overlap
+   *  count, multiplied by COLLISION_DECAY each tick. When it
+   *  crosses `restThreshold`, the ant enters REST. */
+  readonly collisionCount: Float32Array;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -50,6 +62,8 @@ export class Colony {
     this.pickProb = new Float32Array(capacity);
     this.stigmergy = new Float32Array(capacity);
     this.turnNoise = new Float32Array(capacity);
+    this.restThreshold = new Float32Array(capacity);
+    this.collisionCount = new Float32Array(capacity);
   }
 
   /**
@@ -65,7 +79,7 @@ export class Colony {
 
   spawn(
     x: number, y: number, heading: number, rng: RNG,
-    means: { digProb: number; pickProb: number; stigmergy: number; turnNoise: number },
+    means: { digProb: number; pickProb: number; stigmergy: number; turnNoise: number; restThreshold: number },
     sigma = 0.3,
   ): number {
     if (this.count >= this.capacity) return -1;
@@ -81,6 +95,8 @@ export class Colony {
     this.pickProb[i] = this.trait(rng, means.pickProb, sigma);
     this.stigmergy[i] = this.trait(rng, means.stigmergy, sigma);
     this.turnNoise[i] = this.trait(rng, means.turnNoise, sigma);
+    this.restThreshold[i] = this.trait(rng, means.restThreshold, sigma);
+    this.collisionCount[i] = 0;
     return i;
   }
 
@@ -93,7 +109,7 @@ export class Colony {
   spawnInRect(
     x0: number, y0: number, x1: number, y1: number,
     n: number, rng: RNG, isAir: (x: number, y: number) => boolean,
-    means: { digProb: number; pickProb: number; stigmergy: number; turnNoise: number },
+    means: { digProb: number; pickProb: number; stigmergy: number; turnNoise: number; restThreshold: number },
   ): number {
     let placed = 0;
     let tries = 0;

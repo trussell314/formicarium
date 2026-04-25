@@ -37,7 +37,7 @@
 // flavoured" hack creeps back in, it should justify itself with a
 // citation right here.
 
-import { Colony, STATE_CARRY, STATE_WANDER, type AntState } from './colony';
+import { Colony, STATE_CARRY, STATE_REST, STATE_WANDER, type AntState } from './colony';
 import { Pheromone } from './pheromone';
 import { digCell, isSupported, pickGrain, placeGrain, settle, tryStep } from './physics';
 import type { RNG } from './rng';
@@ -64,6 +64,13 @@ export interface SimParams {
   digDeposit: number;
   /** Pheromone amount deposited on grain placement. */
   buildDeposit: number;
+  /** Mean of the per-ant collision threshold (Beshers & Fewell
+   *  individual-threshold sample). Aina et al. 2023 report behavioural
+   *  withdrawal after ~4–5 close contacts. */
+  restThreshold: number;
+  /** Ticks an ant stays in REST before resuming WANDER. Hard-capped
+   *  for deadlock safety — REST always exits cleanly. */
+  restDuration: number;
 }
 
 export const DEFAULT_PARAMS: SimParams = {
@@ -75,7 +82,15 @@ export const DEFAULT_PARAMS: SimParams = {
   geotaxis: 0.35,
   digDeposit: 1.0,
   buildDeposit: 1.0,
+  restThreshold: 8.0,
+  restDuration: 30,
 };
+
+/** Distance below which two ants count as colliding. ≈ 1 body length. */
+const COLLISION_RADIUS = 1.0;
+/** Multiplicative decay applied to collisionCount each tick. ~50-tick
+ *  half-life — collisions are recent indicators, not lifetime tally. */
+const COLLISION_DECAY = 0.985;
 
 const TWO_PI = Math.PI * 2;
 
@@ -157,16 +172,79 @@ export function step(
   const subSteps = Math.max(2, Math.ceil(walkSpeed));
   const stepLen = walkSpeed / subSteps;
 
+  // Pairwise collision pass — Aguilar et al. 2018 / Aina et al. 2023
+  // "agitation" model. Each ant's collisionCount decays each tick
+  // and is bumped by overlap with any other ant within
+  // COLLISION_RADIUS. WANDER ants whose count crosses their
+  // restThreshold withdraw into REST. O(n²); fine for n ≤ 200.
+  for (let i = 0; i < colony.count; i++) {
+    colony.collisionCount[i]! *= COLLISION_DECAY;
+  }
+  const cr2 = COLLISION_RADIUS * COLLISION_RADIUS;
+  for (let i = 0; i < colony.count; i++) {
+    for (let j = i + 1; j < colony.count; j++) {
+      const dx = colony.posX[j]! - colony.posX[i]!;
+      const dy = colony.posY[j]! - colony.posY[i]!;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < cr2 && d2 > 1e-6) {
+        colony.collisionCount[i]! += 1;
+        colony.collisionCount[j]! += 1;
+      }
+    }
+  }
+
   for (let i = 0; i < colony.count; i++) {
     colony.prevX[i] = colony.posX[i]!;
     colony.prevY[i] = colony.posY[i]!;
     let h = colony.heading[i]!;
-    const stateIn: AntState = colony.state[i] as AntState;
+    let stateIn: AntState = colony.state[i] as AntState;
     const ix = colony.posX[i]! | 0;
     const iy = colony.posY[i]! | 0;
 
+    // REST tick. The Aina et al. 2023 model has withdrawn ants
+    // wandering AWAY from the crowd — not freezing — so the ant
+    // moves with correlated random walk only (no stigmergy
+    // recruitment, no geotaxis). They can't dig and can't pick up
+    // grain. After restDuration ticks the ant resumes WANDER with
+    // a cleared collision count.
+    if (stateIn === STATE_REST) {
+      colony.stateTicks[i]!++;
+      if (colony.stateTicks[i]! >= params.restDuration) {
+        colony.setState(i, STATE_WANDER);
+        colony.collisionCount[i] = 0;
+      } else {
+        // Random-walk step. Move-only; no stigmergy bias.
+        h += rng.gauss() * colony.turnNoise[i]!;
+        colony.heading[i] = wrapAngle(h);
+        let nx = colony.posX[i]!;
+        let ny = colony.posY[i]!;
+        for (let s = 0; s < subSteps; s++) {
+          const dx = Math.cos(h) * stepLen;
+          const dy = Math.sin(h) * stepLen;
+          const r = tryStep(world, nx, ny, dx, dy);
+          nx = r.x; ny = r.y;
+          if (r.hitSoil) {
+            h = wrapAngle(h + Math.PI * (0.5 + rng.next() * 0.5));
+            colony.heading[i] = h;
+          }
+        }
+        colony.posX[i] = nx;
+        colony.posY[i] = ny;
+        continue;
+      }
+    }
+
+    // WANDER ants overloaded by collisions enter REST. CARRY ants
+    // are committed to deposit and ignore the agitation signal —
+    // real laden foragers don't drop their cargo to rest.
+    if (stateIn === STATE_WANDER && colony.collisionCount[i]! > colony.restThreshold[i]!) {
+      colony.setState(i, STATE_REST);
+      continue;
+    }
+
     // (1) Correlated random walk — Gaussian heading perturbation.
     h += rng.gauss() * colony.turnNoise[i]!;
+    void stateIn; // re-read below as state may have changed
 
     // (2) Stigmergy — bias toward the gradient of the field for our
     // current state.
