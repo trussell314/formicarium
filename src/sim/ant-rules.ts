@@ -38,6 +38,7 @@
 // citation right here.
 
 import { Colony, STATE_CARRY, STATE_REST, STATE_WANDER, type AntState } from './colony';
+import type { ParticleSystem } from './particles';
 import { Pheromone } from './pheromone';
 import { digCell, isSupported, pickGrain, placeGrain, settle, tryStep } from './physics';
 import type { RNG } from './rng';
@@ -158,12 +159,15 @@ export function step(
   buildField: Pheromone,
   rng: RNG,
   params: SimParams = DEFAULT_PARAMS,
+  particles?: ParticleSystem,
 ): void {
   world.tick++;
 
-  // Environmental dynamics: pheromone fields advance one tick.
+  // Environmental dynamics: pheromone fields advance one tick;
+  // dust particle ringbuffer ages and gravity-falls one tick.
   digField.step();
   buildField.step();
+  if (particles) particles.step();
 
   // walkSpeed, geotaxis, and the deposit amounts stay as colony-wide
   // constants; the per-ant heterogeneity (digProb, pickProb,
@@ -324,6 +328,22 @@ export function step(
             colony.setState(i, STATE_CARRY);
             digField.deposit(target.x, target.y, digDeposit);
             colony.heading[i] = -Math.PI / 2 + rng.range(-0.3, 0.3);
+            // Spawn a small puff of dust from the dig site so the
+            // event is visible. Three particles drifting up + away
+            // from the wall, lifetime ~30 ticks.
+            if (particles) {
+              for (let k = 0; k < 3; k++) {
+                const a = rng.range(-Math.PI, 0);
+                const sp = rng.range(0.05, 0.18);
+                particles.spawn(
+                  target.x + 0.5,
+                  target.y + 0.3,
+                  Math.cos(a) * sp,
+                  Math.sin(a) * sp - 0.05,
+                  28 + ((rng.next() * 16) | 0),
+                );
+              }
+            }
           }
         }
       }
@@ -350,6 +370,19 @@ export function step(
           // field (the act of disturbing a pile is itself a
           // construction-pheromone signal in the Theraulaz model).
           buildField.deposit(target.x, target.y, buildDeposit * 0.5);
+          // Tiny dust puff at the disturbed grain — fewer/shorter
+          // than a fresh dig because nothing's being broken loose.
+          if (particles) {
+            for (let k = 0; k < 2; k++) {
+              const a = rng.range(-Math.PI, 0);
+              const sp = rng.range(0.04, 0.10);
+              particles.spawn(
+                target.x + 0.5, target.y + 0.3,
+                Math.cos(a) * sp, Math.sin(a) * sp - 0.03,
+                18 + ((rng.next() * 10) | 0),
+              );
+            }
+          }
         }
       }
     }

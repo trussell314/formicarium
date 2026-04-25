@@ -86,6 +86,12 @@ export function tryStep(
   if (k === CELL_AIR) return { x: nx, y: ny, hitSoil: false };
   if (k === CELL_SOIL) return { x, y, hitSoil: true };
   // GRAIN — try to climb up to 2 cells.
+  // For an honest stair-step we need (a) the destination cell at
+  // the lifted row to be air [upK] and (b) headroom above the ant's
+  // origin so it can lift its body before stepping sideways. The
+  // headroom check pairs the source row's headIy with the source
+  // col cx — both pre-move. This is the geometric condition for
+  // the body's diagonal sweep to clear both ceilings.
   const MAX_CLIMB = 2;
   for (let dh = 1; dh <= MAX_CLIMB; dh++) {
     const probeIy = iy - dh;
@@ -96,7 +102,11 @@ export function tryStep(
     if (upK === CELL_AIR && headK === CELL_AIR) {
       return { x: nx, y: ny - dh, hitSoil: false };
     }
-    if (upK === CELL_SOIL) break;
+    // Stop probing if either the lift-target column has soil above
+    // the grain (no climb past it) or the source column does (no
+    // headroom). Previously only upK==SOIL broke; a SOIL ceiling at
+    // the source could leave the loop running an extra iteration.
+    if (upK === CELL_SOIL || headK === CELL_SOIL) break;
   }
   return { x, y, hitSoil: false };
 }
@@ -165,13 +175,32 @@ export function settleGrain(world: World, x: number, y: number, rng: RNG): { x: 
 }
 
 /**
+ * Recompute world.mound[col] from cell state. Walks up from the
+ * natural-surface row, counting consecutive GRAIN cells. Cheap
+ * because mounds are short. Always call this on every column the
+ * sandpile cascade touched (start AND end of any cross-column slide)
+ * — otherwise mound[] drifts and the deposit search falls back to
+ * stale data.
+ */
+export function recomputeMound(world: World, col: number): void {
+  if (col < 0 || col >= world.width) return;
+  const surfRow = world.naturalSurface[col]!;
+  let m = 0;
+  for (let yy = surfRow - 1; yy >= 0; yy--) {
+    if (world.cells[yy * world.width + col] === CELL_GRAIN) m++;
+    else break;
+  }
+  world.mound[col] = m;
+}
+
+/**
  * Place a grain at (x, y) (which must be air) and let it settle via
  * the sandpile rule. Returns the final cell or null if (x, y) wasn't
  * a valid air cell to seed from.
  *
- * Side effect: bumps world.mound for the resting column if the grain
- * came to rest above the natural surface (so the renderer's mound
- * stat stays meaningful).
+ * Side effect: refreshes world.mound for both the seed column AND
+ * the final column (the sandpile cascade can slide diagonally across
+ * columns, so both ends of the path may have changed).
  */
 export function placeGrain(world: World, x: number, y: number, rng: RNG): { x: number; y: number } | null {
   const idx = y * world.width + x;
@@ -179,18 +208,8 @@ export function placeGrain(world: World, x: number, y: number, rng: RNG): { x: n
   if (world.cells[idx] !== CELL_AIR) return null;
   world.cells[idx] = CELL_GRAIN;
   const final = settleGrain(world, x, y, rng);
-  const surfRow = world.naturalSurface[final.x]!;
-  if (final.y < surfRow) {
-    // Recompute mound height (number of grain cells stacked above
-    // the natural surface for this column). Cheap to scan because
-    // mounds are short.
-    let m = 0;
-    for (let yy = surfRow - 1; yy >= 0; yy--) {
-      if (world.cells[yy * world.width + final.x] === CELL_GRAIN) m++;
-      else break;
-    }
-    world.mound[final.x] = m;
-  }
+  recomputeMound(world, x);
+  if (final.x !== x) recomputeMound(world, final.x);
   return final;
 }
 
@@ -206,11 +225,19 @@ export function digCell(world: World, x: number, y: number, rng: RNG): boolean {
   const idx = y * world.width + x;
   if (world.cells[idx] !== CELL_SOIL) return false;
   world.cells[idx] = CELL_AIR;
-  // A grain directly above might fall into the void.
+  // Stamp the tick so the renderer can briefly glow this cell as
+  // "freshly excavated." renderer.ts:163 reads digTick — without
+  // this write the highlight never appears.
+  world.digTick[idx] = world.tick;
+  // A grain directly above might fall into the void. If the
+  // cascade slides it sideways, mound[] for both columns needs to
+  // be refreshed; otherwise the deposit search uses stale heights.
   if (y > 0) {
     const aboveIdx = idx - world.width;
     if (world.cells[aboveIdx] === CELL_GRAIN) {
-      settleGrain(world, x, y - 1, rng);
+      const final = settleGrain(world, x, y - 1, rng);
+      recomputeMound(world, x);
+      if (final.x !== x) recomputeMound(world, final.x);
     }
   }
   return true;
@@ -234,21 +261,18 @@ export function pickGrain(world: World, x: number, y: number, rng: RNG): boolean
   const idx = y * world.width + x;
   if (world.cells[idx] !== CELL_GRAIN) return false;
   world.cells[idx] = CELL_AIR;
-  // Re-settle the grain directly above (it lost its support).
+  // Re-settle the grain directly above (it lost its support). If
+  // the cascade slid the grain across columns, both columns need
+  // a mound refresh — otherwise the deposit search uses stale data.
+  let slideDest = -1;
   if (y > 0) {
     const aboveIdx = idx - world.width;
     if (world.cells[aboveIdx] === CELL_GRAIN) {
-      settleGrain(world, x, y - 1, rng);
+      const final = settleGrain(world, x, y - 1, rng);
+      if (final.x !== x) slideDest = final.x;
     }
   }
-  // Recompute this column's above-surface mound height — picking the
-  // grain might have removed the top of the stack.
-  const surfRow = world.naturalSurface[x]!;
-  let m = 0;
-  for (let yy = surfRow - 1; yy >= 0; yy--) {
-    if (world.cells[yy * world.width + x] === CELL_GRAIN) m++;
-    else break;
-  }
-  world.mound[x] = m;
+  recomputeMound(world, x);
+  if (slideDest >= 0) recomputeMound(world, slideDest);
   return true;
 }

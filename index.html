@@ -40,11 +40,56 @@
         margin: 0 0 6px 0; font-size: 12px; font-weight: 600;
         color: #f0e2c4; letter-spacing: 0.04em;
       }
+      /* On-screen control cluster — visible on every platform but
+         essential on mobile where keyboard input is unavailable.
+         Each button mirrors a keyboard binding 1:1. Stays out of the
+         way (small, translucent) until tapped. */
+      #ctrls {
+        position: fixed; left: 50%; bottom: 12px;
+        transform: translateX(-50%);
+        display: flex; flex-wrap: wrap; gap: 6px;
+        padding: 8px;
+        background: rgba(10, 6, 6, 0.62);
+        border: 1px solid rgba(216, 200, 168, 0.18);
+        border-radius: 8px;
+        opacity: 0.55;
+        transition: opacity 200ms ease;
+        z-index: 10;
+        max-width: calc(100vw - 24px);
+      }
+      #ctrls:hover, #ctrls:focus-within { opacity: 1; }
+      #ctrls.hidden { opacity: 0; pointer-events: none; }
+      #ctrls button {
+        appearance: none;
+        background: rgba(216, 200, 168, 0.10);
+        border: 1px solid rgba(216, 200, 168, 0.28);
+        border-radius: 6px;
+        color: #f0e2c4;
+        font: 600 13px ui-sans-serif, system-ui, sans-serif;
+        padding: 8px 12px;
+        min-width: 44px;
+        min-height: 44px;
+        line-height: 1;
+        cursor: pointer;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #ctrls button:active { background: rgba(216, 200, 168, 0.25); }
     </style>
   </head>
   <body>
     <canvas id="screen"></canvas>
     <div id="hud"></div>
+    <div id="ctrls" role="toolbar" aria-label="simulation controls">
+      <button data-act="pause" title="pause / resume (space)">⏯</button>
+      <button data-act="slower" title="slower (-)">−</button>
+      <button data-act="faster" title="faster (+)">+</button>
+      <button data-act="zoomout" title="reset zoom (0)">⌖</button>
+      <button data-act="phero" title="pheromone overlay (p)">𝜙</button>
+      <button data-act="reseed" title="reseed (r)">↻</button>
+      <button data-act="full" title="fullscreen (f)">⛶</button>
+      <button data-act="help" title="help (?)">?</button>
+    </div>
     <div id="help">
       <h1>FORMICARIUM</h1>
       <div><kbd>space</kbd> pause / resume</div>

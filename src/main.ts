@@ -196,36 +196,32 @@ function main(): void {
   let stepsPerFrame = settings.simStepsPerFrame;
   let lastHud = 0;
 
-  window.addEventListener('keydown', (e) => {
-    if (e.key === ' ') { paused = !paused; e.preventDefault(); }
-    else if (e.key === '+' || e.key === '=') { stepsPerFrame = Math.min(64, stepsPerFrame * 2); }
-    else if (e.key === '-' || e.key === '_') { stepsPerFrame = Math.max(1, stepsPerFrame >> 1); }
-    else if (e.key === '?') {
+  // Action map — single source of truth for keyboard AND on-screen
+  // controls. Mobile users have no keyboard, so the button cluster
+  // in index.html dispatches via the same names.
+  const actions: Record<string, () => void> = {
+    pause: () => { paused = !paused; },
+    faster: () => { stepsPerFrame = Math.min(64, stepsPerFrame * 2); },
+    slower: () => { stepsPerFrame = Math.max(1, stepsPerFrame >> 1); },
+    help: () => {
       help.classList.toggle('hidden');
       if (helpHideTimer !== undefined) {
         window.clearTimeout(helpHideTimer);
         helpHideTimer = undefined;
       }
-    }
-    else if (e.key === '0') {
-      renderer.zoom = 1;
-      renderer.panX = 0;
-      renderer.panY = 0;
-    }
-    else if (e.key === 'f') {
+    },
+    zoomout: () => { renderer.zoom = 1; renderer.panX = 0; renderer.panY = 0; },
+    full: () => {
       // Browsers require fullscreen requests to be tied to a user
-      // gesture — a keydown qualifies. Errors are non-fatal: a
-      // browser without permission just stays windowed.
+      // gesture — both keydown and click qualify.
       if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen().catch(() => {});
       } else {
         document.exitFullscreen().catch(() => {});
       }
-    }
-    else if (e.key === 'p') {
-      renderer.showPheromones = !renderer.showPheromones;
-    }
-    else if (e.key === 'r') {
+    },
+    phero: () => { renderer.showPheromones = !renderer.showPheromones; },
+    reseed: () => {
       const s2 = { ...settings, seed: (settings.seed * 16807 + 1) >>> 0 };
       const built = build(s2);
       rng = built.rng;
@@ -235,8 +231,30 @@ function main(): void {
       buildField = built.buildField;
       // Hot-swap: rebuild renderer view of the new world.
       (renderer as unknown as { world: World }).world = world;
-    }
+    },
+  };
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === ' ') { actions.pause!(); e.preventDefault(); }
+    else if (e.key === '+' || e.key === '=') actions.faster!();
+    else if (e.key === '-' || e.key === '_') actions.slower!();
+    else if (e.key === '?') actions.help!();
+    else if (e.key === '0') actions.zoomout!();
+    else if (e.key === 'f') actions.full!();
+    else if (e.key === 'p') actions.phero!();
+    else if (e.key === 'r') actions.reseed!();
   });
+
+  // Wire the on-screen button cluster (index.html #ctrls). Each
+  // button has a data-act attribute that names the action above.
+  const ctrls = document.getElementById('ctrls') as HTMLDivElement | null;
+  if (ctrls) {
+    ctrls.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      const act = t?.dataset?.act;
+      if (act && actions[act]) actions[act]!();
+    });
+  }
 
   let last = performance.now();
   let alpha = 0;
@@ -248,9 +266,8 @@ function main(): void {
 
     if (!paused) {
       for (let i = 0; i < stepsPerFrame; i++) {
-        step(world, colony, digField, buildField, rng, DEFAULT_PARAMS);
+        step(world, colony, digField, buildField, rng, DEFAULT_PARAMS, particles);
       }
-      void particles;
       // No fixed-timestep accumulator yet — render alpha=1 (no
       // interpolation) is fine while sub-stepping multiple sim ticks
       // per frame, since the visible motion comes from the sim itself.
