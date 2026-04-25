@@ -24,6 +24,7 @@
 // about them.
 
 import { CONFIG } from '../config';
+import { CELLS_PER_CM } from '../scenario';
 import {
   Colony,
   STATE_CARRY,
@@ -152,30 +153,16 @@ const PHEROMONE_DIFFUSE = 0.04;
 const PHEROMONE_EVAP = 0.985;
 const PHEROMONE_FOLLOW_STRENGTH = 0.35;
 
-// Response-threshold (Beshers & Fewell 2001) for the REST task:
-//   P(engage REST) = s² / (s² + θ²)
-// where s = number of neighbours within REST_CROWD_RADIUS_CELLS and
-// θ = this ant's restThreshold. Per-tick engage probability is
-// further throttled by REST_PROB_PER_TICK so transitions don't
-// snap-chatter at every frame.
-//
-// Tuning: REST_PROB_PER_TICK was 0.04 but at 10Hz that left too
-// many ants parked too long; sim looked frozen. 0.012 keeps the
-// effect visible (some ants pause in crowds) without killing
-// global activity.
-const REST_CROWD_RADIUS_CELLS = 3.0;
+// All physical-distance constants below are expressed in cm; the
+// resolved scenario's CELLS_PER_CM converts them to cells at the
+// only place each is used. Hard-coding distances in cells makes
+// behaviour silently break when the grid resolution changes
+// (e.g. at CELLS_PER_CM=40 a 30-cell recall radius is only 0.75 cm,
+// which trapped ants in the spawn chamber).
+const REST_CROWD_RADIUS_CM = 0.5;
 const REST_PROB_PER_TICK = 0.012;
 const REST_DURATION_TICKS = 30;
-
-/**
- * Foraging-recall bias. WANDER ants that have drifted far from
- * their spawn point (home vector magnitude in cells) get a
- * heading nudge back toward home. Real foragers don't wander
- * indefinitely; they return after a search loop. Without this
- * bias, ants emerging onto the surface wander out of the field
- * of interest forever.
- */
-const FORAGING_RECALL_DIST_CELLS = 30;
+const FORAGING_RECALL_DIST_CM = 1.5;
 const FORAGING_RECALL_STRENGTH = 0.05;
 
 // Thigmotaxis (wall-following). Ants preferentially walk along
@@ -183,7 +170,7 @@ const FORAGING_RECALL_STRENGTH = 0.05;
 // of the 8 compass directions; where solid is found, we bias the
 // heading to run PARALLEL to that surface instead of either ramming
 // it or flying off into open space.
-const THIGMOTAXIS_PROBE_CELLS = 1.5;
+const THIGMOTAXIS_PROBE_CM = 0.05;
 const THIGMOTAXIS_STRENGTH = 0.12;
 
 /**
@@ -196,10 +183,11 @@ function thigmotaxisBias(world: World, x: number, y: number, heading: number): n
   // closest solid direction.
   let wallAngle = NaN;
   let closest = Infinity;
+  const probe = THIGMOTAXIS_PROBE_CM * CELLS_PER_CM;
   for (let k = 0; k < 8; k++) {
     const a = (k / 8) * Math.PI * 2;
-    const sx = x + Math.cos(a) * THIGMOTAXIS_PROBE_CELLS;
-    const sy = y + Math.sin(a) * THIGMOTAXIS_PROBE_CELLS;
+    const sx = x + Math.cos(a) * probe;
+    const sy = y + Math.sin(a) * probe;
     const ix = sx | 0;
     const iy = sy | 0;
     if (!world.inBounds(ix, iy)) continue;
@@ -297,11 +285,13 @@ export function stepSimulation(
       let crowd = 0;
       const ax = colony.posX[i]!;
       const ay = colony.posY[i]!;
+      const rCells = REST_CROWD_RADIUS_CM * CELLS_PER_CM;
+      const rCells2 = rCells * rCells;
       for (let j = 0; j < colony.count; j++) {
         if (j === i) continue;
         const dx = colony.posX[j]! - ax;
         const dy = colony.posY[j]! - ay;
-        if (dx * dx + dy * dy <= REST_CROWD_RADIUS_CELLS * REST_CROWD_RADIUS_CELLS) {
+        if (dx * dx + dy * dy <= rCells2) {
           crowd++;
         }
       }
@@ -337,17 +327,21 @@ export function stepSimulation(
     }
     // Above-surface return: WANDER ants whose y is above the
     // natural surface (i.e., walking on the grass / hunting in the
-    // sky) get a strong heading bias toward straight-down. Surface
+    // sky) get a STRONG heading bias toward straight-down. Surface
     // is foreign territory; the colony lives below ground. Without
-    // this, ants that surface to deposit grain just keep walking
-    // along the grass and never return to dig.
+    // this, ants surface to deposit grain and then wander on the
+    // grass for hundreds of ticks before drifting back down,
+    // burning the cycles that would otherwise be excavation.
+    // 0.6 per tick almost-snaps the heading down within a few
+    // ticks — fast enough that surface time is brief, slow enough
+    // that the path looks like an arc, not a teleport.
     if (state === STATE_WANDER) {
       const ix = colony.posX[i]! | 0;
       const surfY = world.naturalSurface[ix]!;
       if (colony.posY[i]! < surfY) {
         const want = Math.PI / 2; // straight down
         const dh = wrapAngle(want - h);
-        h += dh * 0.25;
+        h += dh * 0.6;
       }
     }
     // Foraging-recall (longer-range, lateral): WANDER ants far from
@@ -358,10 +352,11 @@ export function stepSimulation(
       const hxV = colony.homeX[i]!;
       const hyV = colony.homeY[i]!;
       const mag = Math.hypot(hxV, hyV);
-      if (mag > FORAGING_RECALL_DIST_CELLS) {
+      const recallCells = FORAGING_RECALL_DIST_CM * CELLS_PER_CM;
+      if (mag > recallCells) {
         const want = Math.atan2(hyV, hxV);
         const dh = wrapAngle(want - h);
-        const k = Math.min(1, (mag - FORAGING_RECALL_DIST_CELLS) / FORAGING_RECALL_DIST_CELLS);
+        const k = Math.min(1, (mag - recallCells) / recallCells);
         h += dh * (FORAGING_RECALL_STRENGTH * k);
       }
     }
@@ -471,8 +466,8 @@ export function stepSimulation(
   // clip the glass.
   const zMax = Math.max(0.1, slabThicknessCm - 0.05);
   const zMin = 0.05;
-  const collideRcells = 1.2; // xy radius in cells to trigger avoidance
-  const collideRz = 0.3;    // z radius in cm
+  const collideRcells = 0.06 * CELLS_PER_CM; // 0.06 cm
+  const collideRz = 0.3;                     // z radius in cm
   for (let i = 0; i < colony.count; i++) {
     // Spontaneous z drift.
     colony.posZ[i] += rng.gauss() * 0.015;

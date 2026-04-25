@@ -23,10 +23,12 @@ export const DEFAULT_SCENARIO: Scenario = {
   worldHeightCm: 7,
   surfaceFromTopCm: 2,
 
-  // Starter chamber: 4 cm wide × 1.5 cm deep, ~1/3 of the world's
-  // width — visibly the focal point.
-  starterChamberWidthCm: 4,
-  starterChamberDepthCm: 1.5,
+  // Starter chamber: 2 cm wide × 1 cm deep. Smaller than the
+  // visible world so excavation has somewhere to go — with the
+  // previous 4 × 1.5 cm chamber, ants dug at the edges but the
+  // chamber barely changed visually over many in-game days.
+  starterChamberWidthCm: 2,
+  starterChamberDepthCm: 1,
 
   // Ant slab depth (z dimension).
   slabThicknessCm: 0.8,
@@ -39,7 +41,11 @@ export const DEFAULT_SCENARIO: Scenario = {
     worker: {
       count: 10,
       walkSpeedCmPerSec: 2.4,
-      digProbPerSoilHit: 0.12,
+      // Bumped from 0.12 because the higher-resolution grid and
+      // larger world (versus the original tuning) spread ants out
+      // and made dig events too rare for the colony to look busy
+      // over a few in-game days.
+      digProbPerSoilHit: 0.25,
       turnNoiseRadPerSec: 1.2,
       bodyLengthCm: 0.6,
     },

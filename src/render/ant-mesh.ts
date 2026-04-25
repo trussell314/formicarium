@@ -156,7 +156,13 @@ export class AntMeshRenderer {
       if (dh > Math.PI) dh -= 2 * Math.PI;
       else if (dh < -Math.PI) dh += 2 * Math.PI;
       const headingLerp = h0 + dh * alpha;
-      inst.rotation.set(0, 0, headingLerp + this.modelYawOffset);
+      // Assign ONLY .rotation.z so the parent group's −π/2 around X
+      // (set at load time to flip the model from glTF +Z-up into
+      // our screen-space side-view) is preserved. Calling
+      // `rotation.set(0, 0, h)` overwrites all three Euler angles
+      // and silently kills the X rotation, sending ants into wild
+      // top-down-and-spinning poses.
+      inst.rotation.z = headingLerp + this.modelYawOffset;
     }
 
     this.renderer.render(this.scene, this.camera);
