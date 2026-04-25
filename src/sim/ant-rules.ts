@@ -39,9 +39,9 @@
 
 import { Colony, STATE_CARRY, STATE_WANDER, type AntState } from './colony';
 import { Pheromone } from './pheromone';
-import { digCell, isSupported, placeGrain, settle, tryStep } from './physics';
+import { digCell, isSupported, pickGrain, placeGrain, settle, tryStep } from './physics';
 import type { RNG } from './rng';
-import { CELL_AIR, CELL_SOIL, World } from './world';
+import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from './world';
 
 export interface SimParams {
   /** Cells/tick walking speed. Sub-stepped so soil contacts aren't skipped. */
@@ -50,6 +50,12 @@ export interface SimParams {
   turnNoise: number;
   /** P(dig) per soil contact, per Sudd 1970 (range 0.05–0.15 typical). */
   digProb: number;
+  /** P(pickup) per tick when a WANDER ant is adjacent to a grain
+   *  cell. Theraulaz/Bonabeau/Deneubourg 1998 construction model:
+   *  ants both deposit and pick up grain; the balance generates
+   *  emergent structure. Set lower than digProb so mounds still
+   *  accumulate net-positively. */
+  pickProb: number;
   /** Strength of stigmergy gradient bias in heading update (0..1). */
   stigmergy: number;
   /** Strength of negative-geotaxis bias for CARRY ants (0..1). */
@@ -64,6 +70,7 @@ export const DEFAULT_PARAMS: SimParams = {
   walkSpeed: 0.6,
   turnNoise: 0.35,
   digProb: 0.10,    // Sudd: 5–15% per contact
+  pickProb: 0.02,   // lower than digProb so mounds net-grow
   stigmergy: 0.55,
   geotaxis: 0.35,
   digDeposit: 1.0,
@@ -103,6 +110,32 @@ function adjacentSoil(world: World, ix: number, iy: number, h: number): { x: num
   return bestX < 0 ? null : { x: bestX, y: bestY };
 }
 
+/**
+ * Pick a cardinal-neighbour GRAIN cell at random. Used by the
+ * Theraulaz pickup rule — when a WANDER ant is adjacent to deposited
+ * grain, this resolves which one to handle. Order of preference is
+ * randomized so ants on the side of a mound don't always pick the
+ * same cell.
+ */
+function adjacentGrain(world: World, ix: number, iy: number, rng: RNG): { x: number; y: number } | null {
+  const w = world.width;
+  const offsets: ReadonlyArray<readonly [number, number]> = [
+    [1, 0], [-1, 0], [0, -1], [0, 1],
+  ];
+  // Reservoir sample over all grain neighbours so each is equally
+  // likely (avoids a left-preference bias).
+  let pickX = -1, pickY = -1, count = 0;
+  for (const [dx, dy] of offsets) {
+    const x = ix + dx;
+    const y = iy + dy;
+    if (x < 0 || y < 0 || x >= world.width || y >= world.height) continue;
+    if (world.cells[y * w + x] !== CELL_GRAIN) continue;
+    count++;
+    if (rng.next() < 1 / count) { pickX = x; pickY = y; }
+  }
+  return pickX < 0 ? null : { x: pickX, y: pickY };
+}
+
 export function step(
   world: World,
   colony: Colony,
@@ -117,7 +150,7 @@ export function step(
   digField.step();
   buildField.step();
 
-  const { walkSpeed, turnNoise, digProb, stigmergy, geotaxis, digDeposit, buildDeposit } = params;
+  const { walkSpeed, turnNoise, digProb, pickProb, stigmergy, geotaxis, digDeposit, buildDeposit } = params;
   const subSteps = Math.max(2, Math.ceil(walkSpeed));
   const stepLen = walkSpeed / subSteps;
 
@@ -190,6 +223,29 @@ export function step(
             digField.deposit(target.x, target.y, digDeposit);
             colony.heading[i] = -Math.PI / 2 + rng.range(-0.3, 0.3);
           }
+        }
+      }
+    }
+
+    // (3b) Theraulaz construction model: WANDER ants pick up grain
+    // from cells they're adjacent to, with probability pickProb per
+    // tick of contact. Combined with placeGrain, this makes deposited
+    // material a fluid resource — mounds reshape, walls smooth, and
+    // (in the original termite-construction model) emergent walls
+    // and pillars form. Pickup is restricted to ants who didn't
+    // already become CARRY this tick (one transition per tick).
+    if (colony.state[i] === STATE_WANDER) {
+      const target = adjacentGrain(world, ax, ay, rng);
+      if (target !== null && rng.next() < pickProb) {
+        if (pickGrain(world, target.x, target.y, rng)) {
+          colony.posX[i] = target.x + 0.5;
+          colony.posY[i] = target.y + 0.5;
+          colony.setState(i, STATE_CARRY);
+          // Picked-up grain isn't a fresh dig — don't deposit dig
+          // pheromone; instead leave a small mark on the build
+          // field (the act of disturbing a pile is itself a
+          // construction-pheromone signal in the Theraulaz model).
+          buildField.deposit(target.x, target.y, buildDeposit * 0.5);
         }
       }
     }

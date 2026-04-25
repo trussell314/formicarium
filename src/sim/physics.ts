@@ -201,3 +201,40 @@ export function digCell(world: World, x: number, y: number, rng: RNG): boolean {
   }
   return true;
 }
+
+/**
+ * Pick up a deposited grain at (x, y). Returns true if successful,
+ * false if the target wasn't grain. The cell becomes AIR; the
+ * column's mound count is decremented (when the grain was above the
+ * natural surface), and any grain that was sitting on top of this
+ * one is re-settled.
+ *
+ * This is the Theraulaz/Bonabeau/Deneubourg 1998 construction-model
+ * symmetric counterpart to digCell — real ants both deposit AND
+ * pick up grain, and the balance between the two (plus pheromone
+ * modulation) is what generates emergent walls and pillars in
+ * termite/ant nest construction.
+ */
+export function pickGrain(world: World, x: number, y: number, rng: RNG): boolean {
+  if (x < 0 || y < 0 || x >= world.width || y >= world.height) return false;
+  const idx = y * world.width + x;
+  if (world.cells[idx] !== CELL_GRAIN) return false;
+  world.cells[idx] = CELL_AIR;
+  // Re-settle the grain directly above (it lost its support).
+  if (y > 0) {
+    const aboveIdx = idx - world.width;
+    if (world.cells[aboveIdx] === CELL_GRAIN) {
+      settleGrain(world, x, y - 1, rng);
+    }
+  }
+  // Recompute this column's above-surface mound height — picking the
+  // grain might have removed the top of the stack.
+  const surfRow = world.naturalSurface[x]!;
+  let m = 0;
+  for (let yy = surfRow - 1; yy >= 0; yy--) {
+    if (world.cells[yy * world.width + x] === CELL_GRAIN) m++;
+    else break;
+  }
+  world.mound[x] = m;
+  return true;
+}
