@@ -19,9 +19,12 @@ export class Colony {
   readonly heading: Float32Array;
   readonly state: Uint8Array;
   readonly stateTicks: Int32Array;
-  /** X column where the most recent dig happened, used by CARRY ants to
-   *  bias their deposit search back toward the active work zone. */
+  /** Cell column where the most recent dig happened. Used by CARRY ants
+   *  to bias their deposit search back toward the active work zone,
+   *  and (with lastDigY) by post-deposit WANDER ants to head straight
+   *  back to the tunnel they were extending. */
   readonly lastDigX: Int16Array;
+  readonly lastDigY: Int16Array;
   /** Spawn position. Above-surface WANDER ants are biased toward this
    *  point so they return to the nest opening rather than wandering
    *  off across the surface forever. */
@@ -45,6 +48,7 @@ export class Colony {
     this.heading = new Float32Array(capacity);
     this.state = new Uint8Array(capacity);
     this.lastDigX = new Int16Array(capacity);
+    this.lastDigY = new Int16Array(capacity);
     this.homeX = new Float32Array(capacity);
     this.homeY = new Float32Array(capacity);
     this.preferredHeading = new Float32Array(capacity);
@@ -62,6 +66,7 @@ export class Colony {
     this.heading[i] = heading;
     this.state[i] = STATE_WANDER;
     this.lastDigX[i] = x | 0;
+    this.lastDigY[i] = y | 0;
     this.homeX[i] = x;
     this.homeY[i] = y;
     this.stateTicks[i] = 0;

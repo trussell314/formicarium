@@ -393,6 +393,7 @@ export function step(
           colony.posY[i] = target.y + 0.5;
           colony.setState(i, STATE_CARRY);
           colony.lastDigX[i] = target.x;
+          colony.lastDigY[i] = target.y;
           // Record the direction the ant was facing when it dug, so
           // that when it returns from CARRY-deposit it remembers the
           // tunnel direction it was working and resumes pushing
@@ -428,13 +429,28 @@ export function step(
       const dropped = depositGrain(world, cx, cy, rng, colony.lastDigX[i]!);
       if (dropped !== null) {
         colony.setState(i, STATE_WANDER);
-        // Hop to the cell directly above the new grain, then head
-        // back into the nest. Without this the ant would re-enter
-        // the deposit search next tick and either re-deposit on
-        // top of itself or get bounced off its own pile.
+        // Hop to the cell directly above the new grain so the next
+        // tick doesn't re-enter the deposit search and dump on
+        // ourselves.
         const ny2 = Math.max(0, dropped.y - 1);
         colony.posY[i] = ny2 + 0.5;
-        colony.heading[i] = Math.PI / 2 + rng.range(-0.3, 0.3);
+        // Head straight back toward the cell we LAST DUG, not just
+        // generic "down". Without this, post-deposit ants drift off
+        // randomly and abandon the tunnel they were extending — work
+        // sites lose their crew between every dig cycle. Pointing
+        // back at lastDigX/Y keeps a digger's tunnel identity across
+        // its CARRY round-trip.
+        const dxh = colony.lastDigX[i]! - colony.posX[i]!;
+        const dyh = colony.lastDigY[i]! - colony.posY[i]!;
+        if (Math.hypot(dxh, dyh) > 0.5) {
+          colony.heading[i] = Math.atan2(dyh, dxh) + rng.range(-0.2, 0.2);
+        } else {
+          colony.heading[i] = Math.PI / 2 + rng.range(-0.3, 0.3);
+        }
+        // Re-arm the heading-stickiness timer so the WANDER bias
+        // pulls toward this direction for the next ~60 ticks.
+        colony.preferredHeading[i] = colony.heading[i]!;
+        colony.headingTimer[i] = HEADING_TIMER_MAX;
       }
     }
 
