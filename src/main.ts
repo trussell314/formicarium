@@ -131,6 +131,24 @@ function boot(): void {
     }, 250);
   }
 
+  // Speed control. Buttons in #speed (1×/2×/4×/8×/16×/32×) drive
+  // loop.speedMultiplier directly. Highlight the active one.
+  const speedEl = document.getElementById('speed');
+  if (speedEl) {
+    const buttons = Array.from(speedEl.querySelectorAll('button[data-speed]')) as HTMLButtonElement[];
+    const setSpeed = (mult: number): void => {
+      loop.speedMultiplier = mult;
+      for (const b of buttons) {
+        const m = Number(b.dataset.speed);
+        b.classList.toggle('active', m === mult);
+      }
+    };
+    setSpeed(1);
+    for (const b of buttons) {
+      b.addEventListener('click', () => setSpeed(Number(b.dataset.speed)));
+    }
+  }
+
   bindVisibilityPause(loop);
   loop.start();
 }

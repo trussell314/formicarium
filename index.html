@@ -59,6 +59,35 @@
       #antinfo .row .value { color: #e2e4ea; }
       #antinfo .close { position: absolute; top: 4px; right: 6px; cursor: pointer; color: #6a6e78; font-size: 16px; line-height: 1; padding: 2px; }
       #antinfo .close:hover { color: #e2e4ea; }
+      #speed {
+        position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+        background: rgba(10, 12, 16, 0.78);
+        padding: 6px 8px;
+        border-radius: 8px;
+        font-size: 12px;
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+        backdrop-filter: blur(6px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex; gap: 4px; align-items: center;
+        user-select: none;
+      }
+      #speed button {
+        background: transparent;
+        color: #cfd2d8;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 5px;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-family: ui-monospace, monospace;
+        cursor: pointer;
+        transition: background 0.1s, border-color 0.1s;
+      }
+      #speed button:hover { background: rgba(255, 255, 255, 0.08); }
+      #speed button.active {
+        background: rgba(255, 240, 120, 0.2);
+        border-color: rgba(255, 240, 120, 0.5);
+        color: #fff4a8;
+      }
       noscript { padding: 24px; display: block; }
     </style>
   </head>
@@ -67,6 +96,15 @@
       <canvas id="screen"></canvas>
       <div id="overlay" class="hidden"></div>
       <div id="antinfo" class="hidden"></div>
+      <div id="speed">
+        <span style="opacity:0.6;margin-right:4px">speed</span>
+        <button data-speed="1">1×</button>
+        <button data-speed="2">2×</button>
+        <button data-speed="4">4×</button>
+        <button data-speed="8">8×</button>
+        <button data-speed="16">16×</button>
+        <button data-speed="32">32×</button>
+      </div>
       <div id="help">tap an ant for info</div>
     </div>
     <noscript>Formicarium requires JavaScript.</noscript>
