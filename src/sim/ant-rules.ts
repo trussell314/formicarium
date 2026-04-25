@@ -284,7 +284,15 @@ export function step(
         // accelerating once a wall is established.
         const tIdx = world.index(target.x, target.y);
         const expo = world.exposure[tIdx]!;
-        const expoBoost = 1 + 0.5 * Math.min(1, expo / 200);
+        // Two-stage exposure boost. Up to exposure=200 it ramps the
+        // dig probability from 1× to 1.5× (the original "soft soil"
+        // tier). Past exposure=600 (extremely old wall) it ramps a
+        // second time up to 2.0×, modelling that very long-exposed
+        // walls in real nests are abandoned and lobbed laterally.
+        const stage1 = 0.5 * Math.min(1, expo / 200);
+        const stage2 = expo > 200
+          ? 0.5 * Math.min(1, (expo - 200) / 400) : 0;
+        const expoBoost = 1 + stage1 + stage2;
         if (rng.next() < digProb * expoBoost) {
           world.cells[tIdx] = CELL_AIR;
           world.digTick[tIdx] = world.tick;
@@ -337,6 +345,41 @@ export function step(
     const settled = settle(world, sx, sy);
     if (settled !== sy) {
       colony.posY[i] = settled + 0.5;
+    }
+  }
+
+  // Pairwise repulsion. Ants in a real farm have body width — they
+  // physically obstruct each other at tunnel choke points (Aguilar
+  // et al. 2018 "clog control"). Without this they pass through one
+  // another like ghosts, which kills the bottleneck dynamic that
+  // makes nest excavation interesting. O(n²) is fine at the colony
+  // sizes we run (<60 ants).
+  const REPEL_R = 1.0;
+  const REPEL_R2 = REPEL_R * REPEL_R;
+  for (let i = 0; i < colony.count; i++) {
+    for (let j = i + 1; j < colony.count; j++) {
+      const dx = colony.posX[j]! - colony.posX[i]!;
+      const dy = colony.posY[j]! - colony.posY[i]!;
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= REPEL_R2 || d2 < 1e-6) continue;
+      const d = Math.sqrt(d2);
+      const overlap = REPEL_R - d;
+      const ux = dx / d;
+      const uy = dy / d;
+      // Push half the overlap each way; refuse to push an ant into
+      // a solid cell (re-validate target cell against world).
+      const push = overlap * 0.5;
+      const tryMove = (idx: number, mx: number, my: number) => {
+        const nx = colony.posX[idx]! + mx;
+        const ny = colony.posY[idx]! + my;
+        if (nx < 0 || ny < 0 || nx >= world.width || ny >= world.height) return;
+        const k = world.cells[(ny | 0) * world.width + (nx | 0)]!;
+        if (k === CELL_SOIL || k === CELL_GRAIN) return;
+        colony.posX[idx] = nx;
+        colony.posY[idx] = ny;
+      };
+      tryMove(i, -ux * push, -uy * push);
+      tryMove(j,  ux * push,  uy * push);
     }
   }
 
