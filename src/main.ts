@@ -33,20 +33,15 @@ function readSettings(): Settings {
   };
   return {
     seed: num('seed', (Date.now() & 0xffffffff) >>> 0),
-    // Smaller default world: at 200×120 each cell rendered as ~9 px on
-    // a 1080-tall viewport and the ants were sub-5-pixel dots, almost
-    // invisible. 140×80 puts each cell at ~13 px and lifts the ant
-    // sprite into visible territory. The chamber detail is coarser
-    // but it reads as an ant farm rather than a smooth blob.
-    width: Math.max(40, num('width', 140) | 0),
-    height: Math.max(30, num('height', 80) | 0),
-    // 16 ants in a 140-wide world is about 1 ant per 9 cm across.
-    // The previous 24 in a 200-wide world packed them tightly enough
-    // that pairwise repulsion overwhelmed any tunnel-front formation
-    // — they'd cluster at one wall and grind it back as a uniform
-    // chamber. Fewer ants spread across the same world give more
-    // room for distinct work fronts.
-    ants: Math.max(1, num('ants', 16) | 0),
+    // Default world is 200×100 cells. The Khuong+Buhl regime where
+    // multiple tunnel fronts emerge requires both critical density
+    // AND room for the fronts to spread without immediately colliding.
+    // 200×100 with 100 ants gives ~1 ant per 200 cells — the upper end
+    // of the medium-density range Buhl 2004 reports producing branched
+    // (rather than single-gallery or diffuse-chamber) architecture.
+    width: Math.max(40, num('width', 200) | 0),
+    height: Math.max(30, num('height', 100) | 0),
+    ants: Math.max(1, num('ants', 100) | 0),
     simStepsPerFrame: Math.max(1, num('speed', 8) | 0),
   };
 }
