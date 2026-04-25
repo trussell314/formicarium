@@ -459,7 +459,24 @@ export function step(
         const placed = placeGrain(world, px, py, rng);
         if (placed !== null) {
           colony.setState(i, STATE_WANDER);
-          buildField.deposit(placed.x, placed.y, buildDeposit);
+          // Khuong 2016 wall-pillar feedback: a build site's local
+          // pheromone concentration AMPLIFIES the deposit left by the
+          // next grain placed there. This is the positive-feedback
+          // half of the stigmergic loop (the gradient-following bias
+          // is the negative half — it just steers ants there). Without
+          // the amplification, every column accumulates at the same
+          // rate and you get a smooth ridge; with it, columns that get
+          // a head-start lock in, and the spaces between them stay
+          // un-deposited. The result is the discrete pillar/wall
+          // morphology Khuong et al. observed in Lasius niger.
+          //   Khuong, A., Gautrais, J., Perna, A., et al. (2016).
+          //   Stigmergic construction and topochemical information
+          //   shape ant nest architecture. PNAS 113(5): 1303–1308.
+          // Cap the gain so a saturated site can't outrun evaporation
+          // and freeze the field.
+          const local = buildField.sample(placed.x, placed.y);
+          const khuongGain = 1 + Math.min(1.5, local * 1.5);
+          buildField.deposit(placed.x, placed.y, buildDeposit * khuongGain);
           // Reorient downward so we head back into the nest.
           colony.heading[i] = Math.PI / 2 + rng.range(-0.3, 0.3);
         }
