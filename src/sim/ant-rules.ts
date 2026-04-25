@@ -165,9 +165,20 @@ function depositGrain(
   // so a CARRY ant can always deposit *somewhere*. The hard cap
   // keeps mounds from going so tall the ant lands on top with no
   // descent path.
-  const tryColumn = (cx: number, cap: number): { x: number; y: number } | null => {
+  // Three-pass placement priority. Pass 0 enforces both the mound
+  // cap and angle-of-repose; pass 1 keeps AoR but lifts the cap;
+  // pass 2 drops both as a last-resort escape valve so CARRY ants
+  // are never permanently locked out of every column.
+  const tryColumn = (cx: number, cap: number, enforceAoR: boolean): { x: number; y: number } | null => {
     if (cx < 0 || cx >= world.width) return null;
     if (world.mound[cx]! >= cap) return null;
+    if (enforceAoR) {
+      const ANGLE_OF_REPOSE = 1;
+      const lm = cx > 0 ? world.mound[cx - 1]! : world.mound[cx]!;
+      const rm = cx < world.width - 1 ? world.mound[cx + 1]! : world.mound[cx]!;
+      const minN = Math.min(lm, rm);
+      if (world.mound[cx]! >= minN + ANGLE_OF_REPOSE) return null;
+    }
     const surfRow = world.naturalSurface[cx]!;
     const cy = surfRow - 1 - world.mound[cx]!;
     if (cy <= 0 || cy >= world.height) return null;
@@ -181,34 +192,34 @@ function depositGrain(
     // still keep deposits concentrated near the work zone; the
     // hard vertical check was redundant. Drop it.
     void iy;
-    // Distance-weighted acceptance with mound-height falloff:
-    //   - Distance term: 1 / (1 + 0.06 * |cx - originX|) concentrates
-    //     spoil over the work zone without losing the lateral spread
-    //     when an immediate column is blocked.
-    //   - Mound term: 1 / (1 + 0.04 * mound[cx]) discourages an ant
-    //     from stacking on an already-tall pile; in real ant farms
-    //     spoil disperses sideways rather than spiring straight up.
-    //   - Beyond 24 cells the gates lift entirely (graceful fallback
-    //     so we never pathologically refuse to deposit).
-    const dist = Math.abs(cx - originX);
-    const moundH = world.mound[cx]!;
-    if (dist <= 24) {
-      const p = (1 / (1 + 0.06 * dist)) * (1 / (1 + 0.04 * moundH));
-      if (rng.next() > p) return null;
-    }
+    // The probabilistic distance/mound gate that used to live here
+    // turned out to be the cause of central-tower runaway: pass-1
+    // RNG-fails fell through to pass-3 (no AoR, no cap), which
+    // always deposits at the ant's column. The cap + AoR + outward
+    // search order alone is enough to keep spoil tapered around the
+    // work zone — the explicit RNG falloff was redundant and
+    // actively harmful.
+    void rng; void originX; void cy;
     world.cells[world.index(cx, cy)] = CELL_GRAIN;
     world.mound[cx] = (world.mound[cx] ?? 0) + 1;
     return { x: cx, y: cy };
   };
-  for (const cap of [MOUND_MAX, MOUND_HARD_MAX]) {
+  const passes: ReadonlyArray<readonly [number, boolean]> = [
+    [MOUND_MAX, true],                  // strict cap + taper
+    [MOUND_HARD_MAX, true],             // taller, still tapered
+    [Number.POSITIVE_INFINITY, true],   // any height — but KEEP taper,
+                                        // otherwise the central
+                                        // column grows as a tower.
+  ];
+  for (const [cap, enforceAoR] of passes) {
     for (let r = 0; r <= SEARCH_RADIUS; r++) {
       if (r === 0) {
-        const here = tryColumn(ix, cap);
+        const here = tryColumn(ix, cap, enforceAoR);
         if (here !== null) return here;
       } else {
-        const a = tryColumn(ix - r, cap);
+        const a = tryColumn(ix - r, cap, enforceAoR);
         if (a !== null) return a;
-        const b = tryColumn(ix + r, cap);
+        const b = tryColumn(ix + r, cap, enforceAoR);
         if (b !== null) return b;
       }
     }
