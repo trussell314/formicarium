@@ -143,6 +143,13 @@ export class Renderer {
       const px = ox + x * scale;
       const py = oy + y * scale;
       const carry = colony.state[i] === STATE_CARRY;
+      // Contact shadow: a small dim ellipse a fraction below the ant
+      // anchors them to the substrate. Without it ants read as
+      // floating overlay sprites instead of agents on the ground.
+      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+      this.ctx.beginPath();
+      this.ctx.ellipse(px, py + radius * 0.85, radius * 1.3, radius * 0.4, 0, 0, Math.PI * 2);
+      this.ctx.fill();
       this.ctx.fillStyle = '#1a0f08';
       this.ctx.beginPath();
       this.ctx.ellipse(px, py, radius * 1.4, radius, colony.heading[i]!, 0, Math.PI * 2);
@@ -154,6 +161,27 @@ export class Renderer {
         this.ctx.fill();
       }
     }
+
+    // "Glass case" frame: dark outer border + subtle vignette. Reads as
+    // an enclosure rather than an unbounded plane, and the radial
+    // darkening at the edges sells the implied depth.
+    const borderPx = Math.max(2, Math.round(scale * 1.2));
+    this.ctx.strokeStyle = 'rgba(20, 14, 10, 0.85)';
+    this.ctx.lineWidth = borderPx;
+    this.ctx.strokeRect(
+      ox + borderPx * 0.5,
+      oy + borderPx * 0.5,
+      ow - borderPx,
+      oh - borderPx,
+    );
+    const grad = this.ctx.createRadialGradient(
+      ox + ow * 0.5, oy + oh * 0.5, Math.min(ow, oh) * 0.45,
+      ox + ow * 0.5, oy + oh * 0.5, Math.max(ow, oh) * 0.75,
+    );
+    grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0.55)');
+    this.ctx.fillStyle = grad;
+    this.ctx.fillRect(ox, oy, ow, oh);
   }
 }
 

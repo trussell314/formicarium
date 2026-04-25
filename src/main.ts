@@ -66,7 +66,14 @@ function main(): void {
 
   const canvas = document.getElementById('screen') as HTMLCanvasElement;
   const hud = document.getElementById('hud') as HTMLDivElement;
+  const help = document.getElementById('help') as HTMLDivElement;
   const renderer = new Renderer(canvas, world);
+
+  // Auto-hide the help panel after a few seconds so it doesn't clutter
+  // the screensaver indefinitely. The `?` key brings it back.
+  let helpHideTimer: number | undefined = window.setTimeout(() => {
+    help.classList.add('hidden');
+  }, 6000);
 
   const onResize = () => renderer.resize(window.innerWidth, window.innerHeight);
   window.addEventListener('resize', onResize);
@@ -78,8 +85,15 @@ function main(): void {
 
   window.addEventListener('keydown', (e) => {
     if (e.key === ' ') { paused = !paused; e.preventDefault(); }
-    else if (e.key === '+') { stepsPerFrame = Math.min(64, stepsPerFrame * 2); }
-    else if (e.key === '-') { stepsPerFrame = Math.max(1, stepsPerFrame >> 1); }
+    else if (e.key === '+' || e.key === '=') { stepsPerFrame = Math.min(64, stepsPerFrame * 2); }
+    else if (e.key === '-' || e.key === '_') { stepsPerFrame = Math.max(1, stepsPerFrame >> 1); }
+    else if (e.key === '?') {
+      help.classList.toggle('hidden');
+      if (helpHideTimer !== undefined) {
+        window.clearTimeout(helpHideTimer);
+        helpHideTimer = undefined;
+      }
+    }
     else if (e.key === 'r') {
       const s2 = { ...settings, seed: (settings.seed * 16807 + 1) >>> 0 };
       const built = build(s2);

@@ -14,11 +14,43 @@
         text-shadow: 0 1px 2px #000;
         pointer-events: none;
       }
+      #help {
+        position: fixed; right: 12px; bottom: 12px;
+        background: rgba(10, 6, 6, 0.78);
+        border: 1px solid rgba(216, 200, 168, 0.18);
+        border-radius: 6px; padding: 10px 14px;
+        font-size: 12px; line-height: 1.5;
+        text-shadow: 0 1px 1px #000;
+        max-width: 240px;
+        transition: opacity 200ms ease;
+        pointer-events: none;
+      }
+      #help.hidden { opacity: 0; }
+      #help kbd {
+        font-family: ui-monospace, monospace;
+        font-size: 11px;
+        background: rgba(216, 200, 168, 0.12);
+        border: 1px solid rgba(216, 200, 168, 0.3);
+        border-radius: 3px;
+        padding: 0 4px;
+        color: #f0e2c4;
+      }
+      #help h1 {
+        margin: 0 0 6px 0; font-size: 12px; font-weight: 600;
+        color: #f0e2c4; letter-spacing: 0.04em;
+      }
     </style>
   </head>
   <body>
     <canvas id="screen"></canvas>
     <div id="hud"></div>
+    <div id="help">
+      <h1>FORMICARIUM</h1>
+      <div><kbd>space</kbd> pause / resume</div>
+      <div><kbd>+</kbd> / <kbd>-</kbd> faster / slower</div>
+      <div><kbd>r</kbd> reseed and rebuild</div>
+      <div><kbd>?</kbd> hide / show this panel</div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
