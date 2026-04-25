@@ -1,14 +1,28 @@
+import { appendFileSync, writeFileSync } from 'fs';
 import { buildFromScenario, CELLS_PER_CM } from '../src/scenario';
 import { stepSimulation } from '../src/sim/ant-rules';
 import { createPheromones } from '../src/sim/pheromone';
 import { DEFAULT_SCENARIO } from '../src/scenarios/default';
+
+// Synchronous append writer — Node's stdout/stderr is block-buffered
+// when piped, which means progress lines don't appear until exit.
+// We write to a side-channel file via fs (sync, unbuffered) so a
+// tail -F watcher can stream lines in near real-time.
+const OUT = process.env.DIAG_OUT ?? '/tmp/diag-stream.log';
+writeFileSync(OUT, '');
+const log = (s: string) => { appendFileSync(OUT, s + '\n'); console.log(s); };
 
 // Use a fixed seed so I can show you the exact run.
 const SEED = 0xc0ffee;
 const { resolved, world, colony, rng } = buildFromScenario({ ...DEFAULT_SCENARIO, seed: SEED });
 const ph = createPheromones(world.width, world.height);
 const cyc = { dayDurationTicks: resolved.dayDurationTicks, nightDurationTicks: resolved.nightDurationTicks };
-const foodEvery = Math.round(resolved.foodSpawnIntervalSec / resolved.secondsPerTick);
+// Override food cadence at the env level so I can A/B test it.
+// FOOD_EVERY_TICKS=0 disables food entirely.
+const envFood = process.env.FOOD_EVERY_TICKS;
+const foodEvery = envFood !== undefined
+  ? (envFood === '0' ? 0 : Number(envFood))
+  : Math.round(resolved.foodSpawnIntervalSec / resolved.secondsPerTick);
 
 let prevSoil = world.countSoil();
 let totalDigs = 0;
@@ -56,20 +70,40 @@ for (let t = 1; t <= 300000; t++) {
 
   if (t % window === 0) {
     let states = [0, 0, 0, 0, 0];
-    for (let i = 0; i < colony.count; i++) states[colony.state[i]]++;
-    // How many of the original V-perimeter cells have been dug since t=0?
+    let belowSurface = 0;
+    let wanderBelow = 0;
+    for (let i = 0; i < colony.count; i++) {
+      states[colony.state[i]]++;
+      const ix = colony.posX[i] | 0;
+      const iy = colony.posY[i] | 0;
+      const sy = world.naturalSurface[ix];
+      if (iy >= sy) {
+        belowSurface++;
+        if (colony.state[i] === 0 /* WANDER */) wanderBelow++;
+      }
+    }
     let vDug = 0;
     for (const idx of vCellSet) if (world.cells[idx] !== 1) vDug++;
     let avgFromHome = 0;
     for (let i = 0; i < colony.count; i++) avgFromHome += Math.hypot(colony.homeX[i], colony.homeY[i]);
     avgFromHome /= colony.count;
-    console.log(
+    let foodOnSurf = 0, foodStored = 0;
+    for (let yi = 0; yi < world.height; yi++) {
+      for (let xi = 0; xi < world.width; xi++) {
+        const k = world.cells[yi * world.width + xi];
+        if (k === 4) foodOnSurf++;
+        else if (k === 5) foodStored++;
+      }
+    }
+    log(
       `t=${String(t).padStart(6)} digs/${window}=${String(windowDigs).padStart(4)}  total=${String(totalDigs).padStart(5)}  ` +
       `W${states[0]}/D${states[1]}/C${states[2]}/R${states[3]}/H${states[4]}  ` +
-      `V-perim dug=${vDug}/${vCellSet.size}  avgHome=${(avgFromHome/CELLS_PER_CM).toFixed(2)}cm`,
+      `below=${belowSurface} wB=${wanderBelow}  ` +
+      `V-perim dug=${vDug}/${vCellSet.size}  avgHome=${(avgFromHome/CELLS_PER_CM).toFixed(2)}cm  ` +
+      `food=${foodOnSurf}/${foodStored}`,
     );
     windowDigs = 0;
   }
 }
 
-console.log(`first dig at tick ${firstDigTick}, last dig at tick ${lastDigTick}`);
+log(`first dig at tick ${firstDigTick}, last dig at tick ${lastDigTick}`);
