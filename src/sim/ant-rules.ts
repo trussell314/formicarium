@@ -110,8 +110,13 @@ function tryDepositGrain(world: World, ix: number, iy: number): { x: number; y: 
     world.surfaceMound[cx]++;
     return { x: cx, y: cy };
   };
-  // Search own column, then ±1, ±2.
-  for (let r = 0; r <= 2; r++) {
+  // Search own column, then expand outward. Radius wide enough
+  // that grain spreads laterally instead of stacking tall in a
+  // single column — tall stacks plus only-1-cell stair-stepping
+  // plus angle-of-repose chains turn the surface into an
+  // impassable wall and freeze every ant in HAUL/CARRY transit.
+  const SEARCH_RADIUS = 8;
+  for (let r = 0; r <= SEARCH_RADIUS; r++) {
     if (r === 0) {
       const here = tryColumn(ix);
       if (here !== null) return here;

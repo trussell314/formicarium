@@ -15,7 +15,7 @@
 //
 // Both use this single predicate so they can never disagree.
 
-import { CELL_GRAIN, CELL_SOIL, World } from './world';
+import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from './world';
 
 export function isSupported(world: World, ix: number, iy: number): boolean {
   // Bottom of world always grounded.
@@ -72,20 +72,27 @@ export function tryStep(
   const iy = ny | 0;
   const k = world.cells[iy * world.width + ix]!;
   if (k === CELL_SOIL || k === CELL_GRAIN) {
-    // Stair-step: a 1-cell-tall obstacle is climbable. If the
-    // cell directly above the destination is air AND the ant
-    // currently has clearance above its head, lift the ant up
-    // by one row instead of refusing the step. Without this,
-    // a single grain on the surface forms an impassable wall.
-    // Only climbs over GRAIN — soil walls still block (and
-    // trigger hitSoil so the ant can dig them out instead).
-    if (k === CELL_GRAIN && iy > 0) {
-      const upK = world.cells[(iy - 1) * world.width + ix]!;
+    // Stair-step over a short grain pile (up to MAX_CLIMB cells
+    // tall). For each candidate lift dh, both (ix, iy-dh) AND
+    // (cx, cy-dh) must be air so the ant has somewhere to land
+    // and headroom above its current pose. Without this, a few
+    // grain deposits form an impassable surface wall and freeze
+    // every ant mid-trip. Only climbs over GRAIN — soil still
+    // blocks and triggers hitSoil so dig logic can engage.
+    const MAX_CLIMB = 2;
+    if (k === CELL_GRAIN) {
+      const cx = x | 0;
       const cy = y | 0;
-      const headK = cy > 0 ? world.cells[(cy - 1) * world.width + (x | 0)]! : CELL_SOIL;
-      if (upK !== CELL_SOIL && upK !== CELL_GRAIN
-          && headK !== CELL_SOIL && headK !== CELL_GRAIN) {
-        return { x: nx, y: ny - 1, hitSoil: false };
+      for (let dh = 1; dh <= MAX_CLIMB; dh++) {
+        const probeIy = iy - dh;
+        const headIy = cy - dh;
+        if (probeIy < 0 || headIy < 0) break;
+        const upK = world.cells[probeIy * world.width + ix]!;
+        const headK = world.cells[headIy * world.width + cx]!;
+        if (upK === CELL_AIR && headK === CELL_AIR) {
+          return { x: nx, y: ny - dh, hitSoil: false };
+        }
+        if (upK === CELL_SOIL) break;
       }
     }
     return { x, y, hitSoil: k === CELL_SOIL };
