@@ -173,7 +173,7 @@ colony.spawnInRect(
   ANTS, rng, (x, y) => world.cells[world.index(x, y)] === 0,
   DEFAULT_PARAMS,
 );
-const digField = new Pheromone(world.width, world.height, 0.12, 0.992);
+const digField = new Pheromone(world.width, world.height, 0.12, 0.985);
 const buildField = new Pheromone(world.width, world.height, 0.10, 0.997);
 
 let prevSoil = world.countSoil();

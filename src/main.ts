@@ -59,12 +59,16 @@ function build(s: Settings) {
   const depth = Math.max(4, Math.floor(s.height * 0.05));
   world.generate(rng, surfaceRow, halfW, depth);
 
-  // Two pheromone fields. Parameters are at the conservative end of
-  // the literature ranges: diffusion 0.12 (slow horizontal spread,
-  // gradients stay sharp), dig evaporation 0.992 (~half-life of
-  // ~85 ticks), build evaporation 0.997 (longer-lived because spoil
-  // mounds are persistent landmarks).
-  const digField = new Pheromone(world.width, world.height, 0.12, 0.992);
+  // Two pheromone fields. The dig-pheromone evaporation is at the
+  // FAST end of the literature range (Bonabeau et al. 1998 give
+  // 0.95–0.99). Slow evaporation (0.992 → ~85-tick half-life) made
+  // stigmergy too sticky: once the first dig front established its
+  // gradient, no second front could compete. Faster evaporation
+  // (0.97 → ~22-tick half-life) means a site's recruitment power
+  // decays unless ants keep working it; new sites get a fair shot
+  // at bootstrapping. Build pheromone stays slow (0.997) — spoil
+  // mounds are meant to be persistent landmarks.
+  const digField = new Pheromone(world.width, world.height, 0.12, 0.985);
   const buildField = new Pheromone(world.width, world.height, 0.10, 0.997);
 
   const colony = new Colony(s.ants);

@@ -25,7 +25,7 @@ function makeSim(seed: number) {
     (x, y) => world.cells[world.index(x, y)] === 0,
     DEFAULT_PARAMS,
   );
-  const dig = new Pheromone(world.width, world.height, 0.12, 0.992);
+  const dig = new Pheromone(world.width, world.height, 0.12, 0.985);
   const build = new Pheromone(world.width, world.height, 0.10, 0.997);
   return { rng, world, colony, dig, build };
 }
