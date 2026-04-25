@@ -84,7 +84,11 @@ export class AntMeshRenderer {
 
     const oriented = new THREE.Group();
     oriented.add(inner);
-    oriented.rotation.x = -Math.PI / 2;
+    // Rotate +π/2 around X so the model's +Z (height) axis maps to
+    // screen-up. With -π/2 the height axis pointed screen-down,
+    // which is why every ant rendered upright (body vertical with
+    // gaster planted at the surface, head pointing skyward).
+    oriented.rotation.x = Math.PI / 2;
     this.template = oriented;
 
     // Measure the model's longest axis AFTER rotation so the

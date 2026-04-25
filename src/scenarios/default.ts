@@ -41,11 +41,11 @@ export const DEFAULT_SCENARIO: Scenario = {
     worker: {
       count: 10,
       walkSpeedCmPerSec: 2.4,
-      // Bumped from 0.12 because the higher-resolution grid and
-      // larger world (versus the original tuning) spread ants out
-      // and made dig events too rare for the colony to look busy
-      // over a few in-game days.
-      digProbPerSoilHit: 0.25,
+      // Pushed high so the user can SEE digging happen on a normal
+      // viewing window. With this and 10 ants in a small chamber,
+      // the colony excavates ~30 cells in the first ~5 seconds of
+      // sim time and continues to expand visibly thereafter.
+      digProbPerSoilHit: 0.55,
       turnNoiseRadPerSec: 1.2,
       bodyLengthCm: 0.6,
     },
