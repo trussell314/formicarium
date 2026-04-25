@@ -14,7 +14,10 @@ import { Colony } from './sim/colony';
 import { World } from './sim/world';
 import { RNG } from './sim/rng';
 
-export const CELLS_PER_CM = 20;
+// 40 cells/cm = 0.25 mm per cell. Bumped up from 20 so the
+// terrain upscale to a typical 1080p+ canvas is ~4× instead of
+// ~8×, which removes the blocky-pixel feel on the dirt and grass.
+export const CELLS_PER_CM = 40;
 
 /** Behaviour and population of one ant caste. */
 export interface AntTypeSpec {

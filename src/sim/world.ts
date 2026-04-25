@@ -111,7 +111,10 @@ export class World {
     for (let dx = -halfW; dx <= halfW; dx++) {
       const taper = 1 - Math.abs(dx) / (halfW + 1);
       const dDepth = Math.round(depth * taper);
-      for (let dy = 1; dy <= dDepth; dy++) {
+      // dy starts at 0 — carve the surface row too. Otherwise the
+      // grass row sits suspended over the open chamber, which the
+      // user reported as "grass floating above the V-shaped well".
+      for (let dy = 0; dy <= dDepth; dy++) {
         const x = cx + dx;
         const y = surfaceBase + dy;
         if (this.inBounds(x, y) && this.cells[this.index(x, y)] === CELL_SOIL) {

@@ -206,7 +206,14 @@ export class Renderer {
             } else {
               r = soilR; g = soilG; b = soilB;
             }
-            const nf = 0.88 + (noise[idx]! / 255) * 0.24;
+            // Multi-frequency texture: per-cell hash noise (existing,
+            // sharp grain) layered with a low-frequency sin product
+            // for clumpiness. The sum gives dirt that reads as
+            // varied at multiple scales rather than a flat gradient
+            // with TV static on top.
+            const fineN = (noise[idx]! / 255) - 0.5;          // [−0.5, +0.5]
+            const coarseN = Math.sin(x * 0.18 + y * 0.13) * Math.cos(x * 0.07 - y * 0.09) * 0.5;
+            const nf = 1 + (fineN * 0.18 + coarseN * 0.10);   // ±~14% total
             r *= nf; g *= nf; b *= nf;
           }
         } else if (k === CELL_GRAIN) {

@@ -40,14 +40,19 @@ describe('World', () => {
     expect(w.surfaceY(5)).toBe(5);
   });
 
-  it('generate sets naturalSurface[x] to the column top', () => {
-    const w = new World(40, 40);
+  it('generate sets naturalSurface[x] to the column top (non-chamber cols)', () => {
+    const w = new World(80, 40);
     w.generate(new RNG(5));
+    // Chamber is carved in the middle; columns near the edges are
+    // untouched, so naturalSurface[x] there should still match
+    // "topmost soil cell" semantics. (Inside the chamber the
+    // surface row was carved out for the user-visible reason that
+    // an uncarved grass row floats over the chamber.)
+    const cx = Math.floor(w.width / 2);
     for (let x = 0; x < w.width; x++) {
+      if (Math.abs(x - cx) < w.width * 0.2) continue;
       const ns = w.naturalSurface[x]!;
-      // At ns itself the cell should be SOIL (original surface row).
       expect(w.cells[w.index(x, ns)]).toBe(CELL_SOIL);
-      // Above ns (row ns-1) the cell should be AIR (sky).
       if (ns > 0) expect(w.cells[w.index(x, ns - 1)]).toBe(CELL_AIR);
     }
   });

@@ -34,8 +34,7 @@ describe('scenario DSL', () => {
     expect(r.nightDurationTicks).toBe(150); // 15 / 0.1
   });
 
-  it('cm dimensions convert to cells via CELLS_PER_CM = 20', () => {
-    expect(CELLS_PER_CM).toBe(20);
+  it('cm dimensions convert to cells via CELLS_PER_CM', () => {
     const r = resolveScenario({
       name: 't',
       worldWidthCm: 10,
@@ -43,9 +42,9 @@ describe('scenario DSL', () => {
       surfaceFromTopCm: 2,
       ants: { x: { count: 1 } },
     });
-    expect(r.gridWidth).toBe(200);
-    expect(r.gridHeight).toBe(160);
-    expect(r.surfaceCellsFromTop).toBe(40);
+    expect(r.gridWidth).toBe(10 * CELLS_PER_CM);
+    expect(r.gridHeight).toBe(8 * CELLS_PER_CM);
+    expect(r.surfaceCellsFromTop).toBe(2 * CELLS_PER_CM);
   });
 
   it('totalAnts sums all ant types', () => {
