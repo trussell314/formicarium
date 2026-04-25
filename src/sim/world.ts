@@ -109,14 +109,18 @@ export class World {
     // stand on.
     const cx = Math.floor(this.width / 2);
     for (let dx = -halfW; dx <= halfW; dx++) {
+      const x = cx + dx;
+      if (x < 0 || x >= this.width) continue;
       const taper = 1 - Math.abs(dx) / (halfW + 1);
       const dDepth = Math.round(depth * taper);
-      // dy starts at 0 — carve the surface row too. Otherwise the
-      // grass row sits suspended over the open chamber, which the
-      // user reported as "grass floating above the V-shaped well".
-      for (let dy = 0; dy <= dDepth; dy++) {
-        const x = cx + dx;
-        const y = surfaceBase + dy;
+      // Carve from this column's actual surface row (which the wave
+      // may have pushed above or below `surfaceBase`) down to
+      // surfaceBase + dDepth. Indexing from `surfaceBase` was
+      // missing wave-raised columns and leaving their grass row
+      // floating over the open chamber.
+      const top = Math.min(this.naturalSurface[x]!, surfaceBase);
+      const bottom = surfaceBase + dDepth;
+      for (let y = top; y <= bottom; y++) {
         if (this.inBounds(x, y) && this.cells[this.index(x, y)] === CELL_SOIL) {
           this.cells[this.index(x, y)] = CELL_AIR;
           soilCount--;

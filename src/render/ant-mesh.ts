@@ -66,17 +66,33 @@ export class AntMeshRenderer {
     // geometry buffers with meshopt.
     loader.setMeshoptDecoder(MeshoptDecoder);
     const gltf = await loader.loadAsync(url);
-    this.template = gltf.scene;
-    // Measure the model so we can scale instances by per-ant
-    // bodyLengthCells.
-    const box = new THREE.Box3().setFromObject(this.template);
+
+    // The Fab-converted model is +Z up (long axis along X, depth
+    // along Y, height along Z). Our ortho camera looks down +Z, so
+    // without correction we'd see top-down instead of side-view.
+    // Wrap the loaded scene in a parent that rotates -π/2 around X:
+    //   model +Z (height) → world −Y (screen up)
+    //   model +Y (depth)  → world +Z (toward camera)
+    //   model +X (length) → world +X (unchanged) — heading 0 = right
+    // The wrapper also centers the geometry so per-instance
+    // .position is the ant's centre, not its bounding-box corner.
+    const inner = gltf.scene;
+    const box = new THREE.Box3().setFromObject(inner);
+    const centre = new THREE.Vector3();
+    box.getCenter(centre);
+    inner.position.sub(centre);
+
+    const oriented = new THREE.Group();
+    oriented.add(inner);
+    oriented.rotation.x = -Math.PI / 2;
+    this.template = oriented;
+
+    // Measure the model's longest axis AFTER rotation so the
+    // per-ant scale factor is in the right frame.
+    const orientedBox = new THREE.Box3().setFromObject(this.template);
     const size = new THREE.Vector3();
-    box.getSize(size);
+    orientedBox.getSize(size);
     this.templateLengthUnits = Math.max(size.x, size.y, size.z);
-    // The Fab-converted model's nose-forward axis is unknown in
-    // advance. Heuristic: the longest extent IS the body axis;
-    // we'll align that with world +x and let the user override
-    // via setModelYawOffset() if it lands wrong.
     this.modelYawOffset = 0;
   }
 
