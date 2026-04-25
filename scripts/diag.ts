@@ -200,10 +200,12 @@ world.generate(rng, surfaceRow, halfW, depth);
 
 const colony = new Colony(ANTS);
 const cx = world.width >> 1;
-// Spawn at the bottom half of the divot — matches main.ts.
-const divotR = Math.max(4, Math.min(halfW, depth + 3));
+// Spawn inside the starter divot — matches main.ts. Must track
+// DIVOT_RADIUS in world.generate.
+const DIVOT_R = 3;
+const surfHere = world.naturalSurface[cx]!;
 colony.spawnInRect(
-  cx - divotR + 1, surfaceRow + divotR - 1, cx + divotR - 1, surfaceRow + 2 * divotR - 1,
+  cx - DIVOT_R + 1, surfHere, cx + DIVOT_R - 1, surfHere + DIVOT_R - 1,
   ANTS, rng, (x, y) => world.cells[world.index(x, y)] === 0,
   DEFAULT_PARAMS,
 );

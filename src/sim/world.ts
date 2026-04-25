@@ -76,28 +76,31 @@ export class World {
       }
     }
 
-    // Starter divot — a small circular pocket the colony has to break
-    // out of. The legacy wide trapezoid gave ants too much pre-carved
-    // real estate to lazily widen; this version forces tunnel
-    // formation by giving them barely enough room to spawn into.
-    // chamberHalfWidth / chamberDepth are repurposed as size hints.
+    // Starter indentation — a half-disc just below the natural
+    // surface, only barely large enough to seed the colony into.
+    // We DELIBERATELY keep this small (radius DIVOT_RADIUS cells,
+    // ~6 cells wide × 6 deep at the default scale) so the rest of
+    // the architecture has to emerge from the agents' work.
+    // Previously this was up to radius 8, which read as a chamber
+    // already half-built. chamberHalfWidth/chamberDepth args remain
+    // in the signature for backwards compatibility with tests but
+    // are no longer consulted.
+    const DIVOT_RADIUS = 3;
     const cx = this.width >> 1;
-    const divotRadius = Math.max(4, Math.min(chamberHalfWidth, chamberDepth + 3));
-    const divotRadius2 = divotRadius * divotRadius;
+    const r2 = DIVOT_RADIUS * DIVOT_RADIUS;
     const surfHere = this.naturalSurface[cx]!;
-    // Place the divot so most of it sits BELOW the surface line, with
-    // just the topmost cell breaking through (so spawned ants are
-    // already underground and have walls to dig).
-    const centerY = surfHere + divotRadius;
-    const x0 = Math.max(0, cx - divotRadius);
-    const x1 = Math.min(this.width - 1, cx + divotRadius);
+    // Centre of the half-disc sits ON the surface so the carved
+    // shape is exactly a semicircle reaching down DIVOT_RADIUS cells.
+    const centerY = surfHere;
+    const x0 = Math.max(0, cx - DIVOT_RADIUS);
+    const x1 = Math.min(this.width - 1, cx + DIVOT_RADIUS);
     const yLo = Math.max(0, surfHere);
-    const yHi = Math.min(this.height - 1, centerY + divotRadius);
+    const yHi = Math.min(this.height - 1, surfHere + DIVOT_RADIUS);
     for (let y = yLo; y <= yHi; y++) {
       for (let x = x0; x <= x1; x++) {
         const ddx = x - cx;
         const ddy = y - centerY;
-        if (ddx * ddx + ddy * ddy > divotRadius2) continue;
+        if (ddx * ddx + ddy * ddy > r2) continue;
         const idx = y * this.width + x;
         if (this.cells[idx] === CELL_SOIL) {
           this.cells[idx] = CELL_AIR;
@@ -105,6 +108,7 @@ export class World {
         }
       }
     }
+    void chamberHalfWidth;
     void chamberDepth;
 
     for (let i = 0; i < this.soilNoise.length; i++) {

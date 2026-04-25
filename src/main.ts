@@ -68,14 +68,18 @@ function build(s: Settings) {
 
   const colony = new Colony(s.ants);
   const cx = world.width >> 1;
-  // Spawn ants in the BOTTOM half of the divot (deeper rows) — the
-  // divot radius matches what world.generate uses.
-  const divotR = Math.max(4, Math.min(halfW, depth + 3));
+  // Spawn ants inside the starter divot. Must match DIVOT_RADIUS in
+  // world.generate — the colony has to fit in the carved semicircle.
+  // The divot is a half-disc of radius 3 below the surface line, so
+  // we fill its full footprint and let physics settle them onto the
+  // floor in the first few ticks.
+  const DIVOT_R = 3;
+  const surfHere = world.naturalSurface[cx]!;
   colony.spawnInRect(
-    cx - divotR + 1,
-    surfaceRow + divotR - 1,
-    cx + divotR - 1,
-    surfaceRow + 2 * divotR - 1,
+    cx - DIVOT_R + 1,
+    surfHere,
+    cx + DIVOT_R - 1,
+    surfHere + DIVOT_R - 1,
     s.ants,
     rng,
     (x, y) => world.cells[world.index(x, y)] === 0 /* AIR */,
