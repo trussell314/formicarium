@@ -270,6 +270,16 @@ export function step(
       if (colony.stateTicks[i]! >= params.restDuration) {
         colony.setState(i, STATE_WANDER);
         colony.collisionCount[i] = 0;
+        // Fresh random heading. Without this, the exiting ant keeps
+        // the heading it had when it entered REST — which was, by
+        // construction, pointing INTO the crowd that exhausted it.
+        // Combined with the dig-pheromone gradient drawing ants
+        // toward active fronts, that produces sticky feedback loops
+        // where the same ants cycle through REST → WANDER → REST in
+        // the same crowded chamber. A uniform-random reset breaks
+        // the loop without overcommitting to any specific dispersal
+        // direction.
+        colony.heading[i] = rng.range(0, Math.PI * 2);
       } else {
         // Random-walk step. Move-only; no stigmergy bias.
         h += rng.gauss() * colony.turnNoise[i]!;
