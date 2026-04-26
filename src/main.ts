@@ -237,7 +237,7 @@ function main(): void {
   // in index.html dispatches via the same names.
   const actions: Record<string, () => void> = {
     pause: () => { paused = !paused; },
-    faster: () => { stepsPerFrame = Math.min(64, stepsPerFrame * 2); },
+    faster: () => { stepsPerFrame = Math.min(1024, stepsPerFrame * 2); },
     slower: () => { stepsPerFrame = Math.max(1, stepsPerFrame >> 1); },
     help: () => {
       help.classList.toggle('hidden');
