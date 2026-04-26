@@ -307,8 +307,38 @@ export function step(
     colony.energy[i]! -= species.metabolism;
     if (colony.energy[i]! <= 0) {
       colony.energy[i] = 0;
-      colony.setState(i, STATE_DEAD);
+      // Drop any carried cargo before becoming a corpse — otherwise
+      // each dead carrier permanently sinks 1 grain or 1 seed and
+      // grain conservation breaks. We try the 4 cardinal neighbours
+      // (then diagonals as a fallback) for an empty AIR cell to drop
+      // into. If absolutely nothing is reachable the cargo is lost,
+      // but that's the genuine entombment edge case.
       const wW = world.width;
+      if (stateIn === STATE_CARRY || stateIn === STATE_CARRY_FOOD) {
+        const cargoMoves = colony.carryMoves[i]!;
+        const isFood = stateIn === STATE_CARRY_FOOD;
+        const offsets: ReadonlyArray<readonly [number, number]> = [
+          [0, 1], [0, -1], [1, 0], [-1, 0],
+          [1, 1], [1, -1], [-1, 1], [-1, -1],
+        ];
+        for (const [dx, dy] of offsets) {
+          const nx = ix + dx;
+          const ny = iy + dy;
+          if (nx < 0 || ny < 0 || nx >= wW || ny >= world.height) continue;
+          const nIdx = ny * wW + nx;
+          if (world.cells[nIdx] !== CELL_AIR) continue;
+          if (isFood) {
+            if (world.food[nIdx]! > 0) continue;
+            world.food[nIdx] = 1;
+            world.foodMoves[nIdx] = Math.min(255, cargoMoves + 1);
+          } else {
+            placeGrain(world, nx, ny, rng, cargoMoves + 1);
+          }
+          break;
+        }
+      }
+      colony.carryMoves[i] = 0;
+      colony.setState(i, STATE_DEAD);
       if (ix >= 0 && iy >= 0 && ix < wW && iy < world.height) {
         world.corpse[iy * wW + ix] = 1;
       }
