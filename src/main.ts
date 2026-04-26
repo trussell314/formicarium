@@ -336,12 +336,33 @@ function main(): void {
         if (colony.state[i] === STATE_DEAD) dead++;
       }
       const alive = colony.count - dead;
+      // Nest geometry: nestVol = AIR cells below each column's natural
+      // surface (per-column to honour the wave); maxDepth = deepest
+      // such cell measured from its own surface row. O(W×H) but only
+      // every 250 ms.
+      let nestVol = 0;
+      let maxDepth = 0;
+      const wW = world.width;
+      const wH = world.height;
+      const surfRow = world.naturalSurface;
+      const cells = world.cells;
+      for (let y = 0; y < wH; y++) {
+        for (let x = 0; x < wW; x++) {
+          if (cells[y * wW + x] !== 0 /* AIR */) continue;
+          const sy = surfRow[x]!;
+          if (y < sy) continue;
+          nestVol++;
+          const d = y - sy;
+          if (d > maxDepth) maxDepth = d;
+        }
+      }
       hud.textContent =
         `formicarium · ${HARVESTER.commonName} · seed 0x${settings.seed.toString(16)}` +
         `  ·  ${world.width}×${world.height}` +
         `  ·  ants ${alive}/${colony.count}${dead > 0 ? ` (${dead} dead)` : ''}` +
         `  ·  t=${world.tick.toLocaleString()}` +
         `  ·  dug ${dugTotal}  grains ${grains}  food ${foodCount}` +
+        `  ·  nest ${nestVol} (depth ${maxDepth})` +
         `  ·  speed ${stepsPerFrame}×${paused ? '  ·  PAUSED' : ''}` +
         `  ·  ${(1000 / Math.max(1, dt)).toFixed(0)} fps`;
     }
