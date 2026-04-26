@@ -829,7 +829,17 @@ export function step(
       //   shape ant nest architecture. PNAS 113(5): 1303–1308.
       const local = buildField.sample(ax, ay);
       const khuongBoost = 1 + Math.min(1.5, local * 1.5);
-      if (rng.next() < colony.digProb[i]! * khuongBoost) {
+      // Substrate compaction (Tschinkel 2004): bulk density of soil
+      // increases with depth, so dig probability decreases. Linear
+      // ramp from 1.0 at surface down to species.compactionFloor at
+      // species.compactionDepth cells, flat below that. Real
+      // P. barbatus still digs deep, just slower than at the surface.
+      const depthBelowSurf = Math.max(0, ay - world.naturalSurface[ax]!);
+      const compactionFactor = Math.max(
+        species.compactionFloor,
+        1 - depthBelowSurf / species.compactionDepth,
+      );
+      if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor) {
         const target = adjacentSoil(world, ax, ay, h);
         if (target !== null) {
           if (digCell(world, target.x, target.y, rng)) {
@@ -967,7 +977,14 @@ export function step(
       // 2× the previous 0.001/tick to widen entrance shafts faster.
       // Earlier value left visible CARRY clusters at the choke; doubling
       // halves the time to a sustainable crater geometry.
-      const WEAR_PROB = 0.002;
+      // Compaction also slows wall erosion at depth — same biology
+      // as the dig-roll factor. Compacted soil is harder to chip.
+      const wearDepth = Math.max(0, py - surf);
+      const wearCompaction = Math.max(
+        species.compactionFloor,
+        1 - wearDepth / species.compactionDepth,
+      );
+      const WEAR_PROB = 0.002 * wearCompaction;
       if (!aboveSurface && cellIsAir && rng.next() < WEAR_PROB) {
         const wW = world.width;
         const candidates: Array<[number, number]> = [];

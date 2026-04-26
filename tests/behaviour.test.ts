@@ -262,6 +262,54 @@ describe('foraging cycle', () => {
 //   Asymmetric dig pheromone (gradient-down bias)
 // ─────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────
+//   Substrate compaction with depth (Tschinkel 2004)
+// ─────────────────────────────────────────────────────────────────
+
+describe('substrate compaction with depth', () => {
+  it('dig rate at depth is lower than at the surface (same digProb input)', () => {
+    // Build two identical worlds — one with soil at the surface,
+    // one with soil deep below. Spawn 50 ants in each pressed
+    // against soil with digProb=1.0. The ratio of dug cells should
+    // match the compaction factor at the deeper world's depth.
+    const TICKS = 500;
+    function runAtDepth(yPos: number): number {
+      const w = new World(40, yPos + 10);
+      for (let x = 0; x < w.width; x++) {
+        w.naturalSurface[x] = 5; // surface always at y=5
+        for (let y = 0; y < w.height; y++) {
+          // Air above, single layer of pocket air at yPos, soil below.
+          w.cells[w.index(x, y)] = y < 5 ? CELL_AIR : CELL_SOIL;
+        }
+      }
+      // Carve a 1-cell pocket at (20, yPos) so ants there have soil
+      // neighbours and the enclosure gate passes.
+      w.cells[w.index(20, yPos)] = CELL_AIR;
+      w.initialSoilCells = w.countSoil();
+      const rng = new RNG(42);
+      const colony = new Colony(50);
+      for (let i = 0; i < 50; i++) {
+        colony.spawn(20.5, yPos + 0.5, 0, rng,
+          { ...TRAITS, digProb: 1.0, turnNoise: 0.001 });
+      }
+      const params = { ...DEFAULT_PARAMS, digProb: 1.0, turnNoise: 0.001, walkSpeed: 0.1 };
+      const { dig, build } = fields(w);
+      const before = w.countSoil();
+      for (let t = 0; t < TICKS; t++) {
+        step(w, colony, dig, build, rng, params);
+      }
+      return before - w.countSoil();
+    }
+    const dugShallow = runAtDepth(6);   // depth 1 cell — near surface, factor ≈ 1.0
+    const dugDeep = runAtDepth(300);    // depth ~295 cells — factor ≈ 0.4 (floor)
+    // Deep digging should be measurably slower than shallow.
+    expect(dugDeep).toBeLessThan(dugShallow);
+    // Roughly proportional to compactionFloor (0.4): allow a wide
+    // band because Sudd contact dynamics aren't perfectly linear.
+    expect(dugDeep / dugShallow).toBeLessThan(0.85);
+  });
+});
+
 describe('asymmetric dig pheromone deposit', () => {
   it('a successful dig lays more pheromone one row BELOW the dug cell than at it', () => {
     const w = flatWorld(40, 30, 10);

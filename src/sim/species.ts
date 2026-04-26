@@ -110,6 +110,23 @@ export interface AntSpecies {
    *  starvation/entombment edge cases — population grows monotonically
    *  and user can't see colony turnover. */
   readonly workerLifespan: number;
+
+  // ── Substrate / soil compaction ────────────────────────────────
+
+  /** Cells deep at which the dig-rate compaction multiplier reaches
+   *  its floor. Tschinkel (2004, J. Insect Sci. 4:21) measured soil
+   *  bulk density increasing with depth in P. badius habitat: from
+   *  ~1.2 g/cm³ at the surface to ~1.6 g/cm³ at 1m. Dig rate
+   *  decreases roughly linearly with bulk density. At our 3 mm/cell
+   *  scale, 1m = 333 cells, so the linear ramp covers 0..333 cells
+   *  before flattening out. */
+  readonly compactionDepth: number;
+  /** Floor of the depth-dependent dig-rate multiplier — even at the
+   *  bottom of the world, dig probability never drops below this
+   *  fraction of the surface rate. Real Pogonomyrmex still digs at
+   *  3m depth, just slower; we floor at 0.4 to keep deep extension
+   *  always achievable. */
+  readonly compactionFloor: number;
 }
 
 /**
@@ -203,4 +220,8 @@ export const HARVESTER: AntSpecies = {
   // (Tschinkel 1998). We cap lower to fit performance/render budget.
   maxColonySize: 1000,
   workerLifespan: 1_000_000,
+  // 333 cells × 3 mm = 1 m, where Tschinkel measured bulk density
+  // levelling off in P. badius soil profiles.
+  compactionDepth: 333,
+  compactionFloor: 0.4,
 };
