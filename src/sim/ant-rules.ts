@@ -839,23 +839,37 @@ export function step(
         species.compactionFloor,
         1 - depthBelowSurf / species.compactionDepth,
       );
-      // Tunnel-tip vs chamber-wall differentiation. Tschinkel (2004)
-      // mapped Pogonomyrmex nests as predominantly vertical galleries
-      // (1-cell-wide tunnels) with horizontal chambers branching at
-      // intervals — so tunnel-extension digs vastly outnumber
-      // chamber-widening digs. Geometrically:
-      //   neighbourSoil = 4: fully entombed → claustrophobia, full rate
-      //   neighbourSoil = 3: tunnel TIP (3 walls + 1 air) → full rate;
-      //                      this is "extend the tunnel"
-      //   neighbourSoil = 2: tunnel SIDE or chamber wall corner →
-      //                      reduced rate; this is "widen the chamber"
-      // The 0.3 multiplier for 2-neighbour digs is the lever that
-      // suppresses lateral chamber widening relative to vertical
-      // tunnel extension.
+      // Tunnel-tip vs chamber-wall (geometric) AND direction-of-
+      // extension differentiation. Tschinkel (2004) mapped
+      // Pogonomyrmex nests as predominantly vertical galleries with
+      // chambers branching at intervals, so dig outcomes that
+      // EXTEND a vertical air structure should out-rate ones that
+      // EXTEND a lateral structure.
+      //
+      // tipBonus by cardinal-soil-count of the ant's CELL:
+      //   4 (entombed) or 3 (tunnel tip): 1.0
+      //   2 (chamber wall corner):        0.3
+      // The 0.3 doesn't apply to claustrophobia entombment (which
+      // has 4 soil neighbours by definition).
       const tipBonus = neighbourSoil >= 3 ? 1.0 : 0.3;
-      if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus) {
-        const target = adjacentSoil(world, ax, ay, h);
-        if (target !== null) {
+      // Direction-of-extension bonus: examine the dig target's
+      // OWN air-neighbour pattern. If the target sits below a
+      // single air cell (above), digging it extends DOWN — boost.
+      // If the target sits beside an air cell (left/right), digging
+      // it extends laterally — penalty.
+      const target = adjacentSoil(world, ax, ay, h);
+      if (target !== null) {
+        const tW = world.width;
+        const tx = target.x;
+        const ty = target.y;
+        const airAbove = ty > 0 && world.cells[(ty - 1) * tW + tx] === CELL_AIR ? 1 : 0;
+        const airBelow = ty < world.height - 1 && world.cells[(ty + 1) * tW + tx] === CELL_AIR ? 1 : 0;
+        const airLeft = tx > 0 && world.cells[ty * tW + (tx - 1)] === CELL_AIR ? 1 : 0;
+        const airRight = tx < tW - 1 && world.cells[ty * tW + (tx + 1)] === CELL_AIR ? 1 : 0;
+        const vAir = airAbove + airBelow;
+        const lAir = airLeft + airRight;
+        const dirBonus = vAir > lAir ? 1.5 : (lAir > vAir ? 0.3 : 1.0);
+        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus * dirBonus) {
           if (digCell(world, target.x, target.y, rng)) {
             // Ant body stays put — mandibles do the reaching. A
             // teleport into target+0.5 produced renderer artefacts
