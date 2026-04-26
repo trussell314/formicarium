@@ -23,7 +23,7 @@ import { RNG } from '../src/sim/rng';
 import { HARVESTER } from '../src/sim/species';
 import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from '../src/sim/world';
 
-const SEED = 0xc0ffee;
+const SEED = Number(process.env.SEED ?? 0xc0ffee) | 0;
 const TICKS = Number(process.env.TICKS ?? 60000) | 0;
 const WIDTH = Number(process.env.WIDTH ?? 200) | 0;
 const HEIGHT = Number(process.env.HEIGHT ?? 120) | 0;
