@@ -242,7 +242,14 @@ const placedInPinhole = colony.spawnInRect(
 );
 const remaining = ANTS - placedInPinhole;
 if (remaining > 0) {
-  const SCATTER_HALF = 10;
+  const TARGET_SCATTER_DENSITY = 3;
+  const SCATTER_HALF = Math.max(
+    10,
+    Math.min(
+      Math.floor((world.width - 1) / 2),
+      Math.ceil(remaining / (2 * TARGET_SCATTER_DENSITY)),
+    ),
+  );
   let topRow = world.height;
   for (let x = Math.max(0, cx - SCATTER_HALF); x <= Math.min(world.width - 1, cx + SCATTER_HALF); x++) {
     if (world.naturalSurface[x]! < topRow) topRow = world.naturalSurface[x]!;
@@ -342,6 +349,7 @@ for (let t = 1; t <= TICKS; t++) {
 
     // Structural metrics over the dug region.
     let dugArea = 0, perim = 0, tips = 0;
+    let maxDepth = 0;
     let bbMinX = Infinity, bbMaxX = -Infinity, bbMinY = Infinity, bbMaxY = -Infinity;
     for (let y = 1; y < world.height - 1; y++) {
       for (let x = 1; x < world.width - 1; x++) {
@@ -349,6 +357,8 @@ for (let t = 1; t <= TICKS; t++) {
         if (k === CELL_AIR && y >= world.naturalSurface[x]!) {
           // Below-surface air cell — count it as dug
           dugArea++;
+          const depth = y - world.naturalSurface[x]!;
+          if (depth > maxDepth) maxDepth = depth;
           if (x < bbMinX) bbMinX = x;
           if (x > bbMaxX) bbMaxX = x;
           if (y < bbMinY) bbMinY = y;
@@ -372,6 +382,12 @@ for (let t = 1; t <= TICKS; t++) {
     const bbW = bbMaxX > bbMinX ? bbMaxX - bbMinX + 1 : 0;
     const bbH = bbMaxY > bbMinY ? bbMaxY - bbMinY + 1 : 0;
     const fmt = (x: number, d = 1) => Number.isFinite(x) ? x.toFixed(d) : 'n/a';
+    // nestVol = AIR cells below the natural-surface line. Distinct
+    // from `dug` (total cells that USED TO BE soil but are now non-
+    // soil, including in-chamber GRAIN deposits): nestVol is the open
+    // air space the colony has actually carved out and hasn't refilled
+    // with grain. maxDepth is the deepest reach of any dug cell below
+    // the surface — measures how far down the colony has tunnelled.
     console.log(
       `t=${String(t).padStart(7)}  dug/${WINDOW}=${String(windowDigs).padStart(4)}  ` +
       `dug=${totalDug} grain=${grains} food=${foodCount} corpse=${corpseCount}  ` +
@@ -381,7 +397,8 @@ for (let t = 1; t <= TICKS; t++) {
       `below=${belowSurface}  y=${fmt(minY)}..${fmt(maxY)}  ` +
       `mound=${maxMound} surfSoil=${surfaceSoil}  ` +
       `cons[dug-grain-liveC]=${conservationGap}  ` +
-      `area=${dugArea} p:a=${perimRatio} tips=${tips} bbox=${bbW}x${bbH}`,
+      `nestVol=${dugArea} maxDepth=${maxDepth} ` +
+      `p:nv=${perimRatio} tips=${tips} bbox=${bbW}x${bbH}`,
     );
     windowDigs = 0;
   }

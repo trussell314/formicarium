@@ -101,7 +101,20 @@ function build(s: Settings) {
   // ground in a few ticks.
   const remaining = s.ants - placedInPinhole;
   if (remaining > 0) {
-    const SCATTER_HALF = 10;
+    // Scale scatter band by colony size to keep spawn density roughly
+    // constant (~3 ants per surface cell). Default 100 ants → 21-cell
+    // band; 500 ants → 153-cell band. Without scaling, packing 500
+    // ants into a 21-cell band hit immediate collision overload and
+    // pinned >90% of the colony in REST permanently — observed at
+    // t=240k diag, the colony survived but never built anything.
+    const TARGET_SCATTER_DENSITY = 3;
+    const SCATTER_HALF = Math.max(
+      10,
+      Math.min(
+        Math.floor((world.width - 1) / 2),
+        Math.ceil(remaining / (2 * TARGET_SCATTER_DENSITY)),
+      ),
+    );
     let topRow = world.height;
     for (let x = Math.max(0, cx - SCATTER_HALF); x <= Math.min(world.width - 1, cx + SCATTER_HALF); x++) {
       if (world.naturalSurface[x]! < topRow) topRow = world.naturalSurface[x]!;
