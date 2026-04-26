@@ -319,6 +319,7 @@ function main(): void {
         `formicarium · seed 0x${settings.seed.toString(16)}` +
         `  ·  ${world.width}×${world.height}` +
         `  ·  ants ${colony.count}` +
+        `  ·  t=${world.tick.toLocaleString()}` +
         `  ·  dug ${dugTotal}  grains ${grains}` +
         `  ·  speed ${stepsPerFrame}×${paused ? '  ·  PAUSED' : ''}` +
         `  ·  ${(1000 / Math.max(1, dt)).toFixed(0)} fps`;
