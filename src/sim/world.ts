@@ -48,6 +48,11 @@ export class World {
   /** Tick at which each cell was last carved (for "fresh dig" highlight). */
   readonly digTick: Int32Array;
   initialSoilCells = 0;
+  /** Soil cells dug by traffic-driven wear and pulverised to dust
+   *  rather than carried as grain. Tracked so the grain-conservation
+   *  invariant `dug = grain + liveCarriers + wearLost` continues to
+   *  hold. See ant-rules.ts wear handler. */
+  wearLost = 0;
   tick = 0;
 
   constructor(width: number, height: number) {

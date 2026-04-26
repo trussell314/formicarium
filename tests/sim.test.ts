@@ -46,7 +46,7 @@ describe('sim invariants', () => {
     }
   });
 
-  it('grain conservation: dug soil = grains in world + carriers', () => {
+  it('grain conservation: dug soil = grains in world + carriers + wearLost', () => {
     const { rng, world, colony, dig, build } = makeSim(0xfeedface);
     for (let t = 0; t < 800; t++) step(world, colony, dig, build, rng, DEFAULT_PARAMS);
     let carriers = 0;
@@ -55,7 +55,12 @@ describe('sim invariants', () => {
     }
     const dug = world.initialSoilCells - world.countSoil();
     const grainsInWorld = world.countGrains();
-    expect(dug).toBe(grainsInWorld + carriers);
+    // wearLost accounts for cells dug by traffic-driven shaft erosion
+    // (Hölldobler & Wilson 1990) which the cited model treats as
+    // pulverised dust, not loaded grain — so it doesn't end up in
+    // either of the other two terms. Without including it here, the
+    // invariant would falsely fail every time wear fires.
+    expect(dug).toBe(grainsInWorld + carriers + world.wearLost);
   });
 
   it('the chamber visibly grows over time', () => {

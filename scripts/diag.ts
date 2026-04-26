@@ -328,11 +328,12 @@ for (let t = 1; t <= TICKS; t++) {
       if (world.food[i]! > 0) foodCount++;
       if (world.corpse[i]! > 0) corpseCount++;
     }
-    // Grain conservation. dug = grains_in_world + grain_carriers.
+    // Grain conservation. dug = grain + grain_carriers + wearLost.
     // CARRY_FOOD ants carry SEEDS not grain, so they don't count
-    // toward the grain budget — only STATE_CARRY does.
+    // toward the grain budget — only STATE_CARRY does. wearLost
+    // tracks traffic-erosion soil pulverised to dust (not grain).
     const liveGrainCarriers = nC;
-    const conservationGap = totalDug - grains - liveGrainCarriers;
+    const conservationGap = totalDug - grains - liveGrainCarriers - world.wearLost;
     let maxMound = 0;
     for (let x = 0; x < world.width; x++) {
       if (world.mound[x]! > maxMound) maxMound = world.mound[x]!;

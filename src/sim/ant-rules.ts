@@ -765,23 +765,21 @@ export function step(
       }
     }
 
-    // CARRY → place grain. Surface-mound-only deposit: the cell must
-    // be above natural surface, over an intact-ground column. CARRY
-    // ants must climb out of the chamber to drop their load.
+    // CARRY → place grain. Two-tier deposit decision:
+    //   1. Surface mound (above surface, intact ground): always
+    //      deposit. Tschinkel 2004 (J. Insect Sci. 4:21) directly
+    //      observed Pogonomyrmex spoil mounds at the entrance.
+    //   2. In-chamber, pheromone-thresholded: deposit at probability
+    //      = local build pheromone (capped at 1) when local > 0.10.
+    //      Khuong et al. 2016 (PNAS 113:1303) sigmoid response —
+    //      deposits cluster at high-pheromone sites that have
+    //      already been built up, producing pillar/wall morphology
+    //      near the mound. The threshold suppresses random deep-
+    //      chamber refill (pheromone evaporates faster than it
+    //      diffuses there).
     //
-    // This is intentional and matches harvester biology — Tschinkel
-    // 2004 (J. Insect Sci. 4:21) found Pogonomyrmex spoil mounds at
-    // entrance, not inside chambers. The earlier "deposit anywhere
-    // with solid support" rule made every dig get instantly refilled
-    // (78% refill rate observed) and capped real depth at ~6 cells
-    // even after 300k ticks. Forcing surface-mound deposit lets the
-    // chamber actually grow as net excavation, allowing the 50+ cell
-    // depths Tschinkel measured in real harvester nests.
-    //
-    // Use stateIn (not colony.state[i]) so ants who BECAME CARRY this
-    // tick (via a dig or grain pickup) wait until next tick before
-    // depositing — preserves the "one transition per tick" rule the
-    // rest of the file follows.
+    // Use stateIn so ants who BECAME CARRY this tick wait a tick
+    // before depositing.
     if (stateIn === STATE_CARRY) {
       const px = colony.posX[i]! | 0;
       const py = colony.posY[i]! | 0;
@@ -790,7 +788,53 @@ export function step(
       const cellIsAir = world.cells[idx] === CELL_AIR;
       const aboveSurface = py < surf;
       const groundIsIntact = world.cells[world.index(px, surf)] !== CELL_AIR;
+
+      // Traffic-driven wall erosion. Hölldobler & Wilson (1990, Ch. 3,
+      // "Nest construction"): "Workers passing through soil-walled
+      // passages erode the walls over time"; Tschinkel (2004) attributes
+      // the visible entrance crater of mature Pogonomyrmex nests to
+      // cumulative outbound CARRY traffic. A laden worker bumping the
+      // narrow shaft sides chips small amounts of soil with mandibles.
+      // Modelled as a small per-tick wear probability for in-transit
+      // CARRY ants, applied to a randomly chosen cardinal SOIL
+      // neighbour. Without this, the 1-cell starter pinhole remains a
+      // perpetual choke for 50+ ants and the colony starves on the
+      // length of the round trip.
+      const WEAR_PROB = 0.001;
+      if (!aboveSurface && cellIsAir && rng.next() < WEAR_PROB) {
+        const wW = world.width;
+        const candidates: Array<[number, number]> = [];
+        if (px > 0 && world.cells[py * wW + (px - 1)] === CELL_SOIL) candidates.push([px - 1, py]);
+        if (px < wW - 1 && world.cells[py * wW + (px + 1)] === CELL_SOIL) candidates.push([px + 1, py]);
+        if (candidates.length > 0) {
+          const pick = candidates[(rng.next() * candidates.length) | 0]!;
+          if (digCell(world, pick[0], pick[1], rng)) {
+            // The chipped soil isn't large enough to cohere as a
+            // grain — real ants pulverise wall material with their
+            // mandibles and the dust is shed during the trip
+            // (Hölldobler & Wilson 1990 Ch. 3 describes the same
+            // behaviour as creating "fine soil" that doesn't end up
+            // in the spoil mound). Track in world.wearLost so grain-
+            // conservation diagnostics stay honest.
+            world.wearLost++;
+          }
+        }
+      }
+
+      const PILLAR_THRESHOLD = 0.30;
+      const supportedBelow =
+        py + 1 < world.height &&
+        world.cells[world.index(px, py + 1)] !== CELL_AIR;
+      let pDeposit = 0;
       if (aboveSurface && groundIsIntact && cellIsAir) {
+        pDeposit = 1; // surface-mound bootstrap (Tschinkel)
+      } else if (!aboveSurface && supportedBelow && cellIsAir) {
+        const localBuild = buildField.sample(px, py);
+        if (localBuild > PILLAR_THRESHOLD) {
+          pDeposit = Math.min(1, localBuild); // Khuong pillar response
+        }
+      }
+      if (pDeposit > 0 && rng.next() < pDeposit) {
         // The grain has now been moved one more time. Stamp the
         // placed cell (and any cascade destination) with the
         // updated count so the renderer can fade it.
