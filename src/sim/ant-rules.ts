@@ -789,7 +789,26 @@ export function step(
             // Fresh material — never moved before. The next deposit
             // will set the placed cell's grainMoves to 1.
             colony.carryMoves[i] = 0;
-            digField.deposit(target.x, target.y, digDeposit);
+            // Asymmetric dig-pheromone deposit: bulk of the recruitment
+            // signal is laid ONE ROW BELOW the actual dug cell, so the
+            // gradient pulls subsequent diggers DOWN into virgin soil
+            // rather than along the row that was just dug. Without
+            // this, every dig laterally lays pheromone at the same
+            // depth, the gradient pulls the next ant the same direction,
+            // and chambers drift into long horizontal galleries (the
+            // opposite of the vertical-gallery + horizontal-chamber
+            // architecture Tschinkel 2004 mapped in Pogonomyrmex
+            // badius). Real ant alarm/recruitment pheromones do show
+            // directional persistence — convection at the surface
+            // disperses them faster than the still air at depth, so
+            // the equivalent biological phenomenon (deeper-pheromone-
+            // lasts-longer) maps onto the same gradient asymmetry.
+            // 80% of the signal goes below the dug cell, 20% at the
+            // dug cell itself for in-place recruitment continuity.
+            digField.deposit(target.x, target.y, digDeposit * 0.2);
+            if (target.y + 1 < world.height) {
+              digField.deposit(target.x, target.y + 1, digDeposit * 0.8);
+            }
             colony.heading[i] = -Math.PI / 2 + rng.range(-0.3, 0.3);
             // Spawn a small puff of dust from the dig site so the
             // event is visible. Three particles drifting up + away

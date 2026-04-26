@@ -159,7 +159,15 @@ export const HARVESTER: AntSpecies = {
   hungerThreshold: 0.6,   // ants seek food below 60%
 
   // ── Age polyethism ───────────────────────────────────────────
-  belowGeotaxis: 0.15,
+  // Same magnitude as surface-funnel and CARRY upward geotaxis (0.35).
+  // Earlier 0.15 was too weak to reliably bring WANDER ants to the
+  // chamber floor — combined with surface-only/threshold deposit,
+  // dig pheromone built up laterally and chambers spread into long
+  // horizontal galleries (the inverse of Tschinkel 2004's vertical-
+  // gallery architecture for Pogonomyrmex). Pre-brood era tried 0.35
+  // and got REST overload + starvation; brood replenishment now
+  // covers the mortality so the stronger pull is sustainable.
+  belowGeotaxis: 0.35,
   // Real worker maturation (nurse → forager): ~3-4 weeks. Compress
   // to ~1 hour biological for observation = 30000 ticks.
   matureAge: 30000,
