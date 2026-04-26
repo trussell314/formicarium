@@ -38,8 +38,8 @@
 // citation right here.
 
 import {
-  Colony, STATE_CARRY, STATE_CARRY_FOOD, STATE_FORAGE, STATE_REST,
-  STATE_WANDER, type AntState,
+  Colony, STATE_CARRY, STATE_CARRY_FOOD, STATE_DEAD, STATE_FORAGE,
+  STATE_REST, STATE_WANDER, type AntState,
 } from './colony';
 import type { ParticleSystem } from './particles';
 import { Pheromone } from './pheromone';
@@ -236,6 +236,7 @@ export function step(
   // candidates. O(n) average instead of O(n²); the chamber-floor
   // pile-ups (where most ants cluster) get most of the speedup.
   for (let i = 0; i < colony.count; i++) {
+    if (colony.state[i] === STATE_DEAD) continue;
     colony.collisionCount[i]! *= COLLISION_DECAY;
   }
   const cr2 = COLLISION_RADIUS * COLLISION_RADIUS;
@@ -248,6 +249,7 @@ export function step(
   const { head, link } = getCollisionBins(bw * bh, colony.count);
   head.fill(-1, 0, bw * bh);
   for (let i = 0; i < colony.count; i++) {
+    if (colony.state[i] === STATE_DEAD) { link[i] = -1; continue; }
     const bx = colony.posX[i]! | 0;
     const by = colony.posY[i]! | 0;
     if (bx < 0 || by < 0 || bx >= bw || by >= bh) { link[i] = -1; continue; }
@@ -256,6 +258,7 @@ export function step(
     head[b] = i;
   }
   for (let i = 0; i < colony.count; i++) {
+    if (colony.state[i] === STATE_DEAD) continue;
     const bx = colony.posX[i]! | 0;
     const by = colony.posY[i]! | 0;
     if (bx < 0 || by < 0 || bx >= bw || by >= bh) continue;
@@ -281,12 +284,63 @@ export function step(
   }
 
   for (let i = 0; i < colony.count; i++) {
+    // Dead ants are inert: position frozen, no decisions, no
+    // collision contribution. Skip the rest of the per-ant body.
+    if (colony.state[i] === STATE_DEAD) {
+      colony.prevX[i] = colony.posX[i]!;
+      colony.prevY[i] = colony.posY[i]!;
+      continue;
+    }
     colony.prevX[i] = colony.posX[i]!;
     colony.prevY[i] = colony.posY[i]!;
     let h = colony.heading[i]!;
     let stateIn: AntState = colony.state[i] as AntState;
     const ix = colony.posX[i]! | 0;
     const iy = colony.posY[i]! | 0;
+
+    // Homeostasis. Drain basal-metabolism energy; eat from any
+    // food cell on contact when below the hunger threshold; die
+    // (transition to STATE_DEAD + place a corpse marker) when
+    // energy reaches zero. CARRY_FOOD ants don't eat their cargo
+    // (they're committed to delivering); FORAGE/CARRY_GRAIN/REST
+    // ants will if hungry. WANDER is the most common eater.
+    colony.energy[i]! -= species.metabolism;
+    if (colony.energy[i]! <= 0) {
+      colony.energy[i] = 0;
+      colony.setState(i, STATE_DEAD);
+      const wW = world.width;
+      if (ix >= 0 && iy >= 0 && ix < wW && iy < world.height) {
+        world.corpse[iy * wW + ix] = 1;
+      }
+      continue;
+    }
+    if (
+      stateIn !== STATE_CARRY_FOOD &&
+      colony.energy[i]! < species.hungerThreshold &&
+      ix >= 0 && iy >= 0 && ix < world.width && iy < world.height
+    ) {
+      // Eat from current cell or any cardinal-adjacent food cell.
+      // Adjacency is the realistic semantic — an ant in a tunnel
+      // segment next to a granary doesn't need to walk INTO the
+      // granary cell to grab a seed. Without this, ants starve
+      // while standing one cell away from food.
+      const wW = world.width;
+      let fIdx = -1;
+      const here = iy * wW + ix;
+      if (world.food[here]! > 0) fIdx = here;
+      else if (ix > 0 && world.food[here - 1]! > 0) fIdx = here - 1;
+      else if (ix < wW - 1 && world.food[here + 1]! > 0) fIdx = here + 1;
+      else if (iy > 0 && world.food[here - wW]! > 0) fIdx = here - wW;
+      else if (iy < world.height - 1 && world.food[here + wW]! > 0) fIdx = here + wW;
+      if (fIdx >= 0) {
+        world.food[fIdx] = 0;
+        world.foodMoves[fIdx] = 0;
+        colony.energy[i] = Math.min(
+          species.maxEnergy,
+          colony.energy[i]! + species.foodValue,
+        );
+      }
+    }
 
     // REST tick. The Aina et al. 2023 model has withdrawn ants
     // wandering AWAY from the crowd — not freezing — so the ant
@@ -716,6 +770,7 @@ export function step(
   // grain cascades so an ant whose footing was just dug out falls
   // properly.
   for (let i = 0; i < colony.count; i++) {
+    if (colony.state[i] === STATE_DEAD) continue;
     const sx = colony.posX[i]! | 0;
     const sy = colony.posY[i]! | 0;
     const settled = settle(world, sx, sy);

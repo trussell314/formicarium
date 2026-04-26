@@ -42,6 +42,26 @@ export interface AntSpecies {
    *  seeds/m²/day in arid grasslands; we pick a value that makes
    *  the cycle visible at sim speeds without flooding the surface. */
   readonly seedsPerTick: number;
+
+  // ── Homeostasis / energy ───────────────────────────────────────
+
+  /** Maximum energy an ant can store. Caps refill when feeding. */
+  readonly maxEnergy: number;
+  /** Per-tick basal-metabolism drain. Ant dies when energy reaches
+   *  0, so 1 / metabolism is roughly the survival horizon for an
+   *  ant that never feeds. Pogonomyrmex barbatus workers can survive
+   *  ~3 weeks without food (Hölldobler & Wilson 1990, Ch. 13).
+   *  At default speed=8 sub-steps × 30 fps × 3 wks ≈ 4.4 × 10^7 ticks,
+   *  metabolism ~2e-8 — but that's invisibly slow for a viewer. We
+   *  scale up so feeding pressure is observable on the timescale
+   *  of a deploy session. */
+  readonly metabolism: number;
+  /** Energy gained from eating one food cell. */
+  readonly foodValue: number;
+  /** Energy threshold below which an ant will eat food on contact.
+   *  Above this, ants prefer to leave food alone for the granary
+   *  (or to be carried to a deposit site by CARRY_FOOD ants). */
+  readonly hungerThreshold: number;
 }
 
 /**
@@ -61,4 +81,15 @@ export const HARVESTER: AntSpecies = {
   forageDuration: 200,
   granivorous: true,
   seedsPerTick: 0.5,    // ~one new seed every 2 ticks across world
+  maxEnergy: 1.0,
+  // 1 / 2e-5 = 50,000-tick survival without food. At default 8x
+  // sub-stepping, that's ~3 minutes of wall clock — slow enough
+  // that a healthy fed colony rarely dies, fast enough that
+  // entombed/cut-off ants die in plain view of a viewer. The
+  // initial 5e-5 was too aggressive for the food-delivery
+  // pipeline (forager → CARRY_FOOD → granary → consumer); the
+  // colony was starving en masse before equilibrium.
+  metabolism: 2e-5,
+  foodValue: 0.6,       // one seed = ~60% of full
+  hungerThreshold: 0.7, // ants feed when energy < 70%
 };

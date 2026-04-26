@@ -38,6 +38,13 @@ export class World {
    *  uses it to lerp food colour from bright green (no moves) to
    *  dark green (moved many times). */
   readonly foodMoves: Uint8Array;
+  /** Per-cell corpse marker. 0 = none, 1 = an ant died here. The
+   *  body is a draggable item: necrophoresis workers (future) pick
+   *  it up and haul it to a midden chamber. Until then the cell
+   *  just renders as a dark spot so the viewer can see where the
+   *  colony lost workers. Multiple corpses in the same cell are
+   *  collapsed to a single marker (we don't track count). */
+  readonly corpse: Uint8Array;
   /** Tick at which each cell was last carved (for "fresh dig" highlight). */
   readonly digTick: Int32Array;
   initialSoilCells = 0;
@@ -53,6 +60,7 @@ export class World {
     this.grainMoves = new Uint8Array(width * height);
     this.food = new Uint8Array(width * height);
     this.foodMoves = new Uint8Array(width * height);
+    this.corpse = new Uint8Array(width * height);
     this.digTick = new Int32Array(width * height);
     this.digTick.fill(-1_000_000);
   }

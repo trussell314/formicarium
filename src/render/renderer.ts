@@ -7,7 +7,7 @@
 //
 // Renderer reads sim state. Never writes. (CLAUDE.md invariant.)
 
-import { Colony, STATE_CARRY } from '../sim/colony';
+import { Colony, STATE_CARRY, STATE_DEAD } from '../sim/colony';
 import type { ParticleSystem } from '../sim/particles';
 import { CELL_AIR, CELL_SOIL, World } from '../sim/world';
 
@@ -232,6 +232,13 @@ export class Renderer {
           const food = lerp3(FOOD_FRESH, FOOD_WORN, t);
           r = food[0]; g = food[1]; b = food[2];
         }
+        // Corpse marker — overrides everything else for that cell so
+        // dead-worker spots show up clearly even if the cell also
+        // had food in it. A dim purplish-grey reads as "ex-ant" against
+        // the brown/green palette without competing with live ants.
+        if (this.world.corpse[idx]! > 0) {
+          r = 90; g = 70; b = 92;
+        }
         const o = idx * 4;
         data[o] = r;
         data[o + 1] = g;
@@ -298,6 +305,10 @@ export class Renderer {
     // against the substrate.
     const radius = Math.max(2, scale * 0.55);
     for (let i = 0; i < colony.count; i++) {
+      // Dead ants: their bodies are already drawn as a corpse cell
+      // in the terrain pass. Skip the live-ant overlay so we don't
+      // render twice.
+      if (colony.state[i] === STATE_DEAD) continue;
       const x = colony.prevX[i]! + (colony.posX[i]! - colony.prevX[i]!) * alpha;
       const y = colony.prevY[i]! + (colony.posY[i]! - colony.prevY[i]!) * alpha;
       const px = ox + x * scale;

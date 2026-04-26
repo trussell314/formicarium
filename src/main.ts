@@ -6,7 +6,7 @@
 //   ?width=N      world width (cells)
 //   ?height=N     world height (cells)
 
-import { Colony } from './sim/colony';
+import { Colony, STATE_DEAD } from './sim/colony';
 import { DEFAULT_PARAMS, step } from './sim/ant-rules';
 import { ParticleSystem } from './sim/particles';
 import { Pheromone } from './sim/pheromone';
@@ -318,10 +318,15 @@ function main(): void {
       const grains = world.countGrains();
       let foodCount = 0;
       for (let i = 0; i < world.food.length; i++) if (world.food[i]! > 0) foodCount++;
+      let dead = 0;
+      for (let i = 0; i < colony.count; i++) {
+        if (colony.state[i] === STATE_DEAD) dead++;
+      }
+      const alive = colony.count - dead;
       hud.textContent =
         `formicarium · ${HARVESTER.commonName} · seed 0x${settings.seed.toString(16)}` +
         `  ·  ${world.width}×${world.height}` +
-        `  ·  ants ${colony.count}` +
+        `  ·  ants ${alive}/${colony.count}${dead > 0 ? ` (${dead} dead)` : ''}` +
         `  ·  t=${world.tick.toLocaleString()}` +
         `  ·  dug ${dugTotal}  grains ${grains}  food ${foodCount}` +
         `  ·  speed ${stepsPerFrame}×${paused ? '  ·  PAUSED' : ''}` +

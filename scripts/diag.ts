@@ -148,6 +148,10 @@ function buildRGB(
         g = 220 + (80 - 220) * t;
         b = 70 + (24 - 70) * t;
       }
+      // Corpse marker — dim purplish-grey (mirror renderer).
+      if (w.corpse[idx]! > 0) {
+        r = 90; g = 70; b = 92;
+      }
       const o = idx * 3;
       body[o] = Math.round(r) & 0xff;
       body[o + 1] = Math.round(g) & 0xff;
@@ -177,8 +181,10 @@ function buildRGB(
       body[o] = nr | 0; body[o + 1] = ng | 0; body[o + 2] = nb | 0;
     }
   }
-  // Overlay ants as 1-pixel black dots.
+  // Overlay ants as 1-pixel black dots. Dead ants are already drawn
+  // as corpse markers in the terrain pass, so skip them here.
   for (let i = 0; i < c.count; i++) {
+    if (c.state[i] === 5 /* STATE_DEAD */) continue;
     const ax = c.posX[i]! | 0;
     const ay = c.posY[i]! | 0;
     if (ax < 0 || ay < 0 || ax >= w.width || ay >= w.height) continue;

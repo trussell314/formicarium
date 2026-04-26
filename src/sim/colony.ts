@@ -25,8 +25,13 @@ export const STATE_FORAGE = 3;
  *  toward the nest. Mirror of STATE_CARRY but with opposite geotaxis
  *  sign — food goes DOWN into the nest, grain goes UP onto the mound. */
 export const STATE_CARRY_FOOD = 4;
+/** Ant has died (energy hit zero or external cause). The ant is
+ *  skipped in all behavioural processing; its position stays put
+ *  and a corpse marker is written to world.corpse[idx] at death,
+ *  so necrophoresis workers can later drag the body to a midden. */
+export const STATE_DEAD = 5;
 
-export type AntState = 0 | 1 | 2 | 3 | 4;
+export type AntState = 0 | 1 | 2 | 3 | 4 | 5;
 
 export class Colony {
   count = 0;
@@ -66,6 +71,12 @@ export class Colony {
    *  state for the per-grain wear visualisation that lives on the
    *  GRAIN cell itself. */
   readonly carryMoves: Uint8Array;
+  /** Per-ant energy reserve in [0, species.maxEnergy]. Drains at
+   *  species.metabolism per tick; refills by species.foodValue when
+   *  the ant walks over a food cell. Ant transitions to STATE_DEAD
+   *  when energy reaches zero. Models basal metabolism + food-as-fuel
+   *  so the colony has a real reason to forage and store granaries. */
+  readonly energy: Float32Array;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -83,6 +94,7 @@ export class Colony {
     this.restThreshold = new Float32Array(capacity);
     this.collisionCount = new Float32Array(capacity);
     this.carryMoves = new Uint8Array(capacity);
+    this.energy = new Float32Array(capacity);
   }
 
   /**
@@ -116,6 +128,11 @@ export class Colony {
     this.turnNoise[i] = this.trait(rng, means.turnNoise, sigma);
     this.restThreshold[i] = this.trait(rng, means.restThreshold, sigma);
     this.collisionCount[i] = 0;
+    // Spawn at full energy. Random sub-threshold variation isn't
+    // useful here — the population's energy distribution becomes
+    // heterogeneous on its own as some ants find food faster than
+    // others.
+    this.energy[i] = 1.0;
     return i;
   }
 
