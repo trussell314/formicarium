@@ -325,27 +325,35 @@ export class Renderer {
         continue;
       }
 
-      // Queen — drawn ~40% larger than workers with a distinctly
-      // long abdomen. Real Pogonomyrmex queens are 9-13 mm vs 5-8 mm
-      // workers — ~1.5× linear. She doesn't move (negligible delta);
+      // Queen — drawn ~40% larger than workers, in deep blue-purple
+      // so she pops against the brown earth + cream brood + black
+      // workers. Real Pogonomyrmex queens are 9-13 mm vs 5-8 mm
+      // workers (~1.5× linear). She doesn't move (negligible delta);
       // skip leg animation for clarity.
       if (state === STATE_QUEEN) {
         const qx = ox + colony.posX[i]! * scale;
         const qy = oy + colony.posY[i]! * scale;
-        const qr = radius * 1.4;
-        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+        const qr = radius * 1.5;
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
         this.ctx.beginPath();
         this.ctx.ellipse(qx, qy + qr * 0.85, qr * 1.3, qr * 0.4, 0, 0, Math.PI * 2);
         this.ctx.fill();
-        // Body: deep amber abdomen + dark thorax/head, a crown-tinted
-        // queen distinct from worker tan-black.
-        this.ctx.fillStyle = 'rgb(60, 30, 18)';
+        // Abdomen + thorax: rich indigo, distinct from any other
+        // palette element (sky is teal-blue, build pheromone is
+        // magenta, dig pheromone is cyan, soil/grain are browns).
+        this.ctx.fillStyle = 'rgb(90, 60, 170)';
         this.ctx.beginPath();
-        this.ctx.ellipse(qx, qy + qr * 0.4, qr * 0.55, qr * 0.95, 0, 0, Math.PI * 2);
+        this.ctx.ellipse(qx, qy + qr * 0.4, qr * 0.6, qr * 1.0, 0, 0, Math.PI * 2);
         this.ctx.fill();
-        this.ctx.fillStyle = 'rgb(40, 22, 14)';
+        this.ctx.fillStyle = 'rgb(140, 100, 220)';
         this.ctx.beginPath();
-        this.ctx.arc(qx, qy - qr * 0.55, qr * 0.45, 0, Math.PI * 2);
+        this.ctx.arc(qx, qy - qr * 0.55, qr * 0.5, 0, Math.PI * 2);
+        this.ctx.fill();
+        // Highlight pip on the head — a bright dot that catches the
+        // eye even at low zoom.
+        this.ctx.fillStyle = 'rgb(220, 200, 255)';
+        this.ctx.beginPath();
+        this.ctx.arc(qx, qy - qr * 0.55, qr * 0.18, 0, Math.PI * 2);
         this.ctx.fill();
         continue;
       }

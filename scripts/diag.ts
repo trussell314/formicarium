@@ -201,14 +201,14 @@ function buildRGB(
       continue;
     }
     if (s === 6 /* QUEEN */) {
-      // 2×2 dark amber blot for the queen.
+      // 2×2 indigo blot for the queen — mirrors renderer colour.
       for (let dy = 0; dy <= 1; dy++) {
         for (let dx = 0; dx <= 1; dx++) {
           const qx = ax + dx;
           const qy = ay + dy;
           if (qx < 0 || qy < 0 || qx >= w.width || qy >= w.height) continue;
           const o = (qy * w.width + qx) * 3;
-          body[o] = 60; body[o + 1] = 30; body[o + 2] = 18;
+          body[o] = 90; body[o + 1] = 60; body[o + 2] = 170;
         }
       }
       continue;
