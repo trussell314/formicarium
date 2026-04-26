@@ -765,24 +765,19 @@ export function step(
       }
     }
 
-    // CARRY → place grain. Two-tier deposit decision:
-    //   1. Surface mound bootstrap: above natural surface AND over a
-    //      column with intact ground = always deposit. This is the
-    //      colony's natural disposal site and seeds the build-
-    //      pheromone field that drives the rest of the model.
-    //   2. In-chamber Khuong-style probabilistic deposit: anywhere
-    //      below surface with solid support beneath, deposit with
-    //      probability scaling with local build pheromone.
-    //        P(deposit) = 0.01 + 2 × buildField.sample(here), max 1
-    //      → no pheromone: ~100-tick mean to deposit, so ants USUALLY
-    //        walk far before dropping. With pheromone (built up at
-    //        established sites): probability climbs toward 1, so
-    //        deposits cluster — Khuong et al. 2016's pillar/wall
-    //        morphology emerges.
-    //   This replaces a fully-deterministic "deposit on the first
-    //   supported cell" rule that produced dig-and-immediately-drop
-    //   churn — diags showed 80 ants stuck at maxDepth=2 for 70k
-    //   ticks because every dug cell was refilled within 1-2 cells.
+    // CARRY → place grain. Surface-mound-only deposit: the cell must
+    // be above natural surface, over an intact-ground column. CARRY
+    // ants must climb out of the chamber to drop their load.
+    //
+    // This is intentional and matches harvester biology — Tschinkel
+    // 2004 (J. Insect Sci. 4:21) found Pogonomyrmex spoil mounds at
+    // entrance, not inside chambers. The earlier "deposit anywhere
+    // with solid support" rule made every dig get instantly refilled
+    // (78% refill rate observed) and capped real depth at ~6 cells
+    // even after 300k ticks. Forcing surface-mound deposit lets the
+    // chamber actually grow as net excavation, allowing the 50+ cell
+    // depths Tschinkel measured in real harvester nests.
+    //
     // Use stateIn (not colony.state[i]) so ants who BECAME CARRY this
     // tick (via a dig or grain pickup) wait until next tick before
     // depositing — preserves the "one transition per tick" rule the
@@ -792,22 +787,10 @@ export function step(
       const py = colony.posY[i]! | 0;
       const idx = world.index(px, py);
       const surf = world.naturalSurface[px]!;
-      const supportedBelow =
-        py + 1 < world.height &&
-        world.cells[world.index(px, py + 1)] !== CELL_AIR;
       const cellIsAir = world.cells[idx] === CELL_AIR;
       const aboveSurface = py < surf;
       const groundIsIntact = world.cells[world.index(px, surf)] !== CELL_AIR;
-      const surfaceMound = aboveSurface && groundIsIntact && cellIsAir;
-      const inChamberCandidate = !aboveSurface && supportedBelow && cellIsAir;
-      let pDeposit = 0;
-      if (surfaceMound) {
-        pDeposit = 1;
-      } else if (inChamberCandidate) {
-        const localBuild = buildField.sample(px, py);
-        pDeposit = Math.min(1, 0.01 + 2 * localBuild);
-      }
-      if (pDeposit > 0 && rng.next() < pDeposit) {
+      if (aboveSurface && groundIsIntact && cellIsAir) {
         // The grain has now been moved one more time. Stamp the
         // placed cell (and any cascade destination) with the
         // updated count so the renderer can fade it.

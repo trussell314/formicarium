@@ -114,6 +114,11 @@ export const HARVESTER: AntSpecies = {
   // Age-based polyethism. matureAge = ~half the survival horizon
   // (50k tick metabolism limit) so the nurse → forager transition
   // happens well within a typical observation session.
+  // Weak unladen-worker bias toward chamber floor. Stronger values
+  // (tried 0.35) caused over-concentration at the floor → REST
+  // overload → less digging overall. The actual "dig deeper" lever
+  // is the dig-target downward bias in adjacentSoil(); this just
+  // ensures some ants drift toward the floor at all.
   belowGeotaxis: 0.15,
   matureAge: 15000,
 };
