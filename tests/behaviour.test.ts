@@ -266,6 +266,77 @@ describe('foraging cycle', () => {
 //   Substrate compaction with depth (Tschinkel 2004)
 // ─────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────
+//   Tunnel-tip vs chamber-wall dig differentiation
+// ─────────────────────────────────────────────────────────────────
+
+describe('tunnel-tip vs chamber-wall dig rates', () => {
+  it('tip dig (3 cardinal soil neighbours) fires faster than wall dig (2 soil neighbours)', () => {
+    // Two parallel mini-experiments. Both have an ant pressed
+    // against soil with digProb=1.0 for many ticks, position
+    // clamped. The only difference is geometry around the ant:
+    //   tip world  — ant in 1-cell pocket with 3 SOIL cardinal
+    //                neighbours (left, right, below)
+    //   wall world — ant in 1-cell-wide horizontal tunnel with
+    //                2 SOIL cardinal neighbours (above, below)
+    // Tunnel-tip dig should fire more often than chamber-wall dig.
+
+    function runScenario(soilNeighbours: 2 | 3): number {
+      const w = new World(40, 30);
+      for (let x = 0; x < w.width; x++) {
+        w.naturalSurface[x] = 5;
+        for (let y = 0; y < w.height; y++) {
+          w.cells[w.index(x, y)] = y < 5 ? CELL_AIR : CELL_SOIL;
+        }
+      }
+      if (soilNeighbours === 3) {
+        // Single carved pocket at (20, 15) — 3 cardinal soil
+        // neighbours (above is air, but for ant at (20, 15) above
+        // is (20, 14) which is air; left, right, below are soil).
+        // Wait — (20, 14) is below surface=5, so y=14 > 5 → SOIL.
+        // Carve (20, 15). Neighbours: (19, 15) soil, (21, 15) soil,
+        // (20, 14) soil, (20, 16) soil. That's 4! Need to also
+        // carve (20, 14) so the ant has only 3.
+        w.cells[w.index(20, 14)] = CELL_AIR; // air above
+        w.cells[w.index(20, 15)] = CELL_AIR; // ant cell
+      } else {
+        // Horizontal 5-cell tunnel at y=15. Ant at center (20, 15).
+        // Neighbours: (19, 15) air, (21, 15) air, (20, 14) soil,
+        // (20, 16) soil. 2 cardinal soil.
+        for (let dx = -2; dx <= 2; dx++) {
+          w.cells[w.index(20 + dx, 15)] = CELL_AIR;
+        }
+      }
+      w.initialSoilCells = w.countSoil();
+      const rng = new RNG(soilNeighbours === 3 ? 100 : 200);
+      const colony = new Colony(1);
+      colony.spawn(20.5, 15.5, Math.PI / 2, rng,
+        { ...TRAITS, digProb: 1.0, turnNoise: 0.001 });
+      const params = { ...DEFAULT_PARAMS, digProb: 1.0, turnNoise: 0.001, walkSpeed: 0.6 };
+      const { dig, build } = fields(w);
+      const initial = w.countSoil();
+      // Many ticks. Each iteration we clamp position + heading to
+      // a known state so the ant reliably bumps soil this tick.
+      for (let t = 0; t < 2000; t++) {
+        colony.posX[0] = 20.5;
+        colony.posY[0] = 15.5;
+        colony.heading[0] = Math.PI / 2; // always heading down
+        colony.energy[0] = 1.0;
+        if (colony.state[0] === STATE_CARRY) colony.setState(0, STATE_WANDER);
+        step(w, colony, dig, build, rng, params);
+      }
+      return initial - w.countSoil();
+    }
+    const dugTip = runScenario(3);
+    const dugWall = runScenario(2);
+    expect(dugTip).toBeGreaterThan(dugWall);
+    // The tip rate is 1.0× and the wall rate is 0.3×; we expect
+    // roughly 3× more dug at the tip. Allow a wide band for Sudd
+    // contact stochasticity and ratio fluctuations.
+    expect(dugTip / Math.max(1, dugWall)).toBeGreaterThan(1.5);
+  });
+});
+
 describe('substrate compaction with depth', () => {
   it('dig rate at depth is lower than at the surface (same digProb input)', () => {
     // Build two identical worlds — one with soil at the surface,

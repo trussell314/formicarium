@@ -839,7 +839,21 @@ export function step(
         species.compactionFloor,
         1 - depthBelowSurf / species.compactionDepth,
       );
-      if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor) {
+      // Tunnel-tip vs chamber-wall differentiation. Tschinkel (2004)
+      // mapped Pogonomyrmex nests as predominantly vertical galleries
+      // (1-cell-wide tunnels) with horizontal chambers branching at
+      // intervals — so tunnel-extension digs vastly outnumber
+      // chamber-widening digs. Geometrically:
+      //   neighbourSoil = 4: fully entombed → claustrophobia, full rate
+      //   neighbourSoil = 3: tunnel TIP (3 walls + 1 air) → full rate;
+      //                      this is "extend the tunnel"
+      //   neighbourSoil = 2: tunnel SIDE or chamber wall corner →
+      //                      reduced rate; this is "widen the chamber"
+      // The 0.3 multiplier for 2-neighbour digs is the lever that
+      // suppresses lateral chamber widening relative to vertical
+      // tunnel extension.
+      const tipBonus = neighbourSoil >= 3 ? 1.0 : 0.3;
+      if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus) {
         const target = adjacentSoil(world, ax, ay, h);
         if (target !== null) {
           if (digCell(world, target.x, target.y, rng)) {
