@@ -405,6 +405,33 @@ for (let t = 1; t <= TICKS; t++) {
       `nestVol=${dugArea} maxDepth=${maxDepth} ` +
       `p:nv=${perimRatio} tips=${tips} bbox=${bbW}x${bbH}`,
     );
+
+    // 5×5 quintile population grid. Cells = world divided into 5
+    // horizontal strips × 5 vertical strips. Each entry is the count
+    // of LIVING ants in that region. Lets us see at a glance whether:
+    //   - row 0 (top, sky): foragers above ground (expected: small
+    //     count, scaling with the polyethism forager fraction)
+    //   - rows ~1 (surface band): entrance traffic + surface mound
+    //   - rows 2-4 (deep): chamber population, where age polyethism
+    //     should bias nurses toward the bottom row
+    //   - left/right columns: spread vs. concentration around the
+    //     pinhole entrance (centre column)
+    const Q = 5;
+    const popGrid: number[][] = Array.from({ length: Q }, () => new Array<number>(Q).fill(0));
+    for (let i = 0; i < colony.count; i++) {
+      if (colony.state[i] === STATE_DEAD) continue;
+      const px = colony.posX[i]!;
+      const py = colony.posY[i]!;
+      const qx = Math.max(0, Math.min(Q - 1, Math.floor((px / world.width) * Q)));
+      const qy = Math.max(0, Math.min(Q - 1, Math.floor((py / world.height) * Q)));
+      popGrid[qy]![qx]!++;
+    }
+    const popLines: string[] = [];
+    for (let qy = 0; qy < Q; qy++) {
+      const row = popGrid[qy]!.map((n) => String(n).padStart(3)).join(' ');
+      popLines.push(`  q${qy} ${row}`);
+    }
+    console.log(`         pop grid (rows = vertical quintile, top → deep):\n${popLines.join('\n')}`);
     windowDigs = 0;
   }
 }
