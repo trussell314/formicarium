@@ -165,7 +165,7 @@ describe('placeGrain / settleGrain (sandpile)', () => {
     const w = withFloor(40, 20);
     const rng = new RNG(0xabc);
     for (let i = 0; i < 50; i++) {
-      placeGrain(w, 20, 0, rng);
+      placeGrain(w, 20, 0, rng, 1);
     }
     // Count grains in the centre column vs. neighbours: pile should
     // be wider than 1 cell.
