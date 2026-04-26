@@ -367,11 +367,28 @@ export function step(
     const ax = nx | 0;
     const ay = ny | 0;
 
+    // Claustrophobia: an ant whose four cardinal cells are all
+    // non-air is genuinely entombed — typically because grain
+    // cascade closed off a one-cell pocket while it stood there.
+    // It has no way to generate a hitSoil contact event because
+    // tryStep blocks every direction, so the normal Sudd roll
+    // never fires and the ant would be stuck for tens of thousands
+    // of ticks. Real ants in this situation chew their way out
+    // immediately; we let the ant roll dig (and pickup, below)
+    // every tick by treating "entombed" as an implicit contact.
+    const wW = world.width;
+    let cardAir = 0;
+    if (ax > 0 && world.cells[ay * wW + (ax - 1)] === CELL_AIR) cardAir++;
+    if (ax < wW - 1 && world.cells[ay * wW + (ax + 1)] === CELL_AIR) cardAir++;
+    if (ay > 0 && world.cells[(ay - 1) * wW + ax] === CELL_AIR) cardAir++;
+    if (ay < world.height - 1 && world.cells[(ay + 1) * wW + ax] === CELL_AIR) cardAir++;
+    const entombed = cardAir === 0;
+
     // (3) Sudd contact-triggered digging. Per soil contact, P(dig) =
     // params.digProb. If the dig fires, ask the env to remove the
     // soil cell; the env handles any granular cascade. Drop dig
     // pheromone at the new air cell so other ants are recruited.
-    if (stateIn === STATE_WANDER && hitSoil) {
+    if (stateIn === STATE_WANDER && (hitSoil || entombed)) {
       // Enclosure gate. Sudd 1970 measured per-contact dig rates on
       // isolated workers in EXCAVATION CONTEXTS — tubes, dishes,
       // partially-built chambers — not on open ground. An ant that
@@ -388,7 +405,6 @@ export function step(
       // cell entrance over the first hours), which is necessary for
       // a 100-ant colony to actually flow through.
       let neighbourSoil = 0;
-      const wW = world.width;
       if (ax > 0 && world.cells[ay * wW + (ax - 1)] === CELL_SOIL) neighbourSoil++;
       if (ax < wW - 1 && world.cells[ay * wW + (ax + 1)] === CELL_SOIL) neighbourSoil++;
       if (ay > 0 && world.cells[(ay - 1) * wW + ax] === CELL_SOIL) neighbourSoil++;
