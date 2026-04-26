@@ -13,10 +13,14 @@
 //   bbox        smallest rectangle containing all dug cells
 import { writeFileSync } from 'fs';
 import { deflateSync } from 'zlib';
-import { Colony } from '../src/sim/colony';
+import {
+  Colony, STATE_CARRY, STATE_CARRY_FOOD, STATE_DEAD, STATE_FORAGE,
+  STATE_REST, STATE_WANDER,
+} from '../src/sim/colony';
 import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { Pheromone } from '../src/sim/pheromone';
 import { RNG } from '../src/sim/rng';
+import { HARVESTER } from '../src/sim/species';
 import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from '../src/sim/world';
 
 const SEED = 0xc0ffee;
@@ -267,42 +271,73 @@ for (let t = 1; t <= TICKS; t++) {
     dumpPPM(stem + '.ppm', world, colony);
   }
   if (t % WINDOW === 0) {
-    let avgX = 0, avgY = 0;
-    let stuck = 0;
-    let wander = 0, carry = 0;
+    // Per-state population breakdown. The new states from foraging
+    // and homeostasis (FORAGE, CARRY_FOOD, DEAD) need to be visible
+    // in the diag — without this we can't distinguish a colony that
+    // collapsed (everyone DEAD) from one stuck in a REST loop.
+    let nW = 0, nC = 0, nR = 0, nF = 0, nCF = 0, nD = 0;
+    let stuckLive = 0, aliveCount = 0;
     let belowSurface = 0;
+    let avgX = 0, avgY = 0;
+    let energySum = 0;
+    let energyMin = Infinity;
     for (let i = 0; i < colony.count; i++) {
-      avgX += colony.posX[i]!;
-      avgY += colony.posY[i]!;
-      const dx = colony.posX[i]! - colony.prevX[i]!;
-      const dy = colony.posY[i]! - colony.prevY[i]!;
-      if (Math.hypot(dx, dy) < 0.01) stuck++;
-      if (colony.state[i] === 0) wander++; else carry++;
+      const s = colony.state[i];
+      if (s === STATE_WANDER) nW++;
+      else if (s === STATE_CARRY) nC++;
+      else if (s === STATE_REST) nR++;
+      else if (s === STATE_FORAGE) nF++;
+      else if (s === STATE_CARRY_FOOD) nCF++;
+      else if (s === STATE_DEAD) nD++;
+      if (s !== STATE_DEAD) {
+        aliveCount++;
+        avgX += colony.posX[i]!;
+        avgY += colony.posY[i]!;
+        const e = colony.energy[i]!;
+        energySum += e;
+        if (e < energyMin) energyMin = e;
+        const dx = colony.posX[i]! - colony.prevX[i]!;
+        const dy = colony.posY[i]! - colony.prevY[i]!;
+        if (Math.hypot(dx, dy) < 0.01) stuckLive++;
+      }
       const ix = colony.posX[i]! | 0;
       const iy = colony.posY[i]! | 0;
       if (iy >= world.naturalSurface[ix]!) belowSurface++;
     }
-    avgX /= colony.count;
-    avgY /= colony.count;
-    let surfaceSoil = 0;
-    for (let x = 0; x < world.width; x++) {
-      const sy = world.naturalSurface[x]!;
-      // Count soil cells right around the natural surface; if these are
-      // all dug, ants have to climb out through grain mounds to deposit.
-      for (let y = sy; y < sy + 3 && y < world.height; y++) {
-        if (world.cells[world.index(x, y)] === CELL_SOIL) surfaceSoil++;
-      }
-    }
+    if (aliveCount > 0) { avgX /= aliveCount; avgY /= aliveCount; }
+    else { avgX = NaN; avgY = NaN; energyMin = NaN; }
+    const energyAvg = aliveCount > 0 ? energySum / aliveCount : NaN;
+
+    // World-state aggregates.
     const totalDug = world.initialSoilCells - world.countSoil();
     const grains = world.countGrains();
+    let foodCount = 0, corpseCount = 0;
+    for (let i = 0; i < world.food.length; i++) {
+      if (world.food[i]! > 0) foodCount++;
+      if (world.corpse[i]! > 0) corpseCount++;
+    }
+    // Grain conservation. dug = grains_in_world + alive_carriers.
+    // The DEAD-CARRY ants take their cargo with them — that's a known
+    // bug; track the gap so we can see when conservation is violated.
+    const liveCarriers = nC + nCF;
+    const conservationGap = totalDug - grains - liveCarriers;
     let maxMound = 0;
     for (let x = 0; x < world.width; x++) {
       if (world.mound[x]! > maxMound) maxMound = world.mound[x]!;
     }
     let minY = Infinity, maxY = -Infinity;
     for (let i = 0; i < colony.count; i++) {
+      if (colony.state[i] === STATE_DEAD) continue;
       if (colony.posY[i]! < minY) minY = colony.posY[i]!;
       if (colony.posY[i]! > maxY) maxY = colony.posY[i]!;
+    }
+    if (!Number.isFinite(minY)) { minY = NaN; maxY = NaN; }
+    let surfaceSoil = 0;
+    for (let x = 0; x < world.width; x++) {
+      const sy = world.naturalSurface[x]!;
+      for (let y = sy; y < sy + 3 && y < world.height; y++) {
+        if (world.cells[world.index(x, y)] === CELL_SOIL) surfaceSoil++;
+      }
     }
 
     // Structural metrics over the dug region.
@@ -336,12 +371,17 @@ for (let t = 1; t <= TICKS; t++) {
     const perimRatio = dugArea > 0 ? (perim / dugArea).toFixed(2) : 'n/a';
     const bbW = bbMaxX > bbMinX ? bbMaxX - bbMinX + 1 : 0;
     const bbH = bbMaxY > bbMinY ? bbMaxY - bbMinY + 1 : 0;
+    const fmt = (x: number, d = 1) => Number.isFinite(x) ? x.toFixed(d) : 'n/a';
     console.log(
-      `t=${String(t).padStart(6)}  dug/${WINDOW}=${String(windowDigs).padStart(4)}  total=${totalDug}  grains=${grains}  ` +
-      `W${wander}/C${carry}  below=${belowSurface}  y=${minY.toFixed(1)}..${maxY.toFixed(1)}  ` +
-      `maxMound=${maxMound}  surfaceSoil=${surfaceSoil}  stuck=${stuck}/${colony.count}  ` +
-      `avg=(${avgX.toFixed(1)},${avgY.toFixed(1)})  ` +
-      `area=${dugArea} perim:area=${perimRatio} tips=${tips} bbox=${bbW}x${bbH}`,
+      `t=${String(t).padStart(7)}  dug/${WINDOW}=${String(windowDigs).padStart(4)}  ` +
+      `dug=${totalDug} grain=${grains} food=${foodCount} corpse=${corpseCount}  ` +
+      `W=${nW} C=${nC} R=${nR} F=${nF} CF=${nCF} D=${nD}  ` +
+      `alive=${aliveCount} stuck=${stuckLive}/${aliveCount}  ` +
+      `E[avg]=${fmt(energyAvg, 2)} E[min]=${fmt(energyMin, 2)}  ` +
+      `below=${belowSurface}  y=${fmt(minY)}..${fmt(maxY)}  ` +
+      `mound=${maxMound} surfSoil=${surfaceSoil}  ` +
+      `cons[dug-grain-liveC]=${conservationGap}  ` +
+      `area=${dugArea} p:a=${perimRatio} tips=${tips} bbox=${bbW}x${bbH}`,
     );
     windowDigs = 0;
   }
