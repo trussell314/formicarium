@@ -22,8 +22,16 @@ const SKY_BOTTOM: [number, number, number] = [70, 75, 96];
 // fog blends toward.
 const TUNNEL_NEAR: [number, number, number] = [148, 110, 78];
 const TUNNEL_DEEP: [number, number, number] = [42, 28, 20];
-const SOIL_TOP: [number, number, number] = [108, 70, 38];
-const SOIL_BOTTOM: [number, number, number] = [70, 42, 22];
+// Soil has TWO colour palettes. Cells start at the FRESH (darker,
+// undisturbed) end and lerp toward the WORN (lighter, weathered) end
+// as world.soilWear[idx] climbs from 0 → 255. Wear increments each
+// time a grain settles in the cell's 8-neighbourhood, so soil near
+// active mounds and tunnel mouths visibly weathers while soil far
+// from any construction stays dark.
+const SOIL_TOP_FRESH: [number, number, number] = [70, 44, 22];
+const SOIL_BOTTOM_FRESH: [number, number, number] = [42, 24, 12];
+const SOIL_TOP_WORN: [number, number, number] = [128, 84, 46];
+const SOIL_BOTTOM_WORN: [number, number, number] = [88, 54, 28];
 const GRASS: [number, number, number] = [50, 92, 36];
 const GRAIN_COLOR: [number, number, number] = [185, 138, 78];
 const FRESH_DIG: [number, number, number] = [78, 56, 38];
@@ -183,7 +191,10 @@ export class Renderer {
             [r, g, b] = GRASS;
           } else {
             const t = (y - sy) / Math.max(1, h - sy);
-            const soil = lerp3(SOIL_TOP, SOIL_BOTTOM, Math.min(1, t));
+            const fresh = lerp3(SOIL_TOP_FRESH, SOIL_BOTTOM_FRESH, Math.min(1, t));
+            const worn = lerp3(SOIL_TOP_WORN, SOIL_BOTTOM_WORN, Math.min(1, t));
+            const wear = this.world.soilWear[idx]! / 255;
+            const soil = lerp3(fresh, worn, wear);
             const n = (noise[idx]! / 255 - 0.5) * 0.18;
             r = soil[0] * (1 + n);
             g = soil[1] * (1 + n);

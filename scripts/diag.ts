@@ -125,9 +125,19 @@ function buildRGB(
           r = 50; g = 92; b = 36;
         } else {
           const depth = (y - sy) / Math.max(1, w.height - sy);
-          r = 108 + (70 - 108) * Math.min(1, depth);
-          g =  70 + (42 -  70) * Math.min(1, depth);
-          b =  38 + (22 -  38) * Math.min(1, depth);
+          const td = Math.min(1, depth);
+          // Fresh (dark) and worn (lighter) endpoints — must mirror
+          // src/render/renderer.ts SOIL_*_FRESH / SOIL_*_WORN.
+          const fr = 70 + (42 - 70) * td;
+          const fg = 44 + (24 - 44) * td;
+          const fb = 22 + (12 - 22) * td;
+          const wr = 128 + (88 - 128) * td;
+          const wg = 84 + (54 - 84) * td;
+          const wb = 46 + (28 - 46) * td;
+          const wear = w.soilWear[idx]! / 255;
+          r = fr + (wr - fr) * wear;
+          g = fg + (wg - fg) * wear;
+          b = fb + (wb - fb) * wear;
           if (depth > 0.55) {
             const f = (depth - 0.55) / 0.45;
             r *= 1 - 0.55 * f; g *= 1 - 0.55 * f; b *= 1 - 0.55 * f;

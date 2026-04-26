@@ -210,6 +210,23 @@ export function placeGrain(world: World, x: number, y: number, rng: RNG): { x: n
   const final = settleGrain(world, x, y, rng);
   recomputeMound(world, x);
   if (final.x !== x) recomputeMound(world, final.x);
+  // Increment soil wear in the 8-neighbourhood of the final grain
+  // position. Visualises construction halo: soil near active mounds
+  // and tunnel mouths fades from dark to weathered over time.
+  const w = world.width;
+  for (let dy = -1; dy <= 1; dy++) {
+    const ny = final.y + dy;
+    if (ny < 0 || ny >= world.height) continue;
+    for (let dx = -1; dx <= 1; dx++) {
+      const nx = final.x + dx;
+      if (nx < 0 || nx >= w) continue;
+      if (dx === 0 && dy === 0) continue;
+      const ni = ny * w + nx;
+      if (world.cells[ni] !== CELL_SOIL) continue;
+      const cur = world.soilWear[ni]!;
+      if (cur < 255) world.soilWear[ni] = cur + 1;
+    }
+  }
   return final;
 }
 

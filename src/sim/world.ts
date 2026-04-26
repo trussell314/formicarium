@@ -20,6 +20,12 @@ export class World {
   readonly mound: Uint16Array;
   /** Per-cell hash noise for renderer texture. Deterministic from rng. */
   readonly soilNoise: Uint8Array;
+  /** Per-cell soil "wear" — increments each time a grain settles in
+   *  this cell's 8-neighbourhood. Renderer uses wear/255 to lerp
+   *  soil colour from undisturbed dark brown toward a weathered,
+   *  paler brown. Visualises the construction halo around active
+   *  mounds and tunnel mouths. */
+  readonly soilWear: Uint8Array;
   /** Tick at which each cell was last carved (for "fresh dig" highlight). */
   readonly digTick: Int32Array;
   initialSoilCells = 0;
@@ -32,6 +38,7 @@ export class World {
     this.naturalSurface = new Uint16Array(width);
     this.mound = new Uint16Array(width);
     this.soilNoise = new Uint8Array(width * height);
+    this.soilWear = new Uint8Array(width * height);
     this.digTick = new Int32Array(width * height);
     this.digTick.fill(-1_000_000);
   }
