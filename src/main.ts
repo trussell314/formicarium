@@ -373,6 +373,11 @@ function main(): void {
         else if (s === STATE_QUEEN) queens++;
       }
       const alive = colony.count - dead;
+      // start = the founder colony at t=0 (queen + initial workers
+      // requested via ?ants). After that, born tracks egg→worker
+      // hatches and died tracks every transition into STATE_DEAD,
+      // so alive = start + born - died holds as an invariant.
+      const start = settings.ants + 1;
       // Nest geometry: nestVol = AIR cells below each column's natural
       // surface (per-column to honour the wave); maxDepth = deepest
       // such cell measured from its own surface row. O(W×H) but only
@@ -396,7 +401,7 @@ function main(): void {
       hud.textContent =
         `formicarium · ${HARVESTER.commonName} · seed 0x${settings.seed.toString(16)}` +
         `  ·  ${world.width}×${world.height}` +
-        `  ·  ants ${alive}/${colony.count}${dead > 0 ? ` (${dead} dead)` : ''}` +
+        `  ·  ants ${alive} (start ${start}, +${world.totalBorn} born, −${world.totalDied} died)` +
         `  ·  Q ${queens} eggs ${eggs}` +
         `  ·  t=${world.tick.toLocaleString()}` +
         `  ·  dug ${dugTotal}  grains ${grains}  food ${foodCount}` +

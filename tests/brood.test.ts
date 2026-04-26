@@ -297,6 +297,72 @@ describe('brood: cargo-drop on worker death', () => {
   });
 });
 
+describe('brood: lifecycle counters', () => {
+  it('world.totalBorn increments on each egg → worker maturation', () => {
+    const rng = new RNG(13);
+    const w = makeWorld();
+    const colony = new Colony(50);
+    spawnQueen(colony, rng);
+    const fast: AntSpecies = {
+      ...HARVESTER,
+      eggLayInterval: 30,
+      eggMatureTicks: 60,
+    };
+    const { dig, build } = fields(w);
+    expect(w.totalBorn).toBe(0);
+    for (let t = 0; t < 500; t++) {
+      step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, fast);
+    }
+    expect(w.totalBorn).toBeGreaterThan(0);
+  });
+
+  it('world.totalDied increments on each death', () => {
+    const rng = new RNG(14);
+    const w = makeWorld();
+    const colony = new Colony(10);
+    // Spawn 5 workers, force them to near-zero energy.
+    for (let k = 0; k < 5; k++) {
+      const i = colony.spawn(20.5 + k, 20.5, 0, rng, DEFAULT_PARAMS);
+      colony.energy[i] = 1e-9;
+    }
+    const fastDeath: AntSpecies = { ...HARVESTER, metabolism: 1.0 };
+    const { dig, build } = fields(w);
+    expect(w.totalDied).toBe(0);
+    step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, fastDeath);
+    expect(w.totalDied).toBe(5);
+  });
+
+  it('alive_adults = start + born − died invariant (eggs excluded)', () => {
+    const rng = new RNG(15);
+    const w = makeWorld();
+    const colony = new Colony(50);
+    const start = 5; // founders (queen + 4 workers)
+    spawnQueen(colony, rng);
+    for (let k = 0; k < start - 1; k++) {
+      colony.spawn(20.5 + k, 20.5, 0, rng, DEFAULT_PARAMS);
+    }
+    expect(colony.count).toBe(start);
+    const { dig, build } = fields(w);
+    const fast: AntSpecies = {
+      ...HARVESTER,
+      eggLayInterval: 50,
+      eggMatureTicks: 100,
+    };
+    for (let t = 0; t < 1000; t++) {
+      step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, fast);
+    }
+    // alive_adults = workers (STATE_WANDER..CARRY_FOOD) + queen.
+    // Excludes STATE_EGG (not yet hatched) and STATE_DEAD.
+    let aliveAdults = 0;
+    for (let i = 0; i < colony.count; i++) {
+      const s = colony.state[i];
+      if (s === STATE_DEAD || s === 7 /* STATE_EGG */) continue;
+      aliveAdults++;
+    }
+    expect(aliveAdults).toBe(start + w.totalBorn - w.totalDied);
+  });
+});
+
 describe('brood: queen+egg do not interfere with worker invariants', () => {
   it('eggs are skipped in collision/gravity passes (don\'t break embedded-ant invariant)', () => {
     const rng = new RNG(12);

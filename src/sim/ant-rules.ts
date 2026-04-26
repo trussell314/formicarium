@@ -333,6 +333,7 @@ export function step(
         colony.energy[i] = species.maxEnergy;
         colony.heading[i] = rng.range(0, Math.PI * 2);
         colony.age[i] = 0;
+        world.totalBorn++;
       }
       continue;
     }
@@ -355,6 +356,7 @@ export function step(
         // fades over its remaining workforce lifetime.
         colony.energy[i] = 0;
         colony.setState(i, STATE_DEAD);
+        world.totalDied++;
         const wW = world.width;
         const ix0 = colony.posX[i]! | 0;
         const iy0 = colony.posY[i]! | 0;
@@ -447,6 +449,7 @@ export function step(
       }
       colony.carryMoves[i] = 0;
       colony.setState(i, STATE_DEAD);
+      world.totalDied++;
       if (ix >= 0 && iy >= 0 && ix < wW && iy < world.height) {
         world.corpse[iy * wW + ix] = 1;
       }

@@ -53,6 +53,14 @@ export class World {
    *  invariant `dug = grain + liveCarriers + wearLost` continues to
    *  hold. See ant-rules.ts wear handler. */
   wearLost = 0;
+  /** Cumulative count of eggs that have hatched into adult workers.
+   *  Increments on each STATE_EGG → STATE_WANDER transition. Used by
+   *  the HUD to surface lifecycle activity (vs. snapshot population). */
+  totalBorn = 0;
+  /** Cumulative count of ant deaths from any cause (worker
+   *  starvation, queen death, future necrophoresis triggers).
+   *  Increments on every transition INTO STATE_DEAD. */
+  totalDied = 0;
   tick = 0;
 
   constructor(width: number, height: number) {
