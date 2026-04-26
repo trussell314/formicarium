@@ -99,6 +99,17 @@ export interface AntSpecies {
    *  5,000-10,000 workers (Tschinkel 1998); this is bounded by what
    *  we can render and simulate without performance issues. */
   readonly maxColonySize: number;
+
+  // ── Aging mortality ─────────────────────────────────────────────
+
+  /** Ticks an adult worker lives before dying of old age. Real
+   *  Pogonomyrmex barbatus workers average ~1 year in the wild
+   *  (Hölldobler & Wilson 1990 Ch. 13). Compressed for observation:
+   *  1M ticks ≈ 33 hours biological scaled to a few minutes of wall
+   *  time at default sim speed. Without this, workers only died of
+   *  starvation/entombment edge cases — population grows monotonically
+   *  and user can't see colony turnover. */
+  readonly workerLifespan: number;
 }
 
 /**
@@ -184,4 +195,5 @@ export const HARVESTER: AntSpecies = {
   // Pogonomyrmex barbatus mature colonies hold 5,000-10,000 workers
   // (Tschinkel 1998). We cap lower to fit performance/render budget.
   maxColonySize: 1000,
+  workerLifespan: 1_000_000,
 };

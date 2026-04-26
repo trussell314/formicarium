@@ -64,16 +64,21 @@ function build(s: Settings) {
   // decays unless ants keep working it; new sites get a fair shot
   // at bootstrapping. Build pheromone stays slow (0.997) — spoil
   // mounds are meant to be persistent landmarks.
-  // Pheromone retention rates calibrated to biological half-lives:
-  //   dig field   — 60 sec biological half-life (foraging trail
-  //                 pheromone, Bonabeau et al. 1998 range): retention
-  //                 = 0.5^(1/500) ≈ 0.9986. Earlier 0.985 ≈ 5 sec
-  //                 half-life (46 ticks); recruits gone before they
-  //                 arrive.
+  // Pheromone parameters calibrated to biological half-lives AND to
+  // gradient sharpness (low diffusion keeps signals localized at
+  // active dig fronts; smearing flattens the gradient and ants
+  // disperse to nearby noisy peaks instead of following the steepest
+  // gradient downward).
+  //   dig field   — 14 min biological half-life (top of Bonabeau
+  //                 et al. 1998 range): retention = 0.5^(1/7000) ≈
+  //                 0.9999. diffuse = 0.06 (was 0.12) — sharper
+  //                 localization so the asymmetric-deposit gradient
+  //                 stays steep at the dig front instead of smearing
+  //                 across whole chamber.
   //   build field — 30 min biological half-life (construction
   //                 pheromone, slower-decaying class; Khuong 2016):
   //                 retention = 0.5^(1/15000) ≈ 0.99995.
-  const digField = new Pheromone(world.width, world.height, 0.12, 0.9986);
+  const digField = new Pheromone(world.width, world.height, 0.06, 0.9999);
   const buildField = new Pheromone(world.width, world.height, 0.10, 0.99995);
 
   // Capacity = species cap, so brood production has slots to fill.

@@ -297,6 +297,43 @@ describe('brood: cargo-drop on worker death', () => {
   });
 });
 
+describe('brood: senescence (worker lifespan)', () => {
+  it('worker dies of old age once age >= species.workerLifespan', () => {
+    const rng = new RNG(20);
+    const w = makeWorld();
+    const colony = new Colony(10);
+    const i = colony.spawn(20.5, 20.5, 0, rng, DEFAULT_PARAMS);
+    // Force the ant to be at the lifespan threshold.
+    const fast: AntSpecies = { ...HARVESTER, workerLifespan: 5 };
+    const { dig, build } = fields(w);
+    let died = false;
+    for (let t = 0; t < 100 && !died; t++) {
+      step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, fast);
+      if (colony.state[i] === STATE_DEAD) died = true;
+    }
+    expect(died).toBe(true);
+    expect(w.totalDied).toBeGreaterThan(0);
+  });
+
+  it('worker dying of old age drops cargo same as starvation', () => {
+    const rng = new RNG(21);
+    const w = makeWorld();
+    const colony = new Colony(10);
+    const i = colony.spawn(20.5, 20.5, 0, rng, DEFAULT_PARAMS);
+    colony.setState(i, STATE_CARRY);
+    colony.carryMoves[i] = 3;
+    const grainsBefore = w.countGrains();
+    const fast: AntSpecies = { ...HARVESTER, workerLifespan: 1 };
+    const { dig, build } = fields(w);
+    step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, fast);
+    expect(colony.state[i]).toBe(STATE_DEAD);
+    // Cargo dropped as a grain in the chamber (queen chamber is
+    // surrounded by air on most sides, so an air neighbour exists).
+    expect(w.countGrains()).toBe(grainsBefore + 1);
+    expect(colony.carryMoves[i]).toBe(0);
+  });
+});
+
 describe('brood: lifecycle counters', () => {
   it('world.totalBorn increments on each egg → worker maturation', () => {
     const rng = new RNG(13);

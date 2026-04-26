@@ -97,10 +97,11 @@ export const DEFAULT_PARAMS: SimParams = {
   // Beshers & Fewell 2001: per-ant individual-threshold mean ~8
   // recent collisions before behavioural withdrawal.
   restThreshold: 8.0,
-  // Aina et al. 2023: collision-driven REST lasts ~minutes in real
-  // ants. 1500 ticks ≈ 3 min biological. (Original 30 ticks = 3.6 sec
-  // was a hand-tune for visual flow that didn't match the cited paper.)
-  restDuration: 1500,
+  // Aina et al. 2023: collision-driven REST lasts on the order of
+  // minutes in real ants. 800 ticks ≈ 1.6 min biological — at the
+  // low end of the cited range; the higher 1500 left ants visibly
+  // stuck in clusters.
+  restDuration: 800,
 };
 
 /** Distance below which two ants count as colliding. ≈ 1 body length. */
@@ -407,6 +408,46 @@ export function step(
     // We keep the age data so the polyethism layer can be added back
     // once brood is in.
     colony.age[i]!++;
+
+    // Senescence: workers die of old age once they exceed
+    // species.workerLifespan. Real Pogonomyrmex barbatus workers
+    // average ~1 year (Hölldobler & Wilson 1990 Ch. 13); we
+    // compress for observability.
+    if (colony.age[i]! >= species.workerLifespan) {
+      colony.energy[i] = 0;
+      // Drop any cargo first (same logic as starvation death below).
+      const wW = world.width;
+      if (stateIn === STATE_CARRY || stateIn === STATE_CARRY_FOOD) {
+        const cargoMoves = colony.carryMoves[i]!;
+        const isFood = stateIn === STATE_CARRY_FOOD;
+        const offsets: ReadonlyArray<readonly [number, number]> = [
+          [0, 1], [0, -1], [1, 0], [-1, 0],
+          [1, 1], [1, -1], [-1, 1], [-1, -1],
+        ];
+        for (const [dx, dy] of offsets) {
+          const nx = ix + dx;
+          const ny = iy + dy;
+          if (nx < 0 || ny < 0 || nx >= wW || ny >= world.height) continue;
+          const nIdx = ny * wW + nx;
+          if (world.cells[nIdx] !== CELL_AIR) continue;
+          if (isFood) {
+            if (world.food[nIdx]! > 0) continue;
+            world.food[nIdx] = 1;
+            world.foodMoves[nIdx] = Math.min(255, cargoMoves + 1);
+          } else {
+            placeGrain(world, nx, ny, rng, cargoMoves + 1);
+          }
+          break;
+        }
+      }
+      colony.carryMoves[i] = 0;
+      colony.setState(i, STATE_DEAD);
+      world.totalDied++;
+      if (ix >= 0 && iy >= 0 && ix < wW && iy < world.height) {
+        world.corpse[iy * wW + ix] = 1;
+      }
+      continue;
+    }
 
     // Homeostasis. Drain basal-metabolism energy; eat from any
     // food cell on contact when below the hunger threshold; die
@@ -920,7 +961,10 @@ export function step(
       // neighbour. Without this, the 1-cell starter pinhole remains a
       // perpetual choke for 50+ ants and the colony starves on the
       // length of the round trip.
-      const WEAR_PROB = 0.001;
+      // 2× the previous 0.001/tick to widen entrance shafts faster.
+      // Earlier value left visible CARRY clusters at the choke; doubling
+      // halves the time to a sustainable crater geometry.
+      const WEAR_PROB = 0.002;
       if (!aboveSurface && cellIsAir && rng.next() < WEAR_PROB) {
         const wW = world.width;
         const candidates: Array<[number, number]> = [];
