@@ -298,11 +298,15 @@ export function step(
     const ix = colony.posX[i]! | 0;
     const iy = colony.posY[i]! | 0;
 
-    // Per-ant aging. Drives polyethism: nurses (young) dive deep,
-    // foragers (old) leave the nest. See Mersch, Crespi & Keller
-    // (2013) for the empirical nurse → cleaner → forager transition.
+    // Per-ant aging. The age field is updated for future use (brood-
+    // production-driven polyethism, where young workers continuously
+    // replace foragers). The age-derived behavioural modulations from
+    // Mersch et al. 2013 were tried (forage-rate scaling, deeper-
+    // diving nurses) and reverted — without brood, all workers age
+    // monotonically into foragers and dig productivity collapses.
+    // We keep the age data so the polyethism layer can be added back
+    // once brood is in.
     colony.age[i]!++;
-    const ageFrac = Math.min(1, colony.age[i]! / species.matureAge);
 
     // Homeostasis. Drain basal-metabolism energy; eat from any
     // food cell on contact when below the hunger threshold; die
@@ -532,17 +536,14 @@ export function step(
       continue;
     }
 
-    // WANDER ants underground roll the foraging-trip transition,
-    // age-scaled per Mersch et al. 2013: newborn nurses essentially
-    // never forage (0.2× base); old workers forage at 2× base. The
-    // colony's instantaneous forager fraction follows the population's
-    // age distribution.
+    // WANDER ants underground roll the foraging-trip transition.
     // Above-surface WANDER ants are already on the way back into
     // the nest (positive geotaxis below) so we don't pull them
-    // back out immediately.
-    const forageProbAge = species.forageProb * (0.2 + 1.8 * ageFrac);
+    // back out immediately. Probability is constant per Mersch et
+    // al.; the age-modulation was reverted (see comment at age++
+    // above).
     if (stateIn === STATE_WANDER && iy >= world.naturalSurface[ix]! &&
-        rng.next() < forageProbAge) {
+        rng.next() < species.forageProb) {
       colony.setState(i, STATE_FORAGE);
       colony.collisionCount[i] = 0;
       // Heading reset toward the surface so the trip starts in the
@@ -579,20 +580,18 @@ export function step(
     //   - WANDER above natural surface: DOWN, full strength (entrance
     //     funnel — surface-walking workers don't loiter, they re-
     //     enter the nest; FORAGE handles outbound trips separately).
-    //   - WANDER below natural surface: DOWN, weak strength
-    //     scaled by (1 - 0.7 × ageFrac). Younger nurses head deep
-    //     toward the chamber floor (where fresh dig opportunities
-    //     are); older ants stay shallow preparing to go forage.
-    //     Mersch, Crespi & Keller (2013) Science: nurse → cleaner
-    //     → forager progression in Camponotus fellah.
+    //   - WANDER below natural surface: DOWN, weak strength — the
+    //     unladen-worker bias toward chamber floor where fresh dig
+    //     opportunities are. Constant strength rather than age-
+    //     modulated; the age modulation was reverted because monotone
+    //     aging without brood replenishment collapsed dig throughput.
     if (stateIn === STATE_CARRY) {
       h += wrapAngle(-Math.PI / 2 - h) * geotaxis;
     } else if (stateIn === STATE_WANDER) {
       if (iy < world.naturalSurface[ix]!) {
         h += wrapAngle(Math.PI / 2 - h) * geotaxis;
       } else {
-        const nurseStrength = 1 - 0.7 * ageFrac;
-        h += wrapAngle(Math.PI / 2 - h) * species.belowGeotaxis * nurseStrength;
+        h += wrapAngle(Math.PI / 2 - h) * species.belowGeotaxis;
       }
     }
     h = wrapAngle(h);
