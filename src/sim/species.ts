@@ -62,6 +62,25 @@ export interface AntSpecies {
    *  Above this, ants prefer to leave food alone for the granary
    *  (or to be carried to a deposit site by CARRY_FOOD ants). */
   readonly hungerThreshold: number;
+
+  // ── Age-based polyethism (Mersch, Crespi & Keller 2013) ────────
+
+  /** Base strength of positive geotaxis for unladen WANDER ants below
+   *  the natural surface — pulls them toward the chamber floor where
+   *  fresh dig opportunities are. Weak (~0.1–0.2): just a bias on top
+   *  of stigmergy, not a homing vector. Mersch's nurses bias deep
+   *  (toward brood); we use the same mechanism without an explicit
+   *  brood site. Modulated by ageFrac so nurses dive deep and
+   *  foragers stay shallow (preparing to leave for surface trips). */
+  readonly belowGeotaxis: number;
+  /** Ticks until an ant reaches "mature" / forager age. ageFrac =
+   *  min(1, age/matureAge) modulates below-surface geotaxis (decreases
+   *  with age — nurses head deep, foragers stay near entrance) and
+   *  forageProb (increases with age — old workers go outside, young
+   *  workers stay inside). Mersch et al. tracked Camponotus fellah
+   *  workers transitioning nurse → cleaner → forager over weeks; the
+   *  matureAge here is the sim-tick analogue. */
+  readonly matureAge: number;
 }
 
 /**
@@ -92,4 +111,9 @@ export const HARVESTER: AntSpecies = {
   metabolism: 2e-5,
   foodValue: 0.6,       // one seed = ~60% of full
   hungerThreshold: 0.7, // ants feed when energy < 70%
+  // Age-based polyethism. matureAge = ~half the survival horizon
+  // (50k tick metabolism limit) so the nurse → forager transition
+  // happens well within a typical observation session.
+  belowGeotaxis: 0.15,
+  matureAge: 15000,
 };

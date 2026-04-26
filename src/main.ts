@@ -131,6 +131,16 @@ function build(s: Settings) {
       DEFAULT_PARAMS,
     );
   }
+  // Seed the age distribution. Real colonies have continuous brood
+  // production → workers span every age class at once. We don't model
+  // brood, so we randomise initial ages uniformly across [0, 1.5 ×
+  // matureAge]: roughly 1/3 nurses, 1/3 cleaners, 1/3 foragers from
+  // tick zero, matching the cluster ratios Mersch et al. (2013) found
+  // in Camponotus fellah colonies. Without this, age polyethism
+  // collapses (everyone is the same age, so everyone behaves the same).
+  for (let i = 0; i < colony.count; i++) {
+    colony.age[i] = (rng.next() * HARVESTER.matureAge * 1.5) | 0;
+  }
   return { rng, world, colony, digField, buildField };
 }
 

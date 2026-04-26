@@ -77,6 +77,11 @@ export class Colony {
    *  when energy reaches zero. Models basal metabolism + food-as-fuel
    *  so the colony has a real reason to forage and store granaries. */
   readonly energy: Float32Array;
+  /** Per-ant age in ticks since spawn. Drives age-based polyethism
+   *  (Mersch, Crespi & Keller 2013) — younger ants bias toward
+   *  deeper nest work, older ants bias toward foraging. Frozen
+   *  on death. */
+  readonly age: Int32Array;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -95,6 +100,7 @@ export class Colony {
     this.collisionCount = new Float32Array(capacity);
     this.carryMoves = new Uint8Array(capacity);
     this.energy = new Float32Array(capacity);
+    this.age = new Int32Array(capacity);
   }
 
   /**
@@ -133,6 +139,7 @@ export class Colony {
     // heterogeneous on its own as some ants find food faster than
     // others.
     this.energy[i] = 1.0;
+    this.age[i] = 0;
     return i;
   }
 

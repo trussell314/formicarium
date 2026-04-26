@@ -261,6 +261,11 @@ if (remaining > 0) {
     remaining, rng, isAir, DEFAULT_PARAMS,
   );
 }
+// Seed age distribution (mirrors main.ts).
+for (let i = 0; i < colony.count; i++) {
+  colony.age[i] = (rng.next() * HARVESTER.matureAge * 1.5) | 0;
+}
+
 const digField = new Pheromone(world.width, world.height, 0.12, 0.985);
 const buildField = new Pheromone(world.width, world.height, 0.10, 0.997);
 
