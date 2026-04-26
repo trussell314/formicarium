@@ -143,6 +143,14 @@ function wrapAngle(a: number): number {
  * ant's current heading. Used only as the "which face am I touching"
  * resolver — the dig-or-not decision is the Sudd contact roll, made
  * by the caller. Returns null if no cardinal neighbour is soil.
+ *
+ * Note: a dig-target downward bias was tried as an additional lever
+ * for vertical-gallery formation. It paradoxically REDUCED depth
+ * (chamber-floor ants all dug the cell below them, spreading the dig
+ * effort laterally across the wide floor rather than concentrating
+ * at any particular point). The asymmetric dig-pheromone deposit
+ * (see step()) plus strong below-surface geotaxis on WANDER ants
+ * give the right gradient pull without flattening the dig front.
  */
 function adjacentSoil(world: World, ix: number, iy: number, h: number): { x: number; y: number } | null {
   const w = world.width;
