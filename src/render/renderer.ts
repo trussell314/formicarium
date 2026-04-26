@@ -301,11 +301,11 @@ export class Renderer {
     this.ctx.drawImage(this.off, 0, 0, w, h, ox, oy, ow, oh);
 
     // Ant overlay.
-    // Ant body radius. 0.55 of a scaled cell makes ants clearly
-    // readable as creatures at any zoom; the previous 0.35 produced
-    // sub-pixel legs at typical screen sizes and the ants got lost
-    // against the substrate.
-    const radius = Math.max(2, scale * 0.55);
+    // Ant body radius. At 3 mm/cell the ant body is 2 cells wide, so
+    // radius ≈ 1.1 cells (was 0.55 at 6 mm/cell). This keeps the ant
+    // visually the same physical size on screen regardless of sim
+    // resolution.
+    const radius = Math.max(2, scale * 1.1);
     for (let i = 0; i < colony.count; i++) {
       const state = colony.state[i];
       // Dead ants: their bodies are already drawn as a corpse cell

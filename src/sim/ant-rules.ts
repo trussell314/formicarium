@@ -79,9 +79,10 @@ export interface SimParams {
 }
 
 export const DEFAULT_PARAMS: SimParams = {
-  // 0.6 cells/tick × 6 mm/cell ÷ 120 ms/tick = 30 mm/sec — matches
-  // Gordon (1989) Pogonomyrmex foraging speed.
-  walkSpeed: 0.6,
+  // 1.2 cells/tick × 3 mm/cell ÷ 120 ms/tick = 30 mm/sec — matches
+  // Gordon (1989) Pogonomyrmex foraging speed. Scales with cell size:
+  // walkSpeed × cellMM = constant 30 × 0.12 = 3.6 mm/tick.
+  walkSpeed: 1.2,
   // 0.05 rad/tick ÷ 0.12 sec/tick = 0.42 rad/sec ≈ 24°/sec — within
   // observed correlated random walk turn rates for foragers (Kareiva
   // & Shigesada 1983). Earlier 0.35 was 24× faster, ants spun in place.
@@ -104,8 +105,10 @@ export const DEFAULT_PARAMS: SimParams = {
   restDuration: 800,
 };
 
-/** Distance below which two ants count as colliding. ≈ 1 body length. */
-const COLLISION_RADIUS = 1.0;
+/** Distance below which two ants count as colliding. ≈ 1 body length
+ *  (6 mm at our 3 mm/cell scale = 2 cells). Scales with cell size:
+ *  COLLISION_RADIUS × cellMM = 6 mm constant. */
+const COLLISION_RADIUS = 2.0;
 /** Multiplicative decay applied to collisionCount each tick. ~50-tick
  *  half-life — collisions are recent indicators, not lifetime tally. */
 const COLLISION_DECAY = 0.985;

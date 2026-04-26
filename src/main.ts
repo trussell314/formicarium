@@ -40,8 +40,13 @@ function readSettings(): Settings {
     // 200×100 with 100 ants gives ~1 ant per 200 cells — the upper end
     // of the medium-density range Buhl 2004 reports producing branched
     // (rather than single-gallery or diffuse-chamber) architecture.
-    width: Math.max(40, num('width', 200) | 0),
-    height: Math.max(30, num('height', 100) | 0),
+    // Default world: 400×200 cells × 3 mm/cell = 1.2 m × 60 cm —
+    // same physical area as the previous default at 6 mm/cell, just
+    // 2× finer resolution. Sim cost scales linearly with W×H so the
+    // pheromone field update is 4× more work; still well under 1 ms
+    // per tick budget on modern browsers.
+    width: Math.max(40, num('width', 400) | 0),
+    height: Math.max(30, num('height', 200) | 0),
     ants: Math.max(1, num('ants', 100) | 0),
     simStepsPerFrame: Math.max(1, num('speed', 8) | 0),
   };
@@ -65,21 +70,20 @@ function build(s: Settings) {
   // at bootstrapping. Build pheromone stays slow (0.997) — spoil
   // mounds are meant to be persistent landmarks.
   // Pheromone parameters calibrated to biological half-lives AND to
-  // gradient sharpness (low diffusion keeps signals localized at
-  // active dig fronts; smearing flattens the gradient and ants
-  // disperse to nearby noisy peaks instead of following the steepest
-  // gradient downward).
+  // gradient sharpness. Diffuse rate scales by 1/cell_size² to keep
+  // physical diffusion coefficient D constant: at 3 mm/cell (was 6),
+  // diffuse must be 4× higher than the original 6-mm-cell values
+  // (0.06 → 0.24, 0.10 → 0.40). Half-life is tick-based not space-
+  // based and stays the same.
   //   dig field   — 14 min biological half-life (top of Bonabeau
   //                 et al. 1998 range): retention = 0.5^(1/7000) ≈
-  //                 0.9999. diffuse = 0.06 (was 0.12) — sharper
-  //                 localization so the asymmetric-deposit gradient
-  //                 stays steep at the dig front instead of smearing
-  //                 across whole chamber.
+  //                 0.9999. diffuse = 0.24 (cell-scaled).
   //   build field — 30 min biological half-life (construction
   //                 pheromone, slower-decaying class; Khuong 2016):
-  //                 retention = 0.5^(1/15000) ≈ 0.99995.
-  const digField = new Pheromone(world.width, world.height, 0.06, 0.9999);
-  const buildField = new Pheromone(world.width, world.height, 0.10, 0.99995);
+  //                 retention = 0.5^(1/15000) ≈ 0.99995. diffuse =
+  //                 0.40 (cell-scaled).
+  const digField = new Pheromone(world.width, world.height, 0.24, 0.9999);
+  const buildField = new Pheromone(world.width, world.height, 0.40, 0.99995);
 
   // Capacity = species cap, so brood production has slots to fill.
   const colony = new Colony(HARVESTER.maxColonySize);
@@ -90,10 +94,15 @@ function build(s: Settings) {
   // picture: a few ants down the shaft + foragers milling on the
   // surface, all about to discover the existing void. Geometry must
   // match world.generate's pinhole.
-  const SHAFT_DEPTH = 5;
-  const POCKET_HALF = 1;
-  const POCKET_HEIGHT = 2;
-  const PACK_DENSITY = 4; // ants per air cell — dense but not gridlock
+  // Pinhole geometry must match world.generate (cells, scaled with
+  // cell size). Physical dimensions: 30 mm shaft × 15 mm pocket.
+  const SHAFT_DEPTH = 10;
+  const POCKET_HALF = 2;
+  const POCKET_HEIGHT = 4;
+  // Pack density is in ants per cell. 1 ant/cell at the new finer
+  // resolution = same physical density as 4 ants/cell at the old
+  // 6-mm/cell scale (since each old cell is 4 new cells).
+  const PACK_DENSITY = 1;
   const surfHere = world.naturalSurface[cx]!;
   // Queen: spawned first, parked at the deepest carved cell (the
   // pocket bottom). Hölldobler & Wilson (1990) Ch. 5: the founding
@@ -134,9 +143,13 @@ function build(s: Settings) {
     // ants into a 21-cell band hit immediate collision overload and
     // pinned >90% of the colony in REST permanently — observed at
     // t=240k diag, the colony survived but never built anything.
-    const TARGET_SCATTER_DENSITY = 3;
+    // Density is per-cell. With 3 mm/cell, 1 ant/cell still gives
+    // ~3 ant body widths' clearance per ant on a single row. Min
+    // half-band 20 cells = 60 mm, matching the old 10-cell × 6-mm
+    // physical band.
+    const TARGET_SCATTER_DENSITY = 1;
     const SCATTER_HALF = Math.max(
-      10,
+      20,
       Math.min(
         Math.floor((world.width - 1) / 2),
         Math.ceil(remaining / (2 * TARGET_SCATTER_DENSITY)),

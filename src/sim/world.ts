@@ -128,9 +128,13 @@ export class World {
     //   Ch. 5: claustral colony founding.
     // chamberHalfWidth/chamberDepth args remain in the signature for
     // backwards compatibility with existing tests but are ignored.
-    const SHAFT_DEPTH = 5;
-    const POCKET_HALF = 1; // 3-cell-wide pocket at the bottom
-    const POCKET_HEIGHT = 2;
+    // At 3 mm/cell: shaft is 30 mm deep, pocket is 15 mm wide × 12 mm
+    // tall — matches a real claustral founding chamber (Hölldobler &
+    // Wilson 1990 Ch. 5). All values scale with cell size; physical
+    // dimensions stay constant.
+    const SHAFT_DEPTH = 10;
+    const POCKET_HALF = 2; // 5-cell-wide pocket at the bottom
+    const POCKET_HEIGHT = 4;
     const cx = this.width >> 1;
     const surfHere = this.naturalSurface[cx]!;
     // Vertical shaft, 1 cell wide.

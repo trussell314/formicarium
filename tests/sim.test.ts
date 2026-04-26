@@ -176,10 +176,12 @@ describe('sim invariants', () => {
       const jump = Math.hypot(dx, dy);
       if (jump > maxJump) maxJump = jump;
     }
-    // Walk speed 0.6 + gravity 1 = 1.6 max plausible per tick.
-    // Anything larger means a teleport that the renderer would
-    // visualise as a straight line through midair.
-    expect(maxJump).toBeLessThanOrEqual(1.6);
+    // Walk speed 1.2 cells/tick + gravity 1 cell = 2.2 cells max
+    // plausible jump per tick. Anything larger means a teleport
+    // that the renderer would visualise as a straight line through
+    // midair. (Bound updated when sim resolution doubled — before
+    // 3-mm cells, walkSpeed was 0.6 and the bound was 1.6.)
+    expect(maxJump).toBeLessThanOrEqual(2.2);
   });
 
   it('every grain sits on a solid support (sandpile invariant)', () => {

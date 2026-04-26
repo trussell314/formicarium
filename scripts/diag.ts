@@ -25,8 +25,8 @@ import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from '../src/sim/world';
 
 const SEED = Number(process.env.SEED ?? 0xc0ffee) | 0;
 const TICKS = Number(process.env.TICKS ?? 60000) | 0;
-const WIDTH = Number(process.env.WIDTH ?? 200) | 0;
-const HEIGHT = Number(process.env.HEIGHT ?? 120) | 0;
+const WIDTH = Number(process.env.WIDTH ?? 400) | 0;
+const HEIGHT = Number(process.env.HEIGHT ?? 240) | 0;
 const ANTS = Number(process.env.ANTS ?? 24) | 0;
 const DUMP_EVERY = Number(process.env.DUMP_EVERY ?? 0) | 0;
 const DUMP_DIR = process.env.DUMP_DIR ?? '/tmp';
@@ -245,10 +245,10 @@ const colony = new Colony(HARVESTER.maxColonySize);
 const cx = world.width >> 1;
 // Pinhole-pack + surface-scatter — mirrors main.ts. Must track the
 // pinhole geometry in world.generate.
-const SHAFT_DEPTH = 5;
-const POCKET_HALF = 1;
-const POCKET_HEIGHT = 2;
-const PACK_DENSITY = 4;
+const SHAFT_DEPTH = 10;
+const POCKET_HALF = 2;
+const POCKET_HEIGHT = 4;
+const PACK_DENSITY = 1;
 const surfHere = world.naturalSurface[cx]!;
 // Queen first, at pocket bottom. Mirrors main.ts.
 const queenY = surfHere + SHAFT_DEPTH + POCKET_HEIGHT - 1;
@@ -271,9 +271,9 @@ const placedInPinhole = colony.spawnInRect(
 );
 const remaining = ANTS - placedInPinhole;
 if (remaining > 0) {
-  const TARGET_SCATTER_DENSITY = 3;
+  const TARGET_SCATTER_DENSITY = 1;
   const SCATTER_HALF = Math.max(
-    10,
+    20,
     Math.min(
       Math.floor((world.width - 1) / 2),
       Math.ceil(remaining / (2 * TARGET_SCATTER_DENSITY)),
@@ -296,8 +296,8 @@ for (let i = 0; i < colony.count; i++) {
   colony.age[i] = (rng.next() * HARVESTER.matureAge * 1.5) | 0;
 }
 
-const digField = new Pheromone(world.width, world.height, 0.06, 0.9999);
-const buildField = new Pheromone(world.width, world.height, 0.10, 0.99995);
+const digField = new Pheromone(world.width, world.height, 0.24, 0.9999);
+const buildField = new Pheromone(world.width, world.height, 0.40, 0.99995);
 
 let prevSoil = world.countSoil();
 const WINDOW = 5000;

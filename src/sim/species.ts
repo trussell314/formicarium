@@ -123,16 +123,23 @@ export interface AntSpecies {
  */
 // ── Sim ↔ biology time/length anchors ──────────────────────────
 //
-// 1 cell  ≈ 6 mm  (one P. barbatus worker body length;
-//                  Hölldobler & Wilson 1990)
+// 1 cell  ≈ 3 mm  (so one P. barbatus worker body — 6 mm,
+//                  Hölldobler & Wilson 1990 — spans 2 cells)
 // 1 tick  ≈ 120 ms biological time
-//                  (calibrated from walkSpeed = 0.6 cells/tick
-//                  vs. real forager speed ~30 mm/sec, Gordon 1989)
+//                  (calibrated from walkSpeed = 1.2 cells/tick
+//                  × 3 mm/cell × 8.3 ticks/sec = 30 mm/sec, the real
+//                  forager speed in Gordon 1989)
 // →   1 second biological  ≈ 8.3 ticks
 //     1 minute biological  ≈ 500 ticks
 //     1 hour biological    ≈ 30,000 ticks
 //     1 day biological     ≈ 720,000 ticks
 //     1 week biological    ≈ 5 million ticks
+//
+// All cell-relative quantities (walkSpeed, COLLISION_RADIUS, pinhole
+// geometry, default world dims, scatter band, pheromone diffuse rate)
+// are sized so the physical-units description above remains correct.
+// Pheromone half-life and per-tick probabilities are time-relative
+// not space-relative, so they DON'T scale with cell size.
 
 export const HARVESTER: AntSpecies = {
   name: 'Pogonomyrmex barbatus',

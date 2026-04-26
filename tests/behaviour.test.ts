@@ -274,7 +274,9 @@ describe('asymmetric dig pheromone deposit', () => {
     for (let i = 0; i < w.cells.length; i++) {
       if (w.cells[i] === CELL_SOIL) originalSoil.add(i);
     }
-    const params = { ...DEFAULT_PARAMS, digProb: 1.0, turnNoise: 0.001 };
+    // Override walkSpeed to the pre-resolution-change value so the
+    // ant doesn't drift out of the carved pocket before digging.
+    const params = { ...DEFAULT_PARAMS, digProb: 1.0, turnNoise: 0.001, walkSpeed: 0.5 };
     const TRAITS_DIG = { ...TRAITS, digProb: 1.0, turnNoise: 0.001 };
     const rng = new RNG(20);
     const colony = new Colony(1);
@@ -358,6 +360,9 @@ describe('Khuong threshold deposit', () => {
     colony.setState(0, STATE_CARRY);
     colony.carryMoves[0] = 0;
     const { dig, build } = fields(w);
+    // Override walkSpeed so the ant doesn't drift out of the
+    // pheromone-saturated cell before the deposit check fires.
+    const slowParams = { ...DEFAULT_PARAMS, walkSpeed: 0.1 };
     // Saturate the cell at (10, 11) above the 0.30 threshold and
     // re-saturate each tick (otherwise diffusion drains it below).
     let deposited = false;
@@ -366,7 +371,7 @@ describe('Khuong threshold deposit', () => {
       colony.posX[0] = 10.5;
       colony.posY[0] = 11.5;
       colony.energy[0] = 1.0;
-      step(w, colony, dig, build, rng, DEFAULT_PARAMS);
+      step(w, colony, dig, build, rng, slowParams);
       if (colony.state[0] === STATE_WANDER) {
         deposited = true;
         break;
