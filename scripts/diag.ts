@@ -14,8 +14,8 @@
 import { writeFileSync } from 'fs';
 import { deflateSync } from 'zlib';
 import {
-  Colony, STATE_CARRY, STATE_CARRY_FOOD, STATE_DEAD, STATE_FORAGE,
-  STATE_REST, STATE_WANDER,
+  Colony, STATE_CARRY, STATE_CARRY_FOOD, STATE_DEAD, STATE_EGG,
+  STATE_FORAGE, STATE_QUEEN, STATE_REST, STATE_WANDER,
 } from '../src/sim/colony';
 import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { Pheromone } from '../src/sim/pheromone';
@@ -185,13 +185,34 @@ function buildRGB(
       body[o] = nr | 0; body[o + 1] = ng | 0; body[o + 2] = nb | 0;
     }
   }
-  // Overlay ants as 1-pixel black dots. Dead ants are already drawn
-  // as corpse markers in the terrain pass, so skip them here.
+  // Overlay ants. Dead ants → already corpse markers (skip).
+  // Eggs → cream-coloured pixel cluster at the cell.
+  // Queen → larger dark amber blot covering a 2×2 area.
+  // Workers → 1-pixel black dot.
   for (let i = 0; i < c.count; i++) {
-    if (c.state[i] === 5 /* STATE_DEAD */) continue;
+    const s = c.state[i];
+    if (s === 5 /* DEAD */) continue;
     const ax = c.posX[i]! | 0;
     const ay = c.posY[i]! | 0;
     if (ax < 0 || ay < 0 || ax >= w.width || ay >= w.height) continue;
+    if (s === 7 /* EGG */) {
+      const o = (ay * w.width + ax) * 3;
+      body[o] = 245; body[o + 1] = 230; body[o + 2] = 200;
+      continue;
+    }
+    if (s === 6 /* QUEEN */) {
+      // 2×2 dark amber blot for the queen.
+      for (let dy = 0; dy <= 1; dy++) {
+        for (let dx = 0; dx <= 1; dx++) {
+          const qx = ax + dx;
+          const qy = ay + dy;
+          if (qx < 0 || qy < 0 || qx >= w.width || qy >= w.height) continue;
+          const o = (qy * w.width + qx) * 3;
+          body[o] = 60; body[o + 1] = 30; body[o + 2] = 18;
+        }
+      }
+      continue;
+    }
     const o = (ay * w.width + ax) * 3;
     body[o] = 10; body[o + 1] = 5; body[o + 2] = 0;
   }
@@ -220,7 +241,7 @@ const halfW = Math.max(6, Math.floor(WIDTH * 0.06));
 const depth = Math.max(4, Math.floor(HEIGHT * 0.05));
 world.generate(rng, surfaceRow, halfW, depth);
 
-const colony = new Colony(ANTS);
+const colony = new Colony(HARVESTER.maxColonySize);
 const cx = world.width >> 1;
 // Pinhole-pack + surface-scatter — mirrors main.ts. Must track the
 // pinhole geometry in world.generate.
@@ -229,6 +250,14 @@ const POCKET_HALF = 1;
 const POCKET_HEIGHT = 2;
 const PACK_DENSITY = 4;
 const surfHere = world.naturalSurface[cx]!;
+// Queen first, at pocket bottom. Mirrors main.ts.
+const queenY = surfHere + SHAFT_DEPTH + POCKET_HEIGHT - 1;
+const queenIdx = colony.spawn(cx + 0.5, queenY + 0.5, 0, rng, DEFAULT_PARAMS);
+if (queenIdx >= 0) {
+  colony.state[queenIdx] = STATE_QUEEN;
+  colony.stateTicks[queenIdx] = 0;
+  colony.energy[queenIdx] = HARVESTER.maxEnergy;
+}
 const pinholeCap = Math.min(
   ANTS,
   (SHAFT_DEPTH + (POCKET_HALF * 2 + 1) * POCKET_HEIGHT) * PACK_DENSITY,
@@ -261,13 +290,14 @@ if (remaining > 0) {
     remaining, rng, isAir, DEFAULT_PARAMS,
   );
 }
-// Seed age distribution (mirrors main.ts).
+// Seed worker age distribution (mirrors main.ts). Skip queens/eggs.
 for (let i = 0; i < colony.count; i++) {
+  if (colony.state[i] !== 0 /* STATE_WANDER */) continue;
   colony.age[i] = (rng.next() * HARVESTER.matureAge * 1.5) | 0;
 }
 
-const digField = new Pheromone(world.width, world.height, 0.12, 0.985);
-const buildField = new Pheromone(world.width, world.height, 0.10, 0.997);
+const digField = new Pheromone(world.width, world.height, 0.12, 0.9986);
+const buildField = new Pheromone(world.width, world.height, 0.10, 0.99995);
 
 let prevSoil = world.countSoil();
 const WINDOW = 5000;
@@ -287,7 +317,7 @@ for (let t = 1; t <= TICKS; t++) {
     // and homeostasis (FORAGE, CARRY_FOOD, DEAD) need to be visible
     // in the diag — without this we can't distinguish a colony that
     // collapsed (everyone DEAD) from one stuck in a REST loop.
-    let nW = 0, nC = 0, nR = 0, nF = 0, nCF = 0, nD = 0;
+    let nW = 0, nC = 0, nR = 0, nF = 0, nCF = 0, nD = 0, nQ = 0, nE = 0;
     let stuckLive = 0, aliveCount = 0;
     let belowSurface = 0;
     let avgX = 0, avgY = 0;
@@ -301,6 +331,8 @@ for (let t = 1; t <= TICKS; t++) {
       else if (s === STATE_FORAGE) nF++;
       else if (s === STATE_CARRY_FOOD) nCF++;
       else if (s === STATE_DEAD) nD++;
+      else if (s === STATE_QUEEN) nQ++;
+      else if (s === STATE_EGG) nE++;
       if (s !== STATE_DEAD) {
         aliveCount++;
         avgX += colony.posX[i]!;
@@ -397,7 +429,7 @@ for (let t = 1; t <= TICKS; t++) {
     console.log(
       `t=${String(t).padStart(7)}  dug/${WINDOW}=${String(windowDigs).padStart(4)}  ` +
       `dug=${totalDug} grain=${grains} food=${foodCount} corpse=${corpseCount}  ` +
-      `W=${nW} C=${nC} R=${nR} F=${nF} CF=${nCF} D=${nD}  ` +
+      `W=${nW} C=${nC} R=${nR} F=${nF} CF=${nCF} D=${nD} Q=${nQ} E=${nE}  ` +
       `alive=${aliveCount} stuck=${stuckLive}/${aliveCount}  ` +
       `E[avg]=${fmt(energyAvg, 2)} E[min]=${fmt(energyMin, 2)}  ` +
       `below=${belowSurface}  y=${fmt(minY)}..${fmt(maxY)}  ` +

@@ -30,8 +30,21 @@ export const STATE_CARRY_FOOD = 4;
  *  and a corpse marker is written to world.corpse[idx] at death,
  *  so necrophoresis workers can later drag the body to a midden. */
 export const STATE_DEAD = 5;
+/** Reproductive caste. The queen sits at her chamber, doesn't move
+ *  (or moves very little), and periodically lays eggs while she has
+ *  energy. Without continuous brood production, worker mortality
+ *  drains the colony to extinction within a few hundred thousand
+ *  ticks at default settings — see Hölldobler & Wilson 1990 Ch. 5
+ *  on claustral founding and colony growth. */
+export const STATE_QUEEN = 6;
+/** Brood. Stationary, doesn't eat, doesn't move. After
+ *  species.eggMatureTicks the egg transitions to STATE_WANDER and
+ *  becomes a fully-functioning worker. Real brood progresses
+ *  egg → larva → pupa → adult over weeks; we collapse those stages
+ *  into a single maturity counter. */
+export const STATE_EGG = 7;
 
-export type AntState = 0 | 1 | 2 | 3 | 4 | 5;
+export type AntState = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 export class Colony {
   count = 0;

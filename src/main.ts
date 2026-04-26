@@ -6,7 +6,7 @@
 //   ?width=N      world width (cells)
 //   ?height=N     world height (cells)
 
-import { Colony, STATE_DEAD } from './sim/colony';
+import { Colony, STATE_DEAD, STATE_EGG, STATE_QUEEN } from './sim/colony';
 import { DEFAULT_PARAMS, step } from './sim/ant-rules';
 import { ParticleSystem } from './sim/particles';
 import { Pheromone } from './sim/pheromone';
@@ -64,10 +64,20 @@ function build(s: Settings) {
   // decays unless ants keep working it; new sites get a fair shot
   // at bootstrapping. Build pheromone stays slow (0.997) — spoil
   // mounds are meant to be persistent landmarks.
-  const digField = new Pheromone(world.width, world.height, 0.12, 0.985);
-  const buildField = new Pheromone(world.width, world.height, 0.10, 0.997);
+  // Pheromone retention rates calibrated to biological half-lives:
+  //   dig field   — 60 sec biological half-life (foraging trail
+  //                 pheromone, Bonabeau et al. 1998 range): retention
+  //                 = 0.5^(1/500) ≈ 0.9986. Earlier 0.985 ≈ 5 sec
+  //                 half-life (46 ticks); recruits gone before they
+  //                 arrive.
+  //   build field — 30 min biological half-life (construction
+  //                 pheromone, slower-decaying class; Khuong 2016):
+  //                 retention = 0.5^(1/15000) ≈ 0.99995.
+  const digField = new Pheromone(world.width, world.height, 0.12, 0.9986);
+  const buildField = new Pheromone(world.width, world.height, 0.10, 0.99995);
 
-  const colony = new Colony(s.ants);
+  // Capacity = species cap, so brood production has slots to fill.
+  const colony = new Colony(HARVESTER.maxColonySize);
   const cx = world.width >> 1;
   // Pack as many founders as will reasonably fit into the pinhole +
   // terminal pocket; scatter the rest on the surface a few cells to
@@ -80,6 +90,18 @@ function build(s: Settings) {
   const POCKET_HEIGHT = 2;
   const PACK_DENSITY = 4; // ants per air cell — dense but not gridlock
   const surfHere = world.naturalSurface[cx]!;
+  // Queen: spawned first, parked at the deepest carved cell (the
+  // pocket bottom). Hölldobler & Wilson (1990) Ch. 5: the founding
+  // queen excavates her shaft, lays the first eggs, and stays in the
+  // chamber thereafter. We seed one queen no matter the requested
+  // ant count; the requested count then becomes the founder workforce.
+  const queenY = surfHere + SHAFT_DEPTH + POCKET_HEIGHT - 1;
+  const queenIdx = colony.spawn(cx + 0.5, queenY + 0.5, 0, rng, DEFAULT_PARAMS);
+  if (queenIdx >= 0) {
+    colony.state[queenIdx] = STATE_QUEEN;
+    colony.stateTicks[queenIdx] = 0;
+    colony.energy[queenIdx] = HARVESTER.maxEnergy;
+  }
   const shaftAir = SHAFT_DEPTH;
   const pocketAir = (POCKET_HALF * 2 + 1) * POCKET_HEIGHT;
   const pinholeCap = Math.min(s.ants, (shaftAir + pocketAir) * PACK_DENSITY);
@@ -131,14 +153,14 @@ function build(s: Settings) {
       DEFAULT_PARAMS,
     );
   }
-  // Seed the age distribution. Real colonies have continuous brood
-  // production → workers span every age class at once. We don't model
-  // brood, so we randomise initial ages uniformly across [0, 1.5 ×
-  // matureAge]: roughly 1/3 nurses, 1/3 cleaners, 1/3 foragers from
-  // tick zero, matching the cluster ratios Mersch et al. (2013) found
-  // in Camponotus fellah colonies. Without this, age polyethism
-  // collapses (everyone is the same age, so everyone behaves the same).
+  // Seed worker age distribution. Real colonies have continuous brood
+  // production → workers span every age class at once; we now have
+  // brood production, but at t=0 the founder workforce all spawns as
+  // adults so we still seed ages uniformly across [0, 1.5×matureAge]
+  // to give a starting age spread. Skip queen + eggs — queen is
+  // ageless for our purposes and eggs use stateTicks not age.
   for (let i = 0; i < colony.count; i++) {
+    if (colony.state[i] !== 0 /* STATE_WANDER */) continue;
     colony.age[i] = (rng.next() * HARVESTER.matureAge * 1.5) | 0;
   }
   return { rng, world, colony, digField, buildField };
@@ -342,8 +364,13 @@ function main(): void {
       let foodCount = 0;
       for (let i = 0; i < world.food.length; i++) if (world.food[i]! > 0) foodCount++;
       let dead = 0;
+      let eggs = 0;
+      let queens = 0;
       for (let i = 0; i < colony.count; i++) {
-        if (colony.state[i] === STATE_DEAD) dead++;
+        const s = colony.state[i];
+        if (s === STATE_DEAD) dead++;
+        else if (s === STATE_EGG) eggs++;
+        else if (s === STATE_QUEEN) queens++;
       }
       const alive = colony.count - dead;
       // Nest geometry: nestVol = AIR cells below each column's natural
@@ -370,6 +397,7 @@ function main(): void {
         `formicarium · ${HARVESTER.commonName} · seed 0x${settings.seed.toString(16)}` +
         `  ·  ${world.width}×${world.height}` +
         `  ·  ants ${alive}/${colony.count}${dead > 0 ? ` (${dead} dead)` : ''}` +
+        `  ·  Q ${queens} eggs ${eggs}` +
         `  ·  t=${world.tick.toLocaleString()}` +
         `  ·  dug ${dugTotal}  grains ${grains}  food ${foodCount}` +
         `  ·  nest ${nestVol} (depth ${maxDepth})` +

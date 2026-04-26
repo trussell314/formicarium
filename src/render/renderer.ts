@@ -7,7 +7,9 @@
 //
 // Renderer reads sim state. Never writes. (CLAUDE.md invariant.)
 
-import { Colony, STATE_CARRY, STATE_DEAD } from '../sim/colony';
+import {
+  Colony, STATE_CARRY, STATE_DEAD, STATE_EGG, STATE_QUEEN,
+} from '../sim/colony';
 import type { ParticleSystem } from '../sim/particles';
 import { CELL_AIR, CELL_SOIL, World } from '../sim/world';
 
@@ -305,15 +307,54 @@ export class Renderer {
     // against the substrate.
     const radius = Math.max(2, scale * 0.55);
     for (let i = 0; i < colony.count; i++) {
+      const state = colony.state[i];
       // Dead ants: their bodies are already drawn as a corpse cell
       // in the terrain pass. Skip the live-ant overlay so we don't
       // render twice.
-      if (colony.state[i] === STATE_DEAD) continue;
+      if (state === STATE_DEAD) continue;
+
+      // Eggs — small cream-coloured dots at the queen's chamber.
+      // They don't move; static position throughout maturation.
+      if (state === STATE_EGG) {
+        const ex = ox + colony.posX[i]! * scale;
+        const ey = oy + colony.posY[i]! * scale;
+        this.ctx.fillStyle = 'rgba(245, 230, 200, 0.85)';
+        this.ctx.beginPath();
+        this.ctx.ellipse(ex, ey, radius * 0.4, radius * 0.55, 0, 0, Math.PI * 2);
+        this.ctx.fill();
+        continue;
+      }
+
+      // Queen — drawn ~40% larger than workers with a distinctly
+      // long abdomen. Real Pogonomyrmex queens are 9-13 mm vs 5-8 mm
+      // workers — ~1.5× linear. She doesn't move (negligible delta);
+      // skip leg animation for clarity.
+      if (state === STATE_QUEEN) {
+        const qx = ox + colony.posX[i]! * scale;
+        const qy = oy + colony.posY[i]! * scale;
+        const qr = radius * 1.4;
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+        this.ctx.beginPath();
+        this.ctx.ellipse(qx, qy + qr * 0.85, qr * 1.3, qr * 0.4, 0, 0, Math.PI * 2);
+        this.ctx.fill();
+        // Body: deep amber abdomen + dark thorax/head, a crown-tinted
+        // queen distinct from worker tan-black.
+        this.ctx.fillStyle = 'rgb(60, 30, 18)';
+        this.ctx.beginPath();
+        this.ctx.ellipse(qx, qy + qr * 0.4, qr * 0.55, qr * 0.95, 0, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.fillStyle = 'rgb(40, 22, 14)';
+        this.ctx.beginPath();
+        this.ctx.arc(qx, qy - qr * 0.55, qr * 0.45, 0, Math.PI * 2);
+        this.ctx.fill();
+        continue;
+      }
+
       const x = colony.prevX[i]! + (colony.posX[i]! - colony.prevX[i]!) * alpha;
       const y = colony.prevY[i]! + (colony.posY[i]! - colony.prevY[i]!) * alpha;
       const px = ox + x * scale;
       const py = oy + y * scale;
-      const carry = colony.state[i] === STATE_CARRY;
+      const carry = state === STATE_CARRY;
       // Contact shadow: a small dim ellipse a fraction below the ant
       // anchors them to the substrate. Without it ants read as
       // floating overlay sprites instead of agents on the ground.

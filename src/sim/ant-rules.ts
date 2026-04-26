@@ -38,8 +38,8 @@
 // citation right here.
 
 import {
-  Colony, STATE_CARRY, STATE_CARRY_FOOD, STATE_DEAD, STATE_FORAGE,
-  STATE_REST, STATE_WANDER, type AntState,
+  Colony, STATE_CARRY, STATE_CARRY_FOOD, STATE_DEAD, STATE_EGG,
+  STATE_FORAGE, STATE_QUEEN, STATE_REST, STATE_WANDER, type AntState,
 } from './colony';
 import type { ParticleSystem } from './particles';
 import { Pheromone } from './pheromone';
@@ -79,16 +79,28 @@ export interface SimParams {
 }
 
 export const DEFAULT_PARAMS: SimParams = {
+  // 0.6 cells/tick × 6 mm/cell ÷ 120 ms/tick = 30 mm/sec — matches
+  // Gordon (1989) Pogonomyrmex foraging speed.
   walkSpeed: 0.6,
-  turnNoise: 0.35,
-  digProb: 0.10,    // Sudd: 5–15% per contact
-  pickProb: 0.02,   // lower than digProb so mounds net-grow
+  // 0.05 rad/tick ÷ 0.12 sec/tick = 0.42 rad/sec ≈ 24°/sec — within
+  // observed correlated random walk turn rates for foragers (Kareiva
+  // & Shigesada 1983). Earlier 0.35 was 24× faster, ants spun in place.
+  turnNoise: 0.05,
+  digProb: 0.10,    // Sudd 1970: 5–15% per contact
+  // pickProb 0.02/tick = 17%/sec biological. Keep lower than digProb
+  // so mound net-grows over time.
+  pickProb: 0.02,
   stigmergy: 0.55,
   geotaxis: 0.35,
   digDeposit: 1.0,
   buildDeposit: 1.0,
+  // Beshers & Fewell 2001: per-ant individual-threshold mean ~8
+  // recent collisions before behavioural withdrawal.
   restThreshold: 8.0,
-  restDuration: 30,
+  // Aina et al. 2023: collision-driven REST lasts ~minutes in real
+  // ants. 1500 ticks ≈ 3 min biological. (Original 30 ticks = 3.6 sec
+  // was a hand-tune for visual flow that didn't match the cited paper.)
+  restDuration: 1500,
 };
 
 /** Distance below which two ants count as colliding. ≈ 1 body length. */
@@ -236,7 +248,8 @@ export function step(
   // candidates. O(n) average instead of O(n²); the chamber-floor
   // pile-ups (where most ants cluster) get most of the speedup.
   for (let i = 0; i < colony.count; i++) {
-    if (colony.state[i] === STATE_DEAD) continue;
+    const s0 = colony.state[i];
+    if (s0 === STATE_DEAD || s0 === STATE_QUEEN || s0 === STATE_EGG) continue;
     colony.collisionCount[i]! *= COLLISION_DECAY;
   }
   const cr2 = COLLISION_RADIUS * COLLISION_RADIUS;
@@ -249,7 +262,11 @@ export function step(
   const { head, link } = getCollisionBins(bw * bh, colony.count);
   head.fill(-1, 0, bw * bh);
   for (let i = 0; i < colony.count; i++) {
-    if (colony.state[i] === STATE_DEAD) { link[i] = -1; continue; }
+    const sB = colony.state[i];
+    if (sB === STATE_DEAD || sB === STATE_QUEEN || sB === STATE_EGG) {
+      link[i] = -1;
+      continue;
+    }
     const bx = colony.posX[i]! | 0;
     const by = colony.posY[i]! | 0;
     if (bx < 0 || by < 0 || bx >= bw || by >= bh) { link[i] = -1; continue; }
@@ -258,7 +275,8 @@ export function step(
     head[b] = i;
   }
   for (let i = 0; i < colony.count; i++) {
-    if (colony.state[i] === STATE_DEAD) continue;
+    const sP = colony.state[i];
+    if (sP === STATE_DEAD || sP === STATE_QUEEN || sP === STATE_EGG) continue;
     const bx = colony.posX[i]! | 0;
     const by = colony.posY[i]! | 0;
     if (bx < 0 || by < 0 || bx >= bw || by >= bh) continue;
@@ -284,13 +302,85 @@ export function step(
   }
 
   for (let i = 0; i < colony.count; i++) {
+    const stateNow = colony.state[i]!;
+
     // Dead ants are inert: position frozen, no decisions, no
     // collision contribution. Skip the rest of the per-ant body.
-    if (colony.state[i] === STATE_DEAD) {
+    if (stateNow === STATE_DEAD) {
       colony.prevX[i] = colony.posX[i]!;
       colony.prevY[i] = colony.posY[i]!;
       continue;
     }
+
+    // Brood maturation. Eggs sit at the queen's chamber, accumulating
+    // stateTicks until species.eggMatureTicks → emerge as a mature
+    // worker. Hölldobler & Wilson (1990) Ch. 9: real egg→larva→pupa
+    // →adult takes ~4 weeks, compressed here for observability.
+    if (stateNow === STATE_EGG) {
+      colony.prevX[i] = colony.posX[i]!;
+      colony.prevY[i] = colony.posY[i]!;
+      colony.stateTicks[i]!++;
+      if (colony.stateTicks[i]! >= species.eggMatureTicks) {
+        colony.setState(i, STATE_WANDER);
+        colony.energy[i] = species.maxEnergy;
+        colony.heading[i] = rng.range(0, Math.PI * 2);
+        colony.age[i] = 0;
+      }
+      continue;
+    }
+
+    // Queen. Stationary at her starter chamber. Lays an egg every
+    // species.eggLayInterval ticks while alive, energy permitting,
+    // and the colony is below maxColonySize. Hölldobler & Wilson
+    // 1990 Ch. 5 (claustral founding); Tschinkel 1998 (P. barbatus
+    // colony growth). She drains energy at half the worker rate
+    // (real queens are well-fed via trophallaxis — that mechanic
+    // lands later; for now treat metabolism as small enough that
+    // founding-queen claustral survival is preserved).
+    if (stateNow === STATE_QUEEN) {
+      colony.prevX[i] = colony.posX[i]!;
+      colony.prevY[i] = colony.posY[i]!;
+      colony.energy[i]! -= species.metabolism * 0.5;
+      if (colony.energy[i]! <= 0) {
+        // Queen death → colony doom. We mark her STATE_DEAD just
+        // like a worker; brood production stops and the colony
+        // fades over its remaining workforce lifetime.
+        colony.energy[i] = 0;
+        colony.setState(i, STATE_DEAD);
+        const wW = world.width;
+        const ix0 = colony.posX[i]! | 0;
+        const iy0 = colony.posY[i]! | 0;
+        if (ix0 >= 0 && iy0 >= 0 && ix0 < wW && iy0 < world.height) {
+          world.corpse[iy0 * wW + ix0] = 1;
+        }
+        continue;
+      }
+      colony.stateTicks[i]!++;
+      // Egg-laying: requires positive timer threshold + energy above
+      // threshold + colony has slot capacity left. Egg appears at
+      // queen's cell with stateTicks=0; the maturation handler above
+      // will tick it through to adulthood.
+      if (
+        colony.stateTicks[i]! >= species.eggLayInterval &&
+        colony.energy[i]! > 0.4 &&
+        colony.count < colony.capacity &&
+        colony.count < species.maxColonySize
+      ) {
+        colony.stateTicks[i] = 0;
+        const eggIdx = colony.spawn(
+          colony.posX[i]!, colony.posY[i]!,
+          rng.range(0, Math.PI * 2), rng,
+          DEFAULT_PARAMS,
+        );
+        if (eggIdx >= 0) {
+          colony.state[eggIdx] = STATE_EGG;
+          colony.stateTicks[eggIdx] = 0;
+          colony.age[eggIdx] = 0;
+        }
+      }
+      continue;
+    }
+
     colony.prevX[i] = colony.posX[i]!;
     colony.prevY[i] = colony.posY[i]!;
     let h = colony.heading[i]!;
@@ -872,7 +962,8 @@ export function step(
   // grain cascades so an ant whose footing was just dug out falls
   // properly.
   for (let i = 0; i < colony.count; i++) {
-    if (colony.state[i] === STATE_DEAD) continue;
+    const sG = colony.state[i];
+    if (sG === STATE_DEAD || sG === STATE_QUEEN || sG === STATE_EGG) continue;
     const sx = colony.posX[i]! | 0;
     const sy = colony.posY[i]! | 0;
     const settled = settle(world, sx, sy);

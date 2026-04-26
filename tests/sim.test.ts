@@ -66,12 +66,14 @@ describe('sim invariants', () => {
   it('the chamber visibly grows over time', () => {
     const { rng, world, colony, dig, build } = makeSim(0xdeadbeef);
     const before = world.countSoil();
-    for (let t = 0; t < 1500; t++) step(world, colony, dig, build, rng, DEFAULT_PARAMS);
+    // 30k ticks ≈ 1 hour biological at the calibrated tick rate
+    // (1 tick ≈ 120 ms). With biology-scaled REST duration (1500
+    // ticks) and reduced turnNoise (0.05) ants take longer to
+    // generate dig contacts than with the old hand-tuned values.
+    for (let t = 0; t < 30000; t++) step(world, colony, dig, build, rng, DEFAULT_PARAMS);
     const after = world.countSoil();
-    // With Sudd's per-contact dig probability (0.10) AND collision-
-    // REST throttling in a packed test world (20 ants in 120×80),
-    // net dig rate is realistic-low. Test guards against a colony-
-    // wide stall, not against any particular throughput.
+    // Test guards against a colony-wide stall, not against any
+    // particular throughput rate.
     expect(before - after).toBeGreaterThan(0);
   });
 
