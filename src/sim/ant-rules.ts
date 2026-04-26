@@ -747,22 +747,34 @@ export function step(
       }
     }
 
-    // CARRY → place grain. Drop only when:
-    //   (a) the ant is above the natural surface row (it's outside
-    //       the nest in real terms),
-    //   (b) the natural surface row beneath this column is still
-    //       intact (solid). Without (b), a CARRY ant standing over
-    //       an open chamber column would drop grain into the chamber
-    //       through the carved opening, which is not what real ants
-    //       do — they walk to ground first.
-    // Where the grain finally rests is a sandpile cascade in env
-    // (placeGrain → settleGrain). Angle-of-repose is emergent.
-    if (colony.state[i] === STATE_CARRY) {
+    // CARRY → place grain. Drop wherever the ant has a stable surface
+    // beneath: the current cell is AIR and the cell directly below is
+    // SOIL or GRAIN. This subsumes both:
+    //   - the original surface-mound deposit (above natural surface,
+    //     intact ground below)
+    //   - in-chamber wall/pillar deposits (Khuong et al. 2016
+    //     observed harvester workers drop grain at chamber walls
+    //     wherever build pheromone is present, not only outside)
+    // The build-pheromone gradient (which CARRY ants follow via
+    // stigmergy) plus the Khuong amplification on the deposit keep
+    // grain-placement spatially coherent — early deposits seed
+    // future deposits at the same site. Without this relaxation,
+    // CARRY ants in a chamber wider than their walking range pile up
+    // unable-to-deposit and starve (observed in 200k-tick diag).
+    // Use stateIn (not colony.state[i]) so ants who BECAME CARRY this
+    // tick (via a dig or grain pickup) wait until next tick before
+    // depositing — preserves the "one transition per tick" rule the
+    // rest of the file follows. Without this, a dig-then-immediately-
+    // deposit cycle leaves the ant back in WANDER in a single tick
+    // and grain just shuffles between adjacent cells.
+    if (stateIn === STATE_CARRY) {
       const px = colony.posX[i]! | 0;
       const py = colony.posY[i]! | 0;
-      const surf = world.naturalSurface[px]!;
-      const groundIsIntact = world.cells[world.index(px, surf)] !== CELL_AIR;
-      if (py < surf && groundIsIntact && world.cells[world.index(px, py)] === CELL_AIR) {
+      const idx = world.index(px, py);
+      const supportedBelow =
+        py + 1 < world.height &&
+        world.cells[world.index(px, py + 1)] !== CELL_AIR;
+      if (world.cells[idx] === CELL_AIR && supportedBelow) {
         // The grain has now been moved one more time. Stamp the
         // placed cell (and any cascade destination) with the
         // updated count so the renderer can fade it.
