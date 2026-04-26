@@ -100,7 +100,7 @@ function build(s: Settings) {
   // ground in a few ticks.
   const remaining = s.ants - placedInPinhole;
   if (remaining > 0) {
-    const SCATTER_HALF = 16;
+    const SCATTER_HALF = 10;
     let topRow = world.height;
     for (let x = Math.max(0, cx - SCATTER_HALF); x <= Math.min(world.width - 1, cx + SCATTER_HALF); x++) {
       if (world.naturalSurface[x]! < topRow) topRow = world.naturalSurface[x]!;

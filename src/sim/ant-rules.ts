@@ -319,13 +319,14 @@ export function step(
     // foragers head toward the entrance to deposit. WANDER ants ABOVE
     // the natural surface bias DOWNWARD (positive geotaxis) — surface-
     // walking foragers don't loiter on open ground in real founding
-    // colonies; they head for the entrance hole. Both biases use the
-    // same `geotaxis` weight; the surface variant is half-strength so
-    // the random walk still allows incidental surface exploration.
+    // colonies; they head for the entrance hole. Same `geotaxis`
+    // weight in both directions: real ant phototaxis/geotaxis in this
+    // context isn't half-hearted, it's just oriented opposite for
+    // outbound vs inbound.
     if (stateIn === STATE_CARRY) {
       h += wrapAngle(-Math.PI / 2 - h) * geotaxis;
     } else if (stateIn === STATE_WANDER && iy < world.naturalSurface[ix]!) {
-      h += wrapAngle(Math.PI / 2 - h) * geotaxis * 0.5;
+      h += wrapAngle(Math.PI / 2 - h) * geotaxis;
     }
     h = wrapAngle(h);
     colony.heading[i] = h;
@@ -370,6 +371,12 @@ export function step(
       // the ground horizontally instead of tunnelling). Gate the
       // roll on the ant having ≥2 cardinal SOIL neighbours, i.e.
       // it's wedged into a tunnel, pocket, or wall corner.
+      //
+      // We deliberately do NOT also gate on iy>=naturalSurface: that
+      // would block widening the pinhole entrance into a crater
+      // (real founding colonies enlarge a 1-cell hole into a 5–10
+      // cell entrance over the first hours), which is necessary for
+      // a 100-ant colony to actually flow through.
       let neighbourSoil = 0;
       const wW = world.width;
       if (ax > 0 && world.cells[ay * wW + (ax - 1)] === CELL_SOIL) neighbourSoil++;
