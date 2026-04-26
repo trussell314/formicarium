@@ -302,6 +302,10 @@ const buildField = new Pheromone(world.width, world.height, 0.40, 0.99995);
 let prevSoil = world.countSoil();
 const WINDOW = 5000;
 let windowDigs = 0;
+// Snapshot of dig-direction counters at the start of each window
+// so the diag can show per-window deltas (NEW digs that fired
+// during this window, broken down by direction).
+const prevDigsByDir = new Int32Array(4);
 for (let t = 1; t <= TICKS; t++) {
   step(world, colony, digField, buildField, rng, DEFAULT_PARAMS);
   const s = world.countSoil();
@@ -465,6 +469,25 @@ for (let t = 1; t <= TICKS; t++) {
       popLines.push(`  q${qy} ${row}`);
     }
     console.log(`         pop grid (rows = vertical quintile, top → deep):\n${popLines.join('\n')}`);
+
+    // Dig-direction histogram. We're trying to bias dig outcomes
+    // toward vertical extension (Tschinkel 2004 vertical galleries).
+    // Show per-window deltas so we can see whether the dirBonus +
+    // asymmetric-pheromone + below-geotaxis machinery is actually
+    // producing more N+S digs than E+W digs.
+    const dN = world.digsByDir[0]! - prevDigsByDir[0]!;
+    const dS = world.digsByDir[1]! - prevDigsByDir[1]!;
+    const dE = world.digsByDir[2]! - prevDigsByDir[2]!;
+    const dW = world.digsByDir[3]! - prevDigsByDir[3]!;
+    const dV = dN + dS;
+    const dL = dE + dW;
+    const dT = dV + dL;
+    const vPct = dT > 0 ? Math.round((dV / dT) * 100) : 0;
+    console.log(
+      `         dig dirs (this window): N=${dN} S=${dS} E=${dE} W=${dW}  ` +
+      `vertical=${dV} lateral=${dL}  vert%=${vPct}`,
+    );
+    prevDigsByDir.set(world.digsByDir);
     windowDigs = 0;
   }
 }

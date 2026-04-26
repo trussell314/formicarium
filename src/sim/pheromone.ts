@@ -42,9 +42,22 @@ export class Pheromone {
 
   /**
    * Advance one tick: 5-point diffusion + multiplicative evaporation.
-   * Edge cells just evaporate (no diffusion partner outside the
-   * grid). Sub-1e-6 values clamp to zero to keep sparse regions
-   * sparse and avoid denormal-float drag.
+   *
+   * Boundary condition: ABSORBING. Cells at the world edge diffuse
+   * to their existing in-grid neighbours; the "missing" out-of-
+   * world neighbours contribute 0, which means a quarter of the
+   * normal outflow is lost to outside (equivalent to pheromone
+   * dispersing into sky above or deep-soil below the simulated
+   * cross-section). The earlier "edges only evaporate" boundary
+   * was a bug: interior cells still leaked INTO edges via the
+   * 5-point stencil, but edges had no way to lose pheromone
+   * except via the very-slow evaporation rate (0.99995 retention =
+   * 30-min half-life for build), so edges became pheromone traps
+   * that accumulated unbounded over the run. Visually that showed
+   * up as a glowing magenta/cyan wall on the world boundary.
+   *
+   * Sub-1e-6 values clamp to zero to keep sparse regions sparse
+   * and avoid denormal-float drag.
    */
   step(): void {
     const w = this.width;
@@ -54,31 +67,21 @@ export class Pheromone {
     const f = this.diffuse;
     const f4 = f * 0.25;
     const e = this.evaporate;
-    // Interior
-    for (let y = 1; y < h - 1; y++) {
+    for (let y = 0; y < h; y++) {
       const row = y * w;
-      for (let x = 1; x < w - 1; x++) {
+      for (let x = 0; x < w; x++) {
         const i = row + x;
         const c = src[i]!;
-        const sum = src[i - 1]! + src[i + 1]! + src[i - w]! + src[i + w]!;
+        // Sum of in-grid cardinal neighbours; missing edges = 0.
+        let sum = 0;
+        if (x > 0) sum += src[i - 1]!;
+        if (x < w - 1) sum += src[i + 1]!;
+        if (y > 0) sum += src[i - w]!;
+        if (y < h - 1) sum += src[i + w]!;
         const v = ((1 - f) * c + f4 * sum) * e;
         dst[i] = v < 1e-6 ? 0 : v;
       }
     }
-    // Edges: pure evaporation (lossy boundary, simplest)
-    for (let x = 0; x < w; x++) {
-      const top = src[x]! * e;
-      const bot = src[(h - 1) * w + x]! * e;
-      dst[x] = top < 1e-6 ? 0 : top;
-      dst[(h - 1) * w + x] = bot < 1e-6 ? 0 : bot;
-    }
-    for (let y = 1; y < h - 1; y++) {
-      const left = src[y * w]! * e;
-      const right = src[y * w + w - 1]! * e;
-      dst[y * w] = left < 1e-6 ? 0 : left;
-      dst[y * w + w - 1] = right < 1e-6 ? 0 : right;
-    }
-    // Swap
     this.current = dst;
     this.scratch = src;
   }

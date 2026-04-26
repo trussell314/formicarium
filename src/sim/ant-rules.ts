@@ -871,6 +871,16 @@ export function step(
         const dirBonus = vAir > lAir ? 1.5 : (lAir > vAir ? 0.3 : 1.0);
         if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus * dirBonus) {
           if (digCell(world, target.x, target.y, rng)) {
+            // Track dig direction relative to the digger's cell, so
+            // the diag can surface a vertical-vs-lateral histogram.
+            // Order [N, S, E, W] = [-y, +y, +x, -x] from (ax, ay) to
+            // (target.x, target.y).
+            const ddx = target.x - ax;
+            const ddy = target.y - ay;
+            if (ddy < 0) world.digsByDir[0]!++;        // N (up)
+            else if (ddy > 0) world.digsByDir[1]!++;   // S (down)
+            else if (ddx > 0) world.digsByDir[2]!++;   // E
+            else if (ddx < 0) world.digsByDir[3]!++;   // W
             // Ant body stays put — mandibles do the reaching. A
             // teleport into target+0.5 produced renderer artefacts
             // (interpolated path through impossible space) and was
@@ -1018,9 +1028,28 @@ export function step(
         const candidates: Array<[number, number]> = [];
         if (px > 0 && world.cells[py * wW + (px - 1)] === CELL_SOIL) candidates.push([px - 1, py]);
         if (px < wW - 1 && world.cells[py * wW + (px + 1)] === CELL_SOIL) candidates.push([px + 1, py]);
-        if (candidates.length > 0) {
+        // Gate wear to narrow vertical passages — both lateral
+        // neighbours must be SOIL (so the ant is squeezed in a
+        // 1-cell-wide vertical shaft). Hölldobler & Wilson 1990
+        // Ch. 3 describes shaft erosion specifically, not chamber
+        // erosion. Chamber edges have one lateral air + one lateral
+        // soil (asymmetric); requiring length === 2 rejects them.
+        // The diag's dig-direction histogram revealed that without
+        // this gate, wear fires at every chamber wall in every
+        // direction, producing ~70% lateral digs overall —
+        // overwhelming the Sudd vertical bias and creating the
+        // horizontal-gallery architecture the user kept seeing.
+        if (candidates.length === 2) {
           const pick = candidates[(rng.next() * candidates.length) | 0]!;
           if (digCell(world, pick[0], pick[1], rng)) {
+            // Wear is by definition lateral (left/right wall chipping
+            // only). Track in the dig-direction histogram so the diag
+            // shows the FULL picture — Sudd vertical/lateral plus
+            // wear lateral. Without this, the histogram suggested
+            // wide vertical bias even though wear was dumping lots
+            // of lateral activity that dominated the visual outcome.
+            if (pick[0] > px) world.digsByDir[2]!++;       // E
+            else world.digsByDir[3]!++;                    // W
             // The chipped soil isn't large enough to cohere as a
             // grain — real ants pulverise wall material with their
             // mandibles and the dust is shed during the trip

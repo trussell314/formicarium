@@ -61,6 +61,14 @@ export class World {
    *  starvation, queen death, future necrophoresis triggers).
    *  Increments on every transition INTO STATE_DEAD. */
   totalDied = 0;
+  /** Cumulative count of successful Sudd contact-trigger digs by
+   *  direction (north/south/east/west of the digger). Used by the
+   *  diag to surface dig-direction histograms — without this we
+   *  can't tell whether the dirBonus / asymmetric-pheromone /
+   *  geotaxis bias machinery is actually producing more vertical
+   *  digs than lateral digs, or whether some unrelated bottleneck
+   *  is keeping the architecture horizontal. Order: [N, S, E, W]. */
+  readonly digsByDir = new Int32Array(4);
   tick = 0;
 
   constructor(width: number, height: number) {
