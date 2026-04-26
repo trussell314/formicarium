@@ -200,15 +200,38 @@ world.generate(rng, surfaceRow, halfW, depth);
 
 const colony = new Colony(ANTS);
 const cx = world.width >> 1;
-// Spawn inside the starter divot — matches main.ts. Must track
-// DIVOT_RADIUS in world.generate.
-const DIVOT_R = 3;
+// Pinhole-pack + surface-scatter — mirrors main.ts. Must track the
+// pinhole geometry in world.generate.
+const SHAFT_DEPTH = 5;
+const POCKET_HALF = 1;
+const POCKET_HEIGHT = 2;
+const PACK_DENSITY = 4;
 const surfHere = world.naturalSurface[cx]!;
-colony.spawnInRect(
-  cx - DIVOT_R + 1, surfHere, cx + DIVOT_R - 1, surfHere + DIVOT_R - 1,
-  ANTS, rng, (x, y) => world.cells[world.index(x, y)] === 0,
-  DEFAULT_PARAMS,
+const pinholeCap = Math.min(
+  ANTS,
+  (SHAFT_DEPTH + (POCKET_HALF * 2 + 1) * POCKET_HEIGHT) * PACK_DENSITY,
 );
+const isAir = (x: number, y: number): boolean =>
+  world.cells[world.index(x, y)] === 0;
+const placedInPinhole = colony.spawnInRect(
+  cx - POCKET_HALF, surfHere,
+  cx + POCKET_HALF, surfHere + SHAFT_DEPTH + POCKET_HEIGHT - 1,
+  pinholeCap, rng, isAir, DEFAULT_PARAMS,
+);
+const remaining = ANTS - placedInPinhole;
+if (remaining > 0) {
+  const SCATTER_HALF = 16;
+  let topRow = world.height;
+  for (let x = Math.max(0, cx - SCATTER_HALF); x <= Math.min(world.width - 1, cx + SCATTER_HALF); x++) {
+    if (world.naturalSurface[x]! < topRow) topRow = world.naturalSurface[x]!;
+  }
+  const scatterY = Math.max(0, topRow - 1);
+  colony.spawnInRect(
+    Math.max(0, cx - SCATTER_HALF), scatterY,
+    Math.min(world.width - 1, cx + SCATTER_HALF), scatterY,
+    remaining, rng, isAir, DEFAULT_PARAMS,
+  );
+}
 const digField = new Pheromone(world.width, world.height, 0.12, 0.985);
 const buildField = new Pheromone(world.width, world.height, 0.10, 0.997);
 

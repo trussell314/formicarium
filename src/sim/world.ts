@@ -76,31 +76,37 @@ export class World {
       }
     }
 
-    // Starter indentation — a half-disc just below the natural
-    // surface, only barely large enough to seed the colony into.
-    // We DELIBERATELY keep this small (radius DIVOT_RADIUS cells,
-    // ~6 cells wide × 6 deep at the default scale) so the rest of
-    // the architecture has to emerge from the agents' work.
-    // Previously this was up to radius 8, which read as a chamber
-    // already half-built. chamberHalfWidth/chamberDepth args remain
-    // in the signature for backwards compatibility with tests but
-    // are no longer consulted.
-    const DIVOT_RADIUS = 3;
+    // Starter pinhole — modelled on the founding shaft a claustral
+    // queen would dig: a single-column vertical tunnel a few cells
+    // deep, terminating in a tiny pocket where she'd seal herself
+    // in to raise her first brood. This is what a brand-new colony
+    // looks like in nature; nothing chamber-shaped is pre-carved.
+    // Architecture has to emerge from the agents.
+    //   Hölldobler, B., & Wilson, E. O. (1990). The Ants. Belknap.
+    //   Ch. 5: claustral colony founding.
+    // chamberHalfWidth/chamberDepth args remain in the signature for
+    // backwards compatibility with existing tests but are ignored.
+    const SHAFT_DEPTH = 5;
+    const POCKET_HALF = 1; // 3-cell-wide pocket at the bottom
+    const POCKET_HEIGHT = 2;
     const cx = this.width >> 1;
-    const r2 = DIVOT_RADIUS * DIVOT_RADIUS;
     const surfHere = this.naturalSurface[cx]!;
-    // Centre of the half-disc sits ON the surface so the carved
-    // shape is exactly a semicircle reaching down DIVOT_RADIUS cells.
-    const centerY = surfHere;
-    const x0 = Math.max(0, cx - DIVOT_RADIUS);
-    const x1 = Math.min(this.width - 1, cx + DIVOT_RADIUS);
-    const yLo = Math.max(0, surfHere);
-    const yHi = Math.min(this.height - 1, surfHere + DIVOT_RADIUS);
-    for (let y = yLo; y <= yHi; y++) {
-      for (let x = x0; x <= x1; x++) {
-        const ddx = x - cx;
-        const ddy = y - centerY;
-        if (ddx * ddx + ddy * ddy > r2) continue;
+    // Vertical shaft, 1 cell wide.
+    const shaftBottom = Math.min(this.height - 1, surfHere + SHAFT_DEPTH - 1);
+    for (let y = surfHere; y <= shaftBottom; y++) {
+      const idx = y * this.width + cx;
+      if (this.cells[idx] === CELL_SOIL) {
+        this.cells[idx] = CELL_AIR;
+        soil--;
+      }
+    }
+    // Terminal pocket directly below the shaft.
+    const pocketTop = shaftBottom + 1;
+    const pocketBot = Math.min(this.height - 1, pocketTop + POCKET_HEIGHT - 1);
+    const px0 = Math.max(0, cx - POCKET_HALF);
+    const px1 = Math.min(this.width - 1, cx + POCKET_HALF);
+    for (let y = pocketTop; y <= pocketBot; y++) {
+      for (let x = px0; x <= px1; x++) {
         const idx = y * this.width + x;
         if (this.cells[idx] === CELL_SOIL) {
           this.cells[idx] = CELL_AIR;

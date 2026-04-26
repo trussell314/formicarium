@@ -68,23 +68,55 @@ function build(s: Settings) {
 
   const colony = new Colony(s.ants);
   const cx = world.width >> 1;
-  // Spawn ants inside the starter divot. Must match DIVOT_RADIUS in
-  // world.generate — the colony has to fit in the carved semicircle.
-  // The divot is a half-disc of radius 3 below the surface line, so
-  // we fill its full footprint and let physics settle them onto the
-  // floor in the first few ticks.
-  const DIVOT_R = 3;
+  // Pack as many founders as will reasonably fit into the pinhole +
+  // terminal pocket; scatter the rest on the surface a few cells to
+  // either side of the entrance. This mirrors the natural founding
+  // picture: a few ants down the shaft + foragers milling on the
+  // surface, all about to discover the existing void. Geometry must
+  // match world.generate's pinhole.
+  const SHAFT_DEPTH = 5;
+  const POCKET_HALF = 1;
+  const POCKET_HEIGHT = 2;
+  const PACK_DENSITY = 4; // ants per air cell — dense but not gridlock
   const surfHere = world.naturalSurface[cx]!;
-  colony.spawnInRect(
-    cx - DIVOT_R + 1,
+  const shaftAir = SHAFT_DEPTH;
+  const pocketAir = (POCKET_HALF * 2 + 1) * POCKET_HEIGHT;
+  const pinholeCap = Math.min(s.ants, (shaftAir + pocketAir) * PACK_DENSITY);
+  const isAir = (x: number, y: number): boolean =>
+    world.cells[world.index(x, y)] === 0 /* AIR */;
+  const placedInPinhole = colony.spawnInRect(
+    cx - POCKET_HALF,
     surfHere,
-    cx + DIVOT_R - 1,
-    surfHere + DIVOT_R - 1,
-    s.ants,
+    cx + POCKET_HALF,
+    surfHere + SHAFT_DEPTH + POCKET_HEIGHT - 1,
+    pinholeCap,
     rng,
-    (x, y) => world.cells[world.index(x, y)] === 0 /* AIR */,
+    isAir,
     DEFAULT_PARAMS,
   );
+  // Surface scatter for the remainder. Place them in an air row
+  // safely above the wavy natural surface in a band centred on the
+  // entrance; physics gravity-settles each onto its own column's
+  // ground in a few ticks.
+  const remaining = s.ants - placedInPinhole;
+  if (remaining > 0) {
+    const SCATTER_HALF = 16;
+    let topRow = world.height;
+    for (let x = Math.max(0, cx - SCATTER_HALF); x <= Math.min(world.width - 1, cx + SCATTER_HALF); x++) {
+      if (world.naturalSurface[x]! < topRow) topRow = world.naturalSurface[x]!;
+    }
+    const scatterY = Math.max(0, topRow - 1);
+    colony.spawnInRect(
+      Math.max(0, cx - SCATTER_HALF),
+      scatterY,
+      Math.min(world.width - 1, cx + SCATTER_HALF),
+      scatterY,
+      remaining,
+      rng,
+      isAir,
+      DEFAULT_PARAMS,
+    );
+  }
   return { rng, world, colony, digField, buildField };
 }
 
