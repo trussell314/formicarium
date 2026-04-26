@@ -20,12 +20,24 @@ export class World {
   readonly mound: Uint16Array;
   /** Per-cell hash noise for renderer texture. Deterministic from rng. */
   readonly soilNoise: Uint8Array;
-  /** Per-cell soil "wear" — increments each time a grain settles in
-   *  this cell's 8-neighbourhood. Renderer uses wear/255 to lerp
-   *  soil colour from undisturbed dark brown toward a weathered,
-   *  paler brown. Visualises the construction halo around active
-   *  mounds and tunnel mouths. */
-  readonly soilWear: Uint8Array;
+  /** Per-cell move counter for GRAIN cells. Set when an ant deposits
+   *  a grain (carryMoves + 1) and transferred between cells when the
+   *  sandpile cascade slides the grain. Renderer uses it to lerp the
+   *  GRAIN colour from undisturbed dark to weathered light: a grain
+   *  that has been picked up and re-deposited many times has been
+   *  "worked over" and reads visually paler. Zero in non-grain cells. */
+  readonly grainMoves: Uint8Array;
+  /** Per-cell food (seed) presence. 0 = none, 1 = a seed sits here.
+   *  Surface seeds spawn stochastically on intact natural-surface
+   *  rows; foragers pick them up and CARRY_FOOD ants deposit them
+   *  into below-surface chambers (granaries). */
+  readonly food: Uint8Array;
+  /** Per-cell food move counter (mirrors grainMoves but for seeds).
+   *  Set when an ant deposits a food item; transferred when an
+   *  already-deposited food is picked up and re-deposited. Renderer
+   *  uses it to lerp food colour from bright green (no moves) to
+   *  dark green (moved many times). */
+  readonly foodMoves: Uint8Array;
   /** Tick at which each cell was last carved (for "fresh dig" highlight). */
   readonly digTick: Int32Array;
   initialSoilCells = 0;
@@ -38,7 +50,9 @@ export class World {
     this.naturalSurface = new Uint16Array(width);
     this.mound = new Uint16Array(width);
     this.soilNoise = new Uint8Array(width * height);
-    this.soilWear = new Uint8Array(width * height);
+    this.grainMoves = new Uint8Array(width * height);
+    this.food = new Uint8Array(width * height);
+    this.foodMoves = new Uint8Array(width * height);
     this.digTick = new Int32Array(width * height);
     this.digTick.fill(-1_000_000);
   }

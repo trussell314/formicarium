@@ -139,7 +139,7 @@ describe('placeGrain / settleGrain (sandpile)', () => {
     // this in the simplest case.
     const w = withFloor(20, 10); // floor at y=9
     const rng = new RNG(1);
-    const final = placeGrain(w, 10, 0, rng);
+    const final = placeGrain(w, 10, 0, rng, 1);
     expect(final).not.toBeNull();
     expect(final!.y).toBe(8);
     expect(w.cells[w.index(10, 8)]).toBe(CELL_GRAIN);
@@ -151,10 +151,10 @@ describe('placeGrain / settleGrain (sandpile)', () => {
     // conservation.
     const w = withFloor(20, 10);
     const rng = new RNG(1);
-    expect(placeGrain(w, 10, 9, rng)).toBeNull(); // floor cell is soil
+    expect(placeGrain(w, 10, 9, rng, 1)).toBeNull(); // floor cell is soil
     // Out-of-bounds is also null.
-    expect(placeGrain(w, -1, 5, rng)).toBeNull();
-    expect(placeGrain(w, 5, 99, rng)).toBeNull();
+    expect(placeGrain(w, -1, 5, rng, 1)).toBeNull();
+    expect(placeGrain(w, 5, 99, rng, 1)).toBeNull();
   });
 
   it('repeated placement at one column produces a stable sandpile (angle of repose emerges)', () => {
@@ -188,7 +188,7 @@ describe('placeGrain / settleGrain (sandpile)', () => {
     const rng = new RNG(0xdef);
     let placed = 0;
     for (let i = 0; i < 30; i++) {
-      const r = placeGrain(w, 15, 0, rng);
+      const r = placeGrain(w, 15, 0, rng, 1);
       if (r !== null) placed++;
     }
     expect(w.countGrains()).toBe(placed);
@@ -202,24 +202,26 @@ describe('pickGrain', () => {
     // accurate.
     const w = withFloor(20, 10); // surface at y=9, mound counted above row 9
     const rng = new RNG(1);
-    placeGrain(w, 10, 0, rng); // lands at (10, 8)
+    placeGrain(w, 10, 0, rng, 1); // lands at (10, 8)
     expect(w.cells[w.index(10, 8)]).toBe(CELL_GRAIN);
     expect(w.mound[10]).toBe(1);
-    const ok = pickGrain(w, 10, 8, rng);
-    expect(ok).toBe(true);
+    // pickGrain returns the grain's stored move count (>= 0) on
+    // success or -1 on failure.
+    const moves = pickGrain(w, 10, 8, rng);
+    expect(moves).toBeGreaterThanOrEqual(0);
     expect(w.cells[w.index(10, 8)]).toBe(CELL_AIR);
     expect(w.mound[10]).toBe(0);
   });
 
-  it('returns false on non-grain cells', () => {
+  it('returns -1 on non-grain cells', () => {
     // The Theraulaz pickup rule asks the env "is this grain?"
-    // before committing. False means the agent's transition is
+    // before committing. -1 means the agent's transition is
     // refused; if pickGrain lied here, ants would CARRY phantom grains.
     const w = withFloor(10, 10);
     const rng = new RNG(1);
-    expect(pickGrain(w, 5, 9, rng)).toBe(false);  // soil
-    expect(pickGrain(w, 5, 5, rng)).toBe(false);  // air
-    expect(pickGrain(w, -1, 5, rng)).toBe(false); // OOB
+    expect(pickGrain(w, 5, 9, rng)).toBe(-1); // soil
+    expect(pickGrain(w, 5, 5, rng)).toBe(-1); // air
+    expect(pickGrain(w, -1, 5, rng)).toBe(-1); // OOB
   });
 
   it('re-settles a grain that was sitting on top', () => {

@@ -11,6 +11,7 @@ import { DEFAULT_PARAMS, step } from './sim/ant-rules';
 import { ParticleSystem } from './sim/particles';
 import { Pheromone } from './sim/pheromone';
 import { RNG } from './sim/rng';
+import { HARVESTER } from './sim/species';
 import { World } from './sim/world';
 import { Renderer } from './render/renderer';
 
@@ -301,7 +302,7 @@ function main(): void {
 
     if (!paused) {
       for (let i = 0; i < stepsPerFrame; i++) {
-        step(world, colony, digField, buildField, rng, DEFAULT_PARAMS, particles);
+        step(world, colony, digField, buildField, rng, DEFAULT_PARAMS, particles, HARVESTER);
       }
       // No fixed-timestep accumulator yet — render alpha=1 (no
       // interpolation) is fine while sub-stepping multiple sim ticks
@@ -315,12 +316,14 @@ function main(): void {
       lastHud = now;
       const dugTotal = world.initialSoilCells - world.countSoil();
       const grains = world.countGrains();
+      let foodCount = 0;
+      for (let i = 0; i < world.food.length; i++) if (world.food[i]! > 0) foodCount++;
       hud.textContent =
-        `formicarium · seed 0x${settings.seed.toString(16)}` +
+        `formicarium · ${HARVESTER.commonName} · seed 0x${settings.seed.toString(16)}` +
         `  ·  ${world.width}×${world.height}` +
         `  ·  ants ${colony.count}` +
         `  ·  t=${world.tick.toLocaleString()}` +
-        `  ·  dug ${dugTotal}  grains ${grains}` +
+        `  ·  dug ${dugTotal}  grains ${grains}  food ${foodCount}` +
         `  ·  speed ${stepsPerFrame}×${paused ? '  ·  PAUSED' : ''}` +
         `  ·  ${(1000 / Math.max(1, dt)).toFixed(0)} fps`;
     }

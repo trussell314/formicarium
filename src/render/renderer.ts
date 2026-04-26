@@ -22,17 +22,24 @@ const SKY_BOTTOM: [number, number, number] = [70, 75, 96];
 // fog blends toward.
 const TUNNEL_NEAR: [number, number, number] = [148, 110, 78];
 const TUNNEL_DEEP: [number, number, number] = [42, 28, 20];
-// Soil has TWO colour palettes. Cells start at the FRESH (darker,
-// undisturbed) end and lerp toward the WORN (lighter, weathered) end
-// as world.soilWear[idx] climbs from 0 → 255. Wear increments each
-// time a grain settles in the cell's 8-neighbourhood, so soil near
-// active mounds and tunnel mouths visibly weathers while soil far
-// from any construction stays dark.
-const SOIL_TOP_FRESH: [number, number, number] = [70, 44, 22];
-const SOIL_BOTTOM_FRESH: [number, number, number] = [42, 24, 12];
-const SOIL_TOP_WORN: [number, number, number] = [128, 84, 46];
-const SOIL_BOTTOM_WORN: [number, number, number] = [88, 54, 28];
-const GRASS: [number, number, number] = [50, 92, 36];
+// Solid soil — single dark palette. Per-grain wear lives on the
+// GRAIN cells (world.grainMoves), not on undisturbed soil.
+const SOIL_TOP: [number, number, number] = [70, 44, 22];
+const SOIL_BOTTOM: [number, number, number] = [42, 24, 12];
+// Grain has its own dark→light gradient driven by world.grainMoves
+// per cell. Fresh-from-the-soil grain (moves = 1) reads close to
+// soil colour; grain that's been picked up and re-deposited many
+// times trends toward the brighter, dried "weathered" end.
+const GRAIN_FRESH: [number, number, number] = [110, 70, 38];
+const GRAIN_WORN: [number, number, number] = [220, 168, 100];
+// Food (seeds) — bright green when freshly delivered (moves = 0,
+// surface seed rain), darkening as ants pick up and re-deposit.
+const FOOD_FRESH: [number, number, number] = [90, 220, 70];
+const FOOD_WORN: [number, number, number] = [30, 80, 24];
+/** Cap for the moves→colour lerp. Beyond this many moves, additional
+ *  re-deposits don't change colour further. Picked to match a few
+ *  realistic relocations rather than the Uint8 saturation point. */
+const MOVE_COLOUR_CAP = 30;
 const GRAIN_COLOR: [number, number, number] = [185, 138, 78];
 const FRESH_DIG: [number, number, number] = [78, 56, 38];
 
@@ -187,36 +194,43 @@ export class Renderer {
           }
         } else if (k === CELL_SOIL) {
           const sy = surfRow[x]!;
-          if (y === sy) {
-            [r, g, b] = GRASS;
-          } else {
-            const t = (y - sy) / Math.max(1, h - sy);
-            const fresh = lerp3(SOIL_TOP_FRESH, SOIL_BOTTOM_FRESH, Math.min(1, t));
-            const worn = lerp3(SOIL_TOP_WORN, SOIL_BOTTOM_WORN, Math.min(1, t));
-            const wear = this.world.soilWear[idx]! / 255;
-            const soil = lerp3(fresh, worn, wear);
-            const n = (noise[idx]! / 255 - 0.5) * 0.18;
-            r = soil[0] * (1 + n);
-            g = soil[1] * (1 + n);
-            b = soil[2] * (1 + n);
-            // Depth fog: darken substrate below ~80% of the world
-            // height. Sells the cross-section as bottomless rather
-            // than a hard floor. Only applied below a threshold so
-            // the visible chamber stays bright.
-            const depth = (y - sy) / Math.max(1, h - sy);
-            if (depth > 0.55) {
-              const f = (depth - 0.55) / 0.45;
-              r *= 1 - 0.55 * f;
-              g *= 1 - 0.55 * f;
-              b *= 1 - 0.55 * f;
-            }
+          const t = (y - sy) / Math.max(1, h - sy);
+          const soil = lerp3(SOIL_TOP, SOIL_BOTTOM, Math.min(1, t));
+          const n = (noise[idx]! / 255 - 0.5) * 0.18;
+          r = soil[0] * (1 + n);
+          g = soil[1] * (1 + n);
+          b = soil[2] * (1 + n);
+          // Depth fog: darken substrate below ~80% of the world
+          // height. Sells the cross-section as bottomless rather
+          // than a hard floor. Only applied below a threshold so
+          // the visible chamber stays bright.
+          const depth = (y - sy) / Math.max(1, h - sy);
+          if (depth > 0.55) {
+            const f = (depth - 0.55) / 0.45;
+            r *= 1 - 0.55 * f;
+            g *= 1 - 0.55 * f;
+            b *= 1 - 0.55 * f;
           }
         } else {
-          // GRAIN
-          const n = (noise[idx]! / 255 - 0.5) * 0.22;
-          r = GRAIN_COLOR[0] * (1 + n);
-          g = GRAIN_COLOR[1] * (1 + n);
-          b = GRAIN_COLOR[2] * (1 + n);
+          // GRAIN — colour lerps fresh → worn by per-cell move count.
+          // moves=1 (just dug & dropped) reads close to soil; many
+          // re-handlings push it toward the bright weathered end.
+          const moves = this.world.grainMoves[idx]!;
+          const t = Math.min(1, moves / MOVE_COLOUR_CAP);
+          const grain = lerp3(GRAIN_FRESH, GRAIN_WORN, t);
+          const n = (noise[idx]! / 255 - 0.5) * 0.18;
+          r = grain[0] * (1 + n);
+          g = grain[1] * (1 + n);
+          b = grain[2] * (1 + n);
+        }
+        // Food overlay. Food sits on top of (or inside) AIR cells,
+        // independent of cell type. Draw it after the substrate so
+        // the green completely covers the underlying air pixel.
+        if (this.world.food[idx]! > 0) {
+          const moves = this.world.foodMoves[idx]!;
+          const t = Math.min(1, moves / MOVE_COLOUR_CAP);
+          const food = lerp3(FOOD_FRESH, FOOD_WORN, t);
+          r = food[0]; g = food[1]; b = food[2];
         }
         const o = idx * 4;
         data[o] = r;

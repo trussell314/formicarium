@@ -15,8 +15,18 @@ export const STATE_CARRY = 1;
  *  "agitation" model: ants in a crowded zone briefly withdraw,
  *  freeing the choke point and dispersing the work crew. */
 export const STATE_REST = 2;
+/** Foraging trip — leave the nest, walk on the surface looking for
+ *  food, then return to WANDER. See species.ts for cited species
+ *  defaults. The cycle is what keeps ant population from pooling
+ *  indefinitely at construction fronts (Gordon 1989; Hölldobler &
+ *  Wilson 1990, Ch. 8). */
+export const STATE_FORAGE = 3;
+/** Carrying a food item (e.g. a seed for a granivore species) back
+ *  toward the nest. Mirror of STATE_CARRY but with opposite geotaxis
+ *  sign — food goes DOWN into the nest, grain goes UP onto the mound. */
+export const STATE_CARRY_FOOD = 4;
 
-export type AntState = 0 | 1 | 2;
+export type AntState = 0 | 1 | 2 | 3 | 4;
 
 export class Colony {
   count = 0;
@@ -48,6 +58,14 @@ export class Colony {
    *  count, multiplied by COLLISION_DECAY each tick. When it
    *  crosses `restThreshold`, the ant enters REST. */
   readonly collisionCount: Float32Array;
+  /** Move-count of the grain currently being carried by this ant.
+   *  Set on dig (= 0, fresh excavation) or pickup (= grain's stored
+   *  count). On deposit, the carried grain's stored count becomes
+   *  carryMoves + 1 (this deposit is another move). Zero when the
+   *  ant isn't carrying. Renderer doesn't read this; it's just
+   *  state for the per-grain wear visualisation that lives on the
+   *  GRAIN cell itself. */
+  readonly carryMoves: Uint8Array;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -64,6 +82,7 @@ export class Colony {
     this.turnNoise = new Float32Array(capacity);
     this.restThreshold = new Float32Array(capacity);
     this.collisionCount = new Float32Array(capacity);
+    this.carryMoves = new Uint8Array(capacity);
   }
 
   /**

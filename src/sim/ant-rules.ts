@@ -37,11 +37,15 @@
 // flavoured" hack creeps back in, it should justify itself with a
 // citation right here.
 
-import { Colony, STATE_CARRY, STATE_REST, STATE_WANDER, type AntState } from './colony';
+import {
+  Colony, STATE_CARRY, STATE_CARRY_FOOD, STATE_FORAGE, STATE_REST,
+  STATE_WANDER, type AntState,
+} from './colony';
 import type { ParticleSystem } from './particles';
 import { Pheromone } from './pheromone';
 import { digCell, pickGrain, placeGrain, settle, tryStep } from './physics';
 import type { RNG } from './rng';
+import { type AntSpecies, HARVESTER } from './species';
 import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from './world';
 
 export interface SimParams {
@@ -181,8 +185,33 @@ export function step(
   rng: RNG,
   params: SimParams = DEFAULT_PARAMS,
   particles?: ParticleSystem,
+  species: AntSpecies = HARVESTER,
 ): void {
   world.tick++;
+
+  // Surface seed rain. Stochastic deposition of food items onto
+  // intact natural-surface rows — the wind/plant-fall/animal-scat
+  // process that a granivore colony's foraging is built around
+  // (Crist & MacMahon 1992 measured wind-driven seed delivery in
+  // arid soils). Skipped entirely for non-granivorous species.
+  if (species.granivorous && rng.next() < species.seedsPerTick) {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const sx = (rng.next() * world.width) | 0;
+      const sy = world.naturalSurface[sx]!;
+      if (sy < 1) continue;
+      const surfIdx = sy * world.width + sx;
+      const aboveIdx = surfIdx - world.width;
+      if (
+        world.cells[surfIdx] === CELL_SOIL &&
+        world.cells[aboveIdx] === CELL_AIR &&
+        world.food[aboveIdx] === 0
+      ) {
+        world.food[aboveIdx] = 1;
+        world.foodMoves[aboveIdx] = 0;
+        break;
+      }
+    }
+  }
 
   // Environmental dynamics: pheromone fields advance one tick;
   // dust particle ringbuffer ages and gravity-falls one tick.
@@ -300,6 +329,131 @@ export function step(
         colony.posY[i] = ny;
         continue;
       }
+    }
+
+    // FORAGE tick. Negative geotaxis drives the ant out of the nest;
+    // once on the surface, it patrols via correlated random walk.
+    // No stigmergy (the dig pheromone gradient that pulls WANDER
+    // ants in would defeat the whole point of leaving). On surface
+    // contact with a food cell, transition to CARRY_FOOD. After
+    // forageDuration ticks without finding food, return to WANDER
+    // (the patrol returned empty-handed).
+    //   Hölldobler & Wilson (1990), The Ants, Ch. 8: Foraging.
+    //   Gordon (1989). Dynamics of task switching in harvester ants.
+    if (stateIn === STATE_FORAGE) {
+      colony.stateTicks[i]!++;
+      if (colony.stateTicks[i]! >= species.forageDuration) {
+        colony.setState(i, STATE_WANDER);
+        colony.collisionCount[i] = 0;
+        colony.heading[i] = rng.range(0, Math.PI * 2);
+      } else {
+        h += rng.gauss() * colony.turnNoise[i]!;
+        // Below natural surface: hard upward bias toward exit. Above
+        // surface: pure random walk on the open ground.
+        if (iy >= world.naturalSurface[ix]!) {
+          h += wrapAngle(-Math.PI / 2 - h) * geotaxis;
+        }
+        h = wrapAngle(h);
+        colony.heading[i] = h;
+        let nx = colony.posX[i]!;
+        let ny = colony.posY[i]!;
+        for (let s = 0; s < subSteps; s++) {
+          const dx = Math.cos(h) * stepLen;
+          const dy = Math.sin(h) * stepLen;
+          const r = tryStep(world, nx, ny, dx, dy);
+          nx = r.x; ny = r.y;
+          if (r.hitSoil) {
+            h = wrapAngle(h + Math.PI * (0.5 + rng.next() * 0.5));
+            colony.heading[i] = h;
+          }
+        }
+        colony.posX[i] = nx;
+        colony.posY[i] = ny;
+        // Food contact: any cardinal-or-self food cell triggers a
+        // pickup. Discrete grab — no probability, foragers actively
+        // collect on contact (Gordon 2010, Ch. 4).
+        const fx = nx | 0;
+        const fy = ny | 0;
+        const wW = world.width;
+        let fIdx = -1;
+        if (fx >= 0 && fy >= 0 && fx < wW && fy < world.height && world.food[fy * wW + fx]! > 0) {
+          fIdx = fy * wW + fx;
+        } else {
+          if (fx > 0 && world.food[fy * wW + (fx - 1)]! > 0) fIdx = fy * wW + (fx - 1);
+          else if (fx < wW - 1 && world.food[fy * wW + (fx + 1)]! > 0) fIdx = fy * wW + (fx + 1);
+          else if (fy > 0 && world.food[(fy - 1) * wW + fx]! > 0) fIdx = (fy - 1) * wW + fx;
+          else if (fy < world.height - 1 && world.food[(fy + 1) * wW + fx]! > 0) fIdx = (fy + 1) * wW + fx;
+        }
+        if (fIdx >= 0) {
+          colony.carryMoves[i] = world.foodMoves[fIdx]!;
+          world.food[fIdx] = 0;
+          world.foodMoves[fIdx] = 0;
+          colony.setState(i, STATE_CARRY_FOOD);
+          // Re-orient downward — head back to the nest.
+          colony.heading[i] = Math.PI / 2 + rng.range(-0.3, 0.3);
+        }
+        continue;
+      }
+    }
+
+    // CARRY_FOOD tick. Positive geotaxis drives the ant DOWN into
+    // the nest; on reaching a below-surface AIR cell it deposits
+    // the seed (creating a new food cell with foodMoves = carry+1)
+    // and returns to WANDER. Granaries emerge naturally where ants
+    // happen to drop their loads — Tschinkel (2004) found that real
+    // Pogonomyrmex badius granaries form at consistent depths
+    // without any explicit chamber-allocation rule.
+    if (stateIn === STATE_CARRY_FOOD) {
+      h += rng.gauss() * colony.turnNoise[i]!;
+      // Below or above surface, bias DOWN (positive geotaxis).
+      h += wrapAngle(Math.PI / 2 - h) * geotaxis;
+      h = wrapAngle(h);
+      colony.heading[i] = h;
+      let nx = colony.posX[i]!;
+      let ny = colony.posY[i]!;
+      for (let s = 0; s < subSteps; s++) {
+        const dx = Math.cos(h) * stepLen;
+        const dy = Math.sin(h) * stepLen;
+        const r = tryStep(world, nx, ny, dx, dy);
+        nx = r.x; ny = r.y;
+        if (r.hitSoil) {
+          h = wrapAngle(h + Math.PI * (0.5 + rng.next() * 0.5));
+          colony.heading[i] = h;
+        }
+      }
+      colony.posX[i] = nx;
+      colony.posY[i] = ny;
+      // Deposit if we're in a below-surface AIR cell with no food
+      // already there.
+      const dxIdx = nx | 0;
+      const dyIdx = ny | 0;
+      const dIdx = dyIdx * world.width + dxIdx;
+      if (
+        dyIdx > world.naturalSurface[dxIdx]! &&
+        world.cells[dIdx] === CELL_AIR &&
+        world.food[dIdx] === 0
+      ) {
+        world.food[dIdx] = 1;
+        world.foodMoves[dIdx] = Math.min(255, colony.carryMoves[i]! + 1);
+        colony.carryMoves[i] = 0;
+        colony.setState(i, STATE_WANDER);
+        colony.heading[i] = rng.range(0, Math.PI * 2);
+      }
+      continue;
+    }
+
+    // WANDER ants underground roll the foraging-trip transition.
+    // Above-surface WANDER ants are already on the way back into
+    // the nest (positive geotaxis below) so we don't pull them
+    // back out immediately.
+    if (stateIn === STATE_WANDER && iy >= world.naturalSurface[ix]! &&
+        rng.next() < species.forageProb) {
+      colony.setState(i, STATE_FORAGE);
+      colony.collisionCount[i] = 0;
+      // Heading reset toward the surface so the trip starts in the
+      // right direction.
+      colony.heading[i] = -Math.PI / 2 + rng.range(-0.3, 0.3);
+      continue;
     }
 
     // WANDER ants overloaded by collisions enter REST. CARRY ants
@@ -440,6 +594,9 @@ export function step(
             // the load. The CARRY state's own movement (with negative
             // geotaxis) carries the ant away from the new void.
             colony.setState(i, STATE_CARRY);
+            // Fresh material — never moved before. The next deposit
+            // will set the placed cell's grainMoves to 1.
+            colony.carryMoves[i] = 0;
             digField.deposit(target.x, target.y, digDeposit);
             colony.heading[i] = -Math.PI / 2 + rng.range(-0.3, 0.3);
             // Spawn a small puff of dust from the dig site so the
@@ -474,12 +631,16 @@ export function step(
     if (colony.state[i] === STATE_WANDER) {
       const target = adjacentGrain(world, ax, ay, rng);
       if (target !== null && rng.next() < colony.pickProb[i]!) {
-        if (pickGrain(world, target.x, target.y, rng)) {
+        const pickedMoves = pickGrain(world, target.x, target.y, rng);
+        if (pickedMoves >= 0) {
           // No teleport — same reasoning as digCell above: the ant's
           // body stays at its current cell, mandibles reach into the
           // adjacent grain. Avoids a prev→pos straight-line jump
           // through air during the renderer's interpolation.
           colony.setState(i, STATE_CARRY);
+          // Carry forward the grain's existing move count. Next
+          // deposit will store carryMoves + 1 in the placed cell.
+          colony.carryMoves[i] = pickedMoves;
           // Picked-up grain isn't a fresh dig — don't deposit dig
           // pheromone; instead leave a small mark on the build
           // field (the act of disturbing a pile is itself a
@@ -518,9 +679,14 @@ export function step(
       const surf = world.naturalSurface[px]!;
       const groundIsIntact = world.cells[world.index(px, surf)] !== CELL_AIR;
       if (py < surf && groundIsIntact && world.cells[world.index(px, py)] === CELL_AIR) {
-        const placed = placeGrain(world, px, py, rng);
+        // The grain has now been moved one more time. Stamp the
+        // placed cell (and any cascade destination) with the
+        // updated count so the renderer can fade it.
+        const newMoves = colony.carryMoves[i]! + 1;
+        const placed = placeGrain(world, px, py, rng, newMoves);
         if (placed !== null) {
           colony.setState(i, STATE_WANDER);
+          colony.carryMoves[i] = 0;
           // Khuong 2016 wall-pillar feedback: a build site's local
           // pheromone concentration AMPLIFIES the deposit left by the
           // next grain placed there. This is the positive-feedback
@@ -553,6 +719,12 @@ export function step(
     const sx = colony.posX[i]! | 0;
     const sy = colony.posY[i]! | 0;
     const settled = settle(world, sx, sy);
-    if (settled !== sy) colony.posY[i] = settled + 0.5;
+    // Shift posY by the cell delta the settle picked, preserving
+    // the sub-cell fractional part. Snapping to settled+0.5 used to
+    // produce visible "jumps" in the renderer interpolation when an
+    // ant fell from near the top of a cell into the middle of the
+    // next one (delta could exceed gravity's 1-cell budget by up to
+    // ~0.5 cells).
+    if (settled !== sy) colony.posY[i] = colony.posY[i]! + (settled - sy);
   }
 }

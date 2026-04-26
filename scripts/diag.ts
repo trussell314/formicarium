@@ -121,30 +121,32 @@ function buildRGB(
           b =  78 + (20 -  78) * t;
         }
       } else if (k === CELL_SOIL) {
-        if (y === sy) {
-          r = 50; g = 92; b = 36;
-        } else {
-          const depth = (y - sy) / Math.max(1, w.height - sy);
-          const td = Math.min(1, depth);
-          // Fresh (dark) and worn (lighter) endpoints — must mirror
-          // src/render/renderer.ts SOIL_*_FRESH / SOIL_*_WORN.
-          const fr = 70 + (42 - 70) * td;
-          const fg = 44 + (24 - 44) * td;
-          const fb = 22 + (12 - 22) * td;
-          const wr = 128 + (88 - 128) * td;
-          const wg = 84 + (54 - 84) * td;
-          const wb = 46 + (28 - 46) * td;
-          const wear = w.soilWear[idx]! / 255;
-          r = fr + (wr - fr) * wear;
-          g = fg + (wg - fg) * wear;
-          b = fb + (wb - fb) * wear;
-          if (depth > 0.55) {
-            const f = (depth - 0.55) / 0.45;
-            r *= 1 - 0.55 * f; g *= 1 - 0.55 * f; b *= 1 - 0.55 * f;
-          }
+        const depth = (y - sy) / Math.max(1, w.height - sy);
+        const td = Math.min(1, depth);
+        // Single soil palette — must mirror SOIL_TOP / SOIL_BOTTOM.
+        r = 70 + (42 - 70) * td;
+        g = 44 + (24 - 44) * td;
+        b = 22 + (12 - 22) * td;
+        if (depth > 0.55) {
+          const f = (depth - 0.55) / 0.45;
+          r *= 1 - 0.55 * f; g *= 1 - 0.55 * f; b *= 1 - 0.55 * f;
         }
       } else if (k === CELL_GRAIN) {
-        r = 185; g = 138; b = 78;
+        // Lerp grain by per-cell move counter — must mirror
+        // GRAIN_FRESH/GRAIN_WORN/MOVE_COLOUR_CAP in renderer.ts.
+        const moves = w.grainMoves[idx]!;
+        const t = Math.min(1, moves / 30);
+        r = 110 + (220 - 110) * t;
+        g = 70 + (168 - 70) * t;
+        b = 38 + (100 - 38) * t;
+      }
+      // Food overlay — bright→dark green by foodMoves.
+      if (w.food[idx]! > 0) {
+        const moves = w.foodMoves[idx]!;
+        const t = Math.min(1, moves / 30);
+        r = 90 + (30 - 90) * t;
+        g = 220 + (80 - 220) * t;
+        b = 70 + (24 - 70) * t;
       }
       const o = idx * 3;
       body[o] = Math.round(r) & 0xff;

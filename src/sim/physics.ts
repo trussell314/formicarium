@@ -142,10 +142,14 @@ export function settleGrain(world: World, x: number, y: number, rng: RNG): { x: 
   const h = world.height;
   while (true) {
     if (y + 1 >= h) break;
+    const srcIdx = y * w + x;
     const belowIdx = (y + 1) * w + x;
     if (world.cells[belowIdx] === CELL_AIR) {
-      world.cells[y * w + x] = CELL_AIR;
+      const moves = world.grainMoves[srcIdx]!;
+      world.cells[srcIdx] = CELL_AIR;
+      world.grainMoves[srcIdx] = 0;
       world.cells[belowIdx] = CELL_GRAIN;
+      world.grainMoves[belowIdx] = moves;
       y++;
       continue;
     }
@@ -161,12 +165,18 @@ export function settleGrain(world: World, x: number, y: number, rng: RNG): { x: 
     let goLeft: boolean;
     if (dl && dr) goLeft = rng.next() < 0.5;
     else goLeft = dl;
-    world.cells[y * w + x] = CELL_AIR;
+    const moves = world.grainMoves[srcIdx]!;
+    world.cells[srcIdx] = CELL_AIR;
+    world.grainMoves[srcIdx] = 0;
     if (goLeft) {
-      world.cells[(y + 1) * w + x - 1] = CELL_GRAIN;
+      const destIdx = (y + 1) * w + x - 1;
+      world.cells[destIdx] = CELL_GRAIN;
+      world.grainMoves[destIdx] = moves;
       x -= 1;
     } else {
-      world.cells[(y + 1) * w + x + 1] = CELL_GRAIN;
+      const destIdx = (y + 1) * w + x + 1;
+      world.cells[destIdx] = CELL_GRAIN;
+      world.grainMoves[destIdx] = moves;
       x += 1;
     }
     y += 1;
@@ -202,31 +212,20 @@ export function recomputeMound(world: World, col: number): void {
  * the final column (the sandpile cascade can slide diagonally across
  * columns, so both ends of the path may have changed).
  */
-export function placeGrain(world: World, x: number, y: number, rng: RNG): { x: number; y: number } | null {
+export function placeGrain(
+  world: World, x: number, y: number, rng: RNG, moves: number,
+): { x: number; y: number } | null {
   const idx = y * world.width + x;
   if (x < 0 || y < 0 || x >= world.width || y >= world.height) return null;
   if (world.cells[idx] !== CELL_AIR) return null;
   world.cells[idx] = CELL_GRAIN;
+  // Stamp the grain with the carrier ant's move count + 1 (this
+  // placement IS another move). settleGrain will transfer the value
+  // along with the grain if the cascade slides it.
+  world.grainMoves[idx] = Math.min(255, moves);
   const final = settleGrain(world, x, y, rng);
   recomputeMound(world, x);
   if (final.x !== x) recomputeMound(world, final.x);
-  // Increment soil wear in the 8-neighbourhood of the final grain
-  // position. Visualises construction halo: soil near active mounds
-  // and tunnel mouths fades from dark to weathered over time.
-  const w = world.width;
-  for (let dy = -1; dy <= 1; dy++) {
-    const ny = final.y + dy;
-    if (ny < 0 || ny >= world.height) continue;
-    for (let dx = -1; dx <= 1; dx++) {
-      const nx = final.x + dx;
-      if (nx < 0 || nx >= w) continue;
-      if (dx === 0 && dy === 0) continue;
-      const ni = ny * w + nx;
-      if (world.cells[ni] !== CELL_SOIL) continue;
-      const cur = world.soilWear[ni]!;
-      if (cur < 255) world.soilWear[ni] = cur + 1;
-    }
-  }
   return final;
 }
 
@@ -273,11 +272,18 @@ export function digCell(world: World, x: number, y: number, rng: RNG): boolean {
  * modulation) is what generates emergent walls and pillars in
  * termite/ant nest construction.
  */
-export function pickGrain(world: World, x: number, y: number, rng: RNG): boolean {
-  if (x < 0 || y < 0 || x >= world.width || y >= world.height) return false;
+/**
+ * Pick up a deposited grain. Returns the picked grain's move count
+ * (so the carrier ant can keep tracking it), or -1 if the target
+ * wasn't grain.
+ */
+export function pickGrain(world: World, x: number, y: number, rng: RNG): number {
+  if (x < 0 || y < 0 || x >= world.width || y >= world.height) return -1;
   const idx = y * world.width + x;
-  if (world.cells[idx] !== CELL_GRAIN) return false;
+  if (world.cells[idx] !== CELL_GRAIN) return -1;
+  const moves = world.grainMoves[idx]!;
   world.cells[idx] = CELL_AIR;
+  world.grainMoves[idx] = 0;
   // Re-settle the grain directly above (it lost its support). If
   // the cascade slid the grain across columns, both columns need
   // a mound refresh — otherwise the deposit search uses stale data.
@@ -291,5 +297,5 @@ export function pickGrain(world: World, x: number, y: number, rng: RNG): boolean
   }
   recomputeMound(world, x);
   if (slideDest >= 0) recomputeMound(world, slideDest);
-  return true;
+  return moves;
 }
