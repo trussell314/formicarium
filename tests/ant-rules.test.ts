@@ -42,18 +42,22 @@ const TRAITS = {
 };
 
 describe('ant-rules: WANDER → CARRY (digging)', () => {
-  it('a WANDER ant adjacent to soil with digProb=1 transitions to CARRY within a few ticks', () => {
-    // Sudd 1970: per-contact dig probability. With digProb=1 every
-    // soil contact must fire, so an ant pressed against a wall MUST
-    // transition out of WANDER quickly. If this regresses we've
-    // broken the basic excavation primitive.
+  it('a WANDER ant in an enclosed pocket with digProb=1 transitions to CARRY within a few ticks', () => {
+    // Sudd 1970: per-contact dig probability INSIDE an excavation
+    // context (the enclosure gate in ant-rules.ts). With digProb=1
+    // every contact-from-inside-a-pocket must fire, so an ant in
+    // a 1-cell pocket pressed against a wall MUST transition out of
+    // WANDER quickly. If this regresses we've broken the basic
+    // excavation primitive.
     const w = flatWorld(40, 30, 10);
+    // Carve a 1-cell pocket so the ant has ≥2 soil neighbours at
+    // its spawn cell (left, right, below all soil).
+    w.cells[w.index(20, 10)] = CELL_AIR;
+    w.initialSoilCells = w.countSoil();
     const params: SimParams = { ...DEFAULT_PARAMS, digProb: 1.0, turnNoise: 0.01 };
     const rng = new RNG(123);
     const colony = new Colony(1);
-    // Spawn just above the soil surface so movement will quickly
-    // press the ant into a soil cell.
-    colony.spawn(20.5, 9.5, Math.PI / 2, rng, { ...TRAITS, digProb: 1.0, turnNoise: 0.01 });
+    colony.spawn(20.5, 10.5, Math.PI / 2, rng, { ...TRAITS, digProb: 1.0, turnNoise: 0.01 });
     const { dig, build } = fields(w);
     let transitioned = false;
     for (let t = 0; t < 50; t++) {
@@ -70,10 +74,12 @@ describe('ant-rules: WANDER → CARRY (digging)', () => {
     // the dig field. Without this the colony loses its "active
     // front" signal and excavation diffuses into noise.
     const w = flatWorld(40, 30, 10);
+    w.cells[w.index(20, 10)] = CELL_AIR;
+    w.initialSoilCells = w.countSoil();
     const params: SimParams = { ...DEFAULT_PARAMS, digProb: 1.0, turnNoise: 0.01 };
     const rng = new RNG(456);
     const colony = new Colony(1);
-    colony.spawn(20.5, 9.5, Math.PI / 2, rng, { ...TRAITS, digProb: 1.0, turnNoise: 0.01 });
+    colony.spawn(20.5, 10.5, Math.PI / 2, rng, { ...TRAITS, digProb: 1.0, turnNoise: 0.01 });
     const { dig, build } = fields(w);
     for (let t = 0; t < 50; t++) {
       step(w, colony, dig, build, rng, params);

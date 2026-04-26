@@ -315,9 +315,17 @@ export function step(
       h += wrapAngle(want - h) * colony.stigmergy[i]!;
     }
 
-    // (4) Negative geotaxis — laden ants bias upward against gravity.
+    // (4) Geotaxis. CARRY ants bias UPWARD (negative geotaxis) — laden
+    // foragers head toward the entrance to deposit. WANDER ants ABOVE
+    // the natural surface bias DOWNWARD (positive geotaxis) — surface-
+    // walking foragers don't loiter on open ground in real founding
+    // colonies; they head for the entrance hole. Both biases use the
+    // same `geotaxis` weight; the surface variant is half-strength so
+    // the random walk still allows incidental surface exploration.
     if (stateIn === STATE_CARRY) {
       h += wrapAngle(-Math.PI / 2 - h) * geotaxis;
+    } else if (stateIn === STATE_WANDER && iy < world.naturalSurface[ix]!) {
+      h += wrapAngle(Math.PI / 2 - h) * geotaxis * 0.5;
     }
     h = wrapAngle(h);
     colony.heading[i] = h;
@@ -353,6 +361,26 @@ export function step(
     // soil cell; the env handles any granular cascade. Drop dig
     // pheromone at the new air cell so other ants are recruited.
     if (stateIn === STATE_WANDER && hitSoil) {
+      // Enclosure gate. Sudd 1970 measured per-contact dig rates on
+      // isolated workers in EXCAVATION CONTEXTS — tubes, dishes,
+      // partially-built chambers — not on open ground. An ant that
+      // happens to step on flat soil with sky above isn't in a real
+      // dig context, and applying the contact-trigger roll there
+      // produces non-physical "surface scraping" (the colony eats
+      // the ground horizontally instead of tunnelling). Gate the
+      // roll on the ant having ≥2 cardinal SOIL neighbours, i.e.
+      // it's wedged into a tunnel, pocket, or wall corner.
+      let neighbourSoil = 0;
+      const wW = world.width;
+      if (ax > 0 && world.cells[ay * wW + (ax - 1)] === CELL_SOIL) neighbourSoil++;
+      if (ax < wW - 1 && world.cells[ay * wW + (ax + 1)] === CELL_SOIL) neighbourSoil++;
+      if (ay > 0 && world.cells[(ay - 1) * wW + ax] === CELL_SOIL) neighbourSoil++;
+      if (ay < world.height - 1 && world.cells[(ay + 1) * wW + ax] === CELL_SOIL) neighbourSoil++;
+      if (neighbourSoil < 2) {
+        // Not enclosed — skip dig (and the Khuong roll). Grain
+        // pickup is still allowed below; that's a different
+        // behaviour and works fine on open ground.
+      } else {
       // Khuong et al. 2016 topochemistry: ants are MORE LIKELY to
       // dig at a site that's already been "marked" by construction
       // activity in the immediate vicinity. Local build pheromone
@@ -399,6 +427,7 @@ export function step(
             }
           }
         }
+      }
       }
     }
 
