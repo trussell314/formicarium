@@ -224,11 +224,17 @@ export function step(
   const day = daylight(world.tick);
   const forageActivity = species.diurnal ? day : 1 - day;
 
-  // Surface seed rain. Stochastic deposition of food items onto
-  // intact natural-surface rows — the wind/plant-fall/animal-scat
-  // process that a granivore colony's foraging is built around
-  // (Crist & MacMahon 1992 measured wind-driven seed delivery in
-  // arid soils). Skipped entirely for non-granivorous species.
+  // Surface seed rain — two pathways. The legacy uniform-Poisson
+  // path (seedsPerTick) drops a single seed at a random surface
+  // column. The clump path (clumpInterval/Size/Radius, default
+  // pathway for HARVESTER) drops a Gaussian-scattered handful at
+  // one location every interval — visually a "windfall" rather
+  // than a drizzle. Both are skipped entirely for non-granivorous
+  // species.
+  // NB: rng.next() is called unconditionally even when seedsPerTick
+  // is 0. Short-circuiting via `seedsPerTick > 0 &&` would shift
+  // every subsequent rng draw on this tick, silently breaking any
+  // seeded behavioural test that doesn't enable seedsPerTick.
   if (species.granivorous && rng.next() < species.seedsPerTick) {
     for (let attempt = 0; attempt < 10; attempt++) {
       const sx = (rng.next() * world.width) | 0;
@@ -244,6 +250,56 @@ export function step(
         world.food[aboveIdx] = 1;
         world.foodMoves[aboveIdx] = 0;
         break;
+      }
+    }
+  }
+  if (
+    species.granivorous && species.clumpSize > 0 &&
+    species.clumpInterval > 0 && world.tick % species.clumpInterval === 0
+  ) {
+    // Pick a random surface column for the clump centre, then
+    // place clumpSize seeds at Gaussian offsets (1-σ = clumpRadius).
+    // Each seed seeks the topmost AIR cell above the natural surface
+    // in its column — past any mound/grain stacked there — and
+    // settles into it. If nothing's free in that column the seed is
+    // lost (real seeds bouncing off a mound roll away or get buried;
+    // we don't simulate the roll).
+    const cx = (rng.next() * world.width) | 0;
+    for (let k = 0; k < species.clumpSize; k++) {
+      const dx = Math.round(rng.gauss() * species.clumpRadius);
+      const sx = cx + dx;
+      if (sx < 0 || sx >= world.width) continue;
+      const sy = world.naturalSurface[sx]!;
+      if (sy < 1) continue;
+      // Walk upward from natural surface looking for the lowest free
+      // AIR cell. Allows seeds to land on top of grain mounds rather
+      // than disappearing if the surface column is occupied.
+      let placeIdx = -1;
+      for (let py = sy - 1; py >= 0; py--) {
+        const pIdx = py * world.width + sx;
+        const cell = world.cells[pIdx]!;
+        if (cell === CELL_AIR && world.food[pIdx] === 0) {
+          placeIdx = pIdx;
+          break;
+        }
+        if (cell === CELL_SOIL) break;
+      }
+      if (placeIdx >= 0) {
+        world.food[placeIdx] = 1;
+        world.foodMoves[placeIdx] = 0;
+        // Tiny dust puff at the landing cell so a clump arrival is
+        // visible — without this, seeds just blink into existence.
+        if (particles) {
+          const py = (placeIdx / world.width) | 0;
+          const pxx = placeIdx - py * world.width;
+          const a = rng.range(-Math.PI, 0);
+          const sp = rng.range(0.04, 0.10);
+          particles.spawn(
+            pxx + 0.5, py + 0.3,
+            Math.cos(a) * sp, Math.sin(a) * sp - 0.04,
+            22 + ((rng.next() * 14) | 0),
+          );
+        }
       }
     }
   }

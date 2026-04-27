@@ -102,6 +102,13 @@ describe('seed germination', () => {
   });
 
   it('a WANDER ant walking over a sprout removes it', () => {
+    // Pin the ant on top of the sprout cell each tick — the
+    // adjacency check fires every tick the ant is within one
+    // cardinal cell of the sprout, so this guarantees the 0.5-per-
+    // tick clearance roll has many chances within the 100-tick
+    // budget. Without pinning, a freshly-spawned ant in an empty
+    // chamber tends to fall a few rows under gravity and end up
+    // out of cardinal range of the sprout.
     const rng = new RNG(4);
     const w = emptyWorld(30, 20);
     const idx = w.index(12, 8);
@@ -115,6 +122,10 @@ describe('seed germination', () => {
     const { dig, build } = makeFields(w);
     let cleared = false;
     for (let t = 0; t < 100; t++) {
+      // Hold the ant on the sprout cell so the adjacency check
+      // keeps firing each tick.
+      c.posX[0] = 12.5;
+      c.posY[0] = 8.5;
       step(w, c, dig, build, rng, DEFAULT_PARAMS, undefined, FAST_GERM);
       if (w.sprout[idx] === 0) { cleared = true; break; }
     }

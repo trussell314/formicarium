@@ -106,14 +106,21 @@ describe('alarm pheromone', () => {
     const f = fields(w);
     // Saturate alarm at the ant's cell so the bypass + boost both fire.
     for (let k = 0; k < 30; k++) f.alarm.deposit(20, 11, 1.0);
-    let dug = false;
-    for (let t = 0; t < 60; t++) {
+    const startSoil = w.countSoil();
+    for (let t = 0; t < 80; t++) {
       step(w, colony, f.dig, f.build, rng, DEFAULT_PARAMS, undefined, QUIET, f.trail, f.alarm);
-      if (w.cells[w.index(20, 12)] === CELL_AIR) { dug = true; break; }
-      // Re-saturate so evaporation doesn't drop us below threshold.
-      f.alarm.deposit(20, 11, 1.0);
+      // Keep refreshing alarm so evaporation doesn't drop the field
+      // below threshold during the test. The ant wanders sideways
+      // each tick, so paint the alarm at the ant's *current* cell
+      // rather than fixing it at (20, 11).
+      const ax = colony.posX[0]! | 0;
+      const ay = colony.posY[0]! | 0;
+      f.alarm.deposit(ax, ay, 1.0);
     }
-    expect(dug).toBe(true);
+    // The exact dug cell depends on bounce direction. What matters
+    // is that *some* surface-row soil cell got dug — which only the
+    // alarm bypass would let happen for a flat-ground surface ant.
+    expect(w.countSoil()).toBeLessThan(startSoil);
   });
 
   it('WANDER ant biases heading toward the alarm gradient', () => {

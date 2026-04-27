@@ -37,11 +37,27 @@ export interface AntSpecies {
   readonly granivorous: boolean;
   /** Expected number of new surface seeds per tick across the world.
    *  Modelled as a Poisson process — wind/plant fall/animal scat
-   *  deposit seeds onto the natural surface. Crist & MacMahon
-   *  (1992) measured wind-driven seed deposition rates of 0.1–10
-   *  seeds/m²/day in arid grasslands; we pick a value that makes
-   *  the cycle visible at sim speeds without flooding the surface. */
+   *  deposit seeds onto the natural surface. Default 0 for the
+   *  clump-rain model below; species that prefer the older
+   *  uniform-rain feel can set this nonzero. Both pathways can
+   *  fire in the same tick. */
   readonly seedsPerTick: number;
+  /** Ticks between clump-rain events. Each event drops `clumpSize`
+   *  seeds clustered within `clumpRadius` cells of a randomly chosen
+   *  surface column — modelling a plant fruiting at a particular
+   *  location, or a windfall against a slope, rather than a uniform
+   *  drizzle. The default values give ~10× the per-tick foraging
+   *  capacity of the previous uniform rain, so the colony has
+   *  comfortable headroom to grow without seeds being a survival
+   *  pressure. Set very high to disable clump rain. */
+  readonly clumpInterval: number;
+  /** Seeds per clump event. */
+  readonly clumpSize: number;
+  /** 1-σ radius (cells) of the seed scatter around the clump centre.
+   *  Drawn from a Gaussian so most seeds land in a tight pile and
+   *  a few drift outward; this matches the visual "spilled handful"
+   *  look the user asked for, rather than a hard ring. */
+  readonly clumpRadius: number;
 
   // ── Homeostasis / energy ───────────────────────────────────────
 
@@ -282,11 +298,22 @@ export const HARVESTER: AntSpecies = {
 
   // ── Food / diet ───────────────────────────────────────────────
   granivorous: true,
-  // Crist & MacMahon (1992) measured ~1 seed/m²/day in arid grasslands
-  // for windblown deposition; on a 200-cell-wide world (1.2 m), real
-  // rate ≈ 1.2 seeds/day = 1.4e-5 seeds/tick. Compress 100× for
-  // observability without flooding the surface.
-  seedsPerTick: 1.4e-3,
+  // Uniform per-tick seed rain disabled — replaced by the clump
+  // pathway below. Set nonzero on a per-species override to re-enable
+  // the older drizzle behaviour.
+  seedsPerTick: 0,
+  // Capacity check: clumpInterval=1000 × clumpSize=10 = 0.01 seeds/tick.
+  // Over a 720,000-tick biological day that's 7,200 seeds × 0.4 energy
+  // = 2,880 energy/day. Worker metabolism 6.7e-7 × 720k = 0.48
+  // energy/ant/day → supports ~6,000 workers in steady state, well
+  // beyond the maxColonySize=1000 cap. Counts as ~10× the per-ant
+  // foraging headroom of the old uniform-rain values, so seed
+  // availability stops being a survival pressure for any plausible
+  // colony size. The user explicitly asked for "support a 10× population
+  // growth (a setting to tweak later)" — these knobs are the setting.
+  clumpInterval: 1000,
+  clumpSize: 10,
+  clumpRadius: 5,
 
   // ── Homeostasis / energy ──────────────────────────────────────
   maxEnergy: 1.0,
