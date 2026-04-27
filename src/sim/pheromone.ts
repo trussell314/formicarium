@@ -67,6 +67,15 @@ export class Pheromone {
     const f = this.diffuse;
     const f4 = f * 0.25;
     const e = this.evaporate;
+    // Saturation cap. Without an upper bound, fields with steady
+    // deposit > evaporation grow unbounded over long runs (Float32
+    // eventually loses precision; gradient at saturated cells reads
+    // ~0 because all neighbours are equally saturated, so the
+    // sensing radius collapses). 1000 is well above the largest
+    // useful gradient signal — the renderer caps display at ≤4 for
+    // the densest field — so capping here doesn't change visible
+    // behaviour at any concentration the rest of the system reads.
+    const CAP = 1000;
     for (let y = 0; y < h; y++) {
       const row = y * w;
       for (let x = 0; x < w; x++) {
@@ -78,8 +87,10 @@ export class Pheromone {
         if (x < w - 1) sum += src[i + 1]!;
         if (y > 0) sum += src[i - w]!;
         if (y < h - 1) sum += src[i + w]!;
-        const v = ((1 - f) * c + f4 * sum) * e;
-        dst[i] = v < 1e-6 ? 0 : v;
+        let v = ((1 - f) * c + f4 * sum) * e;
+        if (v < 1e-6) v = 0;
+        else if (v > CAP) v = CAP;
+        dst[i] = v;
       }
     }
     this.current = dst;

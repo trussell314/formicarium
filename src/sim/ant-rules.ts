@@ -1032,6 +1032,12 @@ export function step(
         // the loop without overcommitting to any specific dispersal
         // direction.
         colony.heading[i] = rng.range(0, Math.PI * 2);
+        // Update the local stateIn so the rest of the per-ant body
+        // sees STATE_WANDER this tick. Without this, the freshly-
+        // resumed ant gets one tick of "neither REST nor WANDER"
+        // behaviour (no foraging roll, no collision-overload, no
+        // stigmergy bias — only geotaxis and movement run).
+        stateIn = STATE_WANDER;
       } else {
         // Random-walk step. Move-only; no stigmergy bias.
         h += rng.gauss() * colony.turnNoise[i]!;

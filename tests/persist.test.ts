@@ -93,26 +93,55 @@ describe('persist', () => {
     expect(b.world.wearLost).toBe(a.world.wearLost);
     expect(b.world.totalBorn).toBe(a.world.totalBorn);
     expect(b.world.totalDied).toBe(a.world.totalDied);
+    expect(b.world.foodCap).toBe(a.world.foodCap);
+    expect(b.world.clumpAccum).toBe(a.world.clumpAccum);
     expect(b.colony.count).toBe(a.colony.count);
     expect(b.rng.getState()).toBe(a.rng.getState());
 
-    // World arrays
+    // World arrays — every TypedArray field on World.
     expect(bytesEqual(b.world.cells, a.world.cells)).toBe(true);
+    expect(bytesEqual(b.world.naturalSurface, a.world.naturalSurface)).toBe(true);
+    expect(bytesEqual(b.world.mound, a.world.mound)).toBe(true);
+    expect(bytesEqual(b.world.soilNoise, a.world.soilNoise)).toBe(true);
     expect(bytesEqual(b.world.grainMoves, a.world.grainMoves)).toBe(true);
     expect(bytesEqual(b.world.food, a.world.food)).toBe(true);
+    expect(bytesEqual(b.world.foodMoves, a.world.foodMoves)).toBe(true);
     expect(bytesEqual(b.world.corpse, a.world.corpse)).toBe(true);
+    expect(bytesEqual(b.world.sprout, a.world.sprout)).toBe(true);
+    expect(bytesEqual(b.world.sproutTick, a.world.sproutTick)).toBe(true);
     expect(bytesEqual(b.world.digTick, a.world.digTick)).toBe(true);
     expect(bytesEqual(b.world.digsByDir, a.world.digsByDir)).toBe(true);
 
-    // Colony arrays (sample a few; bytesEqual covers the buffers)
+    // Colony arrays — every TypedArray field on Colony.
     expect(bytesEqual(b.colony.posX, a.colony.posX)).toBe(true);
+    expect(bytesEqual(b.colony.posY, a.colony.posY)).toBe(true);
+    expect(bytesEqual(b.colony.prevX, a.colony.prevX)).toBe(true);
+    expect(bytesEqual(b.colony.prevY, a.colony.prevY)).toBe(true);
+    expect(bytesEqual(b.colony.heading, a.colony.heading)).toBe(true);
     expect(bytesEqual(b.colony.state, a.colony.state)).toBe(true);
+    expect(bytesEqual(b.colony.stateTicks, a.colony.stateTicks)).toBe(true);
+    expect(bytesEqual(b.colony.digProb, a.colony.digProb)).toBe(true);
+    expect(bytesEqual(b.colony.pickProb, a.colony.pickProb)).toBe(true);
+    expect(bytesEqual(b.colony.stigmergy, a.colony.stigmergy)).toBe(true);
+    expect(bytesEqual(b.colony.turnNoise, a.colony.turnNoise)).toBe(true);
+    expect(bytesEqual(b.colony.restThreshold, a.colony.restThreshold)).toBe(true);
+    expect(bytesEqual(b.colony.collisionCount, a.colony.collisionCount)).toBe(true);
+    expect(bytesEqual(b.colony.carryMoves, a.colony.carryMoves)).toBe(true);
     expect(bytesEqual(b.colony.energy, a.colony.energy)).toBe(true);
     expect(bytesEqual(b.colony.age, a.colony.age)).toBe(true);
+    expect(bytesEqual(b.colony.stuckTicks, a.colony.stuckTicks)).toBe(true);
 
-    // Pheromone fields
+    // All ten pheromone fields' current buffers.
     expect(bytesEqual(b.dig.current, a.dig.current)).toBe(true);
     expect(bytesEqual(b.build.current, a.build.current)).toBe(true);
+    expect(bytesEqual(b.trail.current, a.trail.current)).toBe(true);
+    expect(bytesEqual(b.alarm.current, a.alarm.current)).toBe(true);
+    expect(bytesEqual(b.queen.current, a.queen.current)).toBe(true);
+    expect(bytesEqual(b.brood.current, a.brood.current)).toBe(true);
+    expect(bytesEqual(b.necro.current, a.necro.current)).toBe(true);
+    expect(bytesEqual(b.noEntry.current, a.noEntry.current)).toBe(true);
+    expect(bytesEqual(b.granary.current, a.granary.current)).toBe(true);
+    expect(bytesEqual(b.trunk.current, a.trunk.current)).toBe(true);
   });
 
   it('continuation from a restored snapshot is bit-identical', () => {
