@@ -373,6 +373,35 @@ export function step(
     }
   }
 
+  // Corpse gravity. Stamped corpses don't move on their own, so a
+  // body dropped on top of a grain mound becomes "floating" the
+  // moment another worker picks up that supporting grain. Cheap
+  // recovery: every 30 ticks (~3.5 sec biological), scan upward —
+  // bottom row first — and shift any corpse marker down one row if
+  // the cell beneath is AIR with no corpse already there. The
+  // bottom-up order means a stack of N orphaned corpses settles in
+  // a single sweep rather than needing N sweeps. The sweep is also
+  // cheap because the corpse field is mostly zero — branch prediction
+  // skips the empty cells.
+  if (world.tick % 30 === 0) {
+    const wW = world.width;
+    const wH = world.height;
+    for (let y = wH - 2; y >= 0; y--) {
+      const row = y * wW;
+      const below = (y + 1) * wW;
+      for (let x = 0; x < wW; x++) {
+        if (world.corpse[row + x]! === 0) continue;
+        if (
+          world.cells[below + x] === CELL_AIR &&
+          world.corpse[below + x]! === 0
+        ) {
+          world.corpse[below + x] = 1;
+          world.corpse[row + x] = 0;
+        }
+      }
+    }
+  }
+
   // walkSpeed, geotaxis, and the deposit amounts stay as colony-wide
   // constants; the per-ant heterogeneity (digProb, pickProb,
   // stigmergy, turnNoise) is sampled at spawn into Colony arrays.
@@ -1103,8 +1132,23 @@ export function step(
       if (
         dxIdx >= 0 && dyIdx >= 0 && dxIdx < world.width && dyIdx < world.height
       ) {
-        const dIdx = dyIdx * world.width + dxIdx;
-        const aboveSurface = dyIdx < world.naturalSurface[dxIdx]!;
+        // Drop position: settle the body downward from the ant's
+        // current cell to the lowest AIR cell with a non-AIR (or
+        // existing-corpse) cell directly beneath. Real bodies don't
+        // hover. Without this, a carrier walking along the top of a
+        // grain mound — or hovering during a single tick before
+        // gravity kicks in at end-of-tick — leaves her cargo at her
+        // body row instead of on the substrate.
+        let landY = dyIdx;
+        while (
+          landY + 1 < world.height &&
+          world.cells[(landY + 1) * world.width + dxIdx] === CELL_AIR &&
+          world.corpse[(landY + 1) * world.width + dxIdx] === 0
+        ) {
+          landY++;
+        }
+        const dIdx = landY * world.width + dxIdx;
+        const aboveSurface = landY < world.naturalSurface[dxIdx]!;
         const groundIsIntact =
           world.cells[world.index(dxIdx, world.naturalSurface[dxIdx]!)] !== CELL_AIR;
         const cellIsAir = world.cells[dIdx] === CELL_AIR;

@@ -152,7 +152,19 @@ describe('necrophoresis', () => {
       step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, NO_NECRO);
     }
     expect(colony.state[0]).toBe(STATE_WANDER);
-    // Corpse is still in place.
-    expect(w.corpse[w.index(cx, 13)]).toBe(1);
+    // Corpse not hauled — it remains in the same column (gravity may
+    // settle it down a row inside the chamber, which is fine; the
+    // test is really "necrophoresis didn't pick it up").
+    let total = 0;
+    let inSameColumn = 0;
+    for (let i = 0; i < w.corpse.length; i++) {
+      if (w.corpse[i]! > 0) {
+        total++;
+        const cx2 = i % w.width;
+        if (cx2 === cx) inSameColumn++;
+      }
+    }
+    expect(total).toBe(1);
+    expect(inSameColumn).toBe(1);
   });
 });
