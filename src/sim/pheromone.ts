@@ -67,6 +67,7 @@ export class Pheromone {
     const f = this.diffuse;
     const f4 = f * 0.25;
     const e = this.evaporate;
+    const m = 1 - f;
     // Saturation cap. Without an upper bound, fields with steady
     // deposit > evaporation grow unbounded over long runs (Float32
     // eventually loses precision; gradient at saturated cells reads
@@ -76,22 +77,49 @@ export class Pheromone {
     // the densest field — so capping here doesn't change visible
     // behaviour at any concentration the rest of the system reads.
     const CAP = 1000;
-    for (let y = 0; y < h; y++) {
-      const row = y * w;
-      for (let x = 0; x < w; x++) {
-        const i = row + x;
-        const c = src[i]!;
-        // Sum of in-grid cardinal neighbours; missing edges = 0.
-        let sum = 0;
-        if (x > 0) sum += src[i - 1]!;
-        if (x < w - 1) sum += src[i + 1]!;
-        if (y > 0) sum += src[i - w]!;
-        if (y < h - 1) sum += src[i + w]!;
-        let v = ((1 - f) * c + f4 * sum) * e;
-        if (v < 1e-6) v = 0;
-        else if (v > CAP) v = CAP;
-        dst[i] = v;
+    // Hot-path interior loop: cells with 1 ≤ x ≤ w-2, 1 ≤ y ≤ h-2
+    // have all four cardinal neighbours in bounds, so we skip the
+    // four `if (x > 0)…` branches per cell. That's the (w-2)×(h-2)
+    // case which is ~98% of the field at default sizes. Edges
+    // handled below by separate boundary loops.
+    if (w >= 2 && h >= 2) {
+      const wm1 = w - 1;
+      const hm1 = h - 1;
+      for (let y = 1; y < hm1; y++) {
+        const rowStart = y * w + 1;
+        const rowEnd = y * w + wm1;
+        for (let i = rowStart; i < rowEnd; i++) {
+          const sum = src[i - 1]! + src[i + 1]! + src[i - w]! + src[i + w]!;
+          let v = m * src[i]! + f4 * sum;
+          v *= e;
+          if (v < 1e-6) v = 0;
+          else if (v > CAP) v = CAP;
+          dst[i] = v;
+        }
       }
+    }
+    // Edge rows (y=0 and y=h-1) and edge columns (x=0 and x=w-1).
+    // Use the original guarded form. Total work: 2*(w + h - 2).
+    const stepBoundaryCell = (x: number, y: number): void => {
+      const i = y * w + x;
+      const c = src[i]!;
+      let sum = 0;
+      if (x > 0) sum += src[i - 1]!;
+      if (x < w - 1) sum += src[i + 1]!;
+      if (y > 0) sum += src[i - w]!;
+      if (y < h - 1) sum += src[i + w]!;
+      let v = ((1 - f) * c + f4 * sum) * e;
+      if (v < 1e-6) v = 0;
+      else if (v > CAP) v = CAP;
+      dst[i] = v;
+    };
+    if (h > 0) {
+      for (let x = 0; x < w; x++) stepBoundaryCell(x, 0);
+      if (h > 1) for (let x = 0; x < w; x++) stepBoundaryCell(x, h - 1);
+    }
+    if (w > 0) {
+      for (let y = 1; y < h - 1; y++) stepBoundaryCell(0, y);
+      if (w > 1) for (let y = 1; y < h - 1; y++) stepBoundaryCell(w - 1, y);
     }
     this.current = dst;
     this.scratch = src;
