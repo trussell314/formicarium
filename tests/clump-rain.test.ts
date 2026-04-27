@@ -1,14 +1,18 @@
-// Clump seed-rain tests. Replaces the old uniform-per-tick rain
-// with periodic clusters (Gaussian-scattered). Verify:
-//   1. A clump fires exactly when world.tick % clumpInterval === 0
-//      and adds ~clumpSize seeds (some may be lost off the world
-//      edge or onto occupied columns).
-//   2. Seeds cluster around the centre column rather than being
-//      uniformly distributed across the world.
-//   3. Total seeds-per-day capacity is at least ~10× the colony's
-//      metabolic demand at maxColonySize, satisfying the user's
-//      "10× population growth" headroom requirement.
-//   4. Non-granivorous species don't drop clumps.
+// Population-driven clump rain. Each tick drops 110% of the live
+// colony's metabolic demand (in seed-equivalent units), capped at
+// 10× the original-population's worker metabolism. The rate is
+// realised through an accumulator that fires one clump every time
+// it crosses species.clumpSize.
+//
+// Verify:
+//   1. Rate scales with population — a many-ant colony gets clearly
+//      more food per unit time than a few-ant colony at the same
+//      foodCap.
+//   2. The cap kicks in at high pop — colonies far above foodCap
+//      receive the SAME food rate as colonies at foodCap.
+//   3. Non-granivorous species don't drop clumps.
+//   4. foodCap = 0 disables the rain (defensive default before
+//      main.ts initialises it).
 
 import { describe, expect, it } from 'vitest';
 import { Colony } from '../src/sim/colony';
@@ -18,15 +22,22 @@ import { RNG } from '../src/sim/rng';
 import { type AntSpecies, HARVESTER } from '../src/sim/species';
 import { CELL_AIR, CELL_SOIL, World } from '../src/sim/world';
 
-function flatWorld(w = 200, h = 60, surf = 20): World {
+function flatWorld(w = 80, h = 40, surf = 12): World {
   const world = new World(w, h);
   for (let x = 0; x < w; x++) world.naturalSurface[x] = surf;
   for (let y = surf; y < h; y++) {
     for (let x = 0; x < w; x++) world.cells[world.index(x, y)] = CELL_SOIL;
   }
-  // ensure above-surface is AIR
   for (let y = 0; y < surf; y++) {
     for (let x = 0; x < w; x++) world.cells[world.index(x, y)] = CELL_AIR;
+  }
+  // Carve a small chamber for the spectator workers so they have AIR
+  // cells to live in (otherwise they're embedded in soil and the
+  // collision/movement passes get confused).
+  for (let y = surf; y < surf + 5; y++) {
+    for (let x = w / 2 - 5; x < w / 2 + 5; x++) {
+      world.cells[world.index(x | 0, y)] = CELL_AIR;
+    }
   }
   world.initialSoilCells = world.countSoil();
   return world;
@@ -39,84 +50,117 @@ function fields(w: World) {
   };
 }
 
-describe('clump seed rain', () => {
-  it('drops a clump at clumpInterval ticks and adds ~clumpSize seeds', () => {
-    const rng = new RNG(1);
-    const w = flatWorld();
-    const colony = new Colony(0);
-    const f = fields(w);
-    const fast: AntSpecies = {
-      ...HARVESTER,
-      seedsPerTick: 0,
-      clumpInterval: 10,
-      clumpSize: 12,
-      clumpRadius: 4,
-    };
-    // Run exactly clumpInterval ticks → one clump fires on tick 10.
-    let countAfter = 0;
-    for (let t = 0; t < 10; t++) {
-      step(w, colony, f.dig, f.build, rng, DEFAULT_PARAMS, undefined, fast);
-    }
-    for (let i = 0; i < w.food.length; i++) if (w.food[i]! > 0) countAfter++;
-    // Most seeds should land; allow some loss to off-world tails of
-    // the Gaussian and column collisions.
-    expect(countAfter).toBeGreaterThan(fast.clumpSize * 0.5);
-    expect(countAfter).toBeLessThanOrEqual(fast.clumpSize);
-  });
+const SPECTATOR_TRAITS = {
+  digProb: 0,
+  pickProb: 0,
+  stigmergy: 0,
+  turnNoise: 0,
+  restThreshold: 1e9,
+};
 
-  it('seeds cluster around the centre column (not uniform)', () => {
-    // Run several clumps, then check the standard deviation of seed
-    // x-positions per clump is ≤ ~3× clumpRadius. (A uniform rain
-    // over a 200-wide world would have std-dev ~58, much higher.)
-    const rng = new RNG(2);
-    const w = flatWorld();
-    const colony = new Colony(0);
-    const f = fields(w);
-    const fast: AntSpecies = {
-      ...HARVESTER, seedsPerTick: 0,
-      clumpInterval: 1, clumpSize: 1, clumpRadius: 5,
-    };
-    // Disable per-tick rain for a clean measurement; clumpSize=1
-    // would normally reduce variability inside a clump, so we run
-    // many clumps and look at the average within-clump spread.
-    // Easier: use clumpSize=20, run one clump, measure spread.
-    const single: AntSpecies = { ...fast, clumpInterval: 50, clumpSize: 20, clumpRadius: 5 };
-    for (let t = 0; t < 50; t++) step(w, colony, f.dig, f.build, rng, DEFAULT_PARAMS, undefined, single);
-    const xs: number[] = [];
-    for (let i = 0; i < w.food.length; i++) {
-      if (w.food[i]! > 0) {
-        xs.push(i % w.width);
+// Inject N spectator workers into the small chamber. Spawn-arity is
+// (x, y, heading, rng, traits). They keep their default WANDER state
+// but the high restThreshold + zero traits keep them mostly still.
+function seedWorkers(c: Colony, n: number, w: World): void {
+  const rng = new RNG(99);
+  const cx = w.width >> 1;
+  const cy = w.naturalSurface[cx]! + 1;
+  for (let k = 0; k < n; k++) {
+    const idx = c.spawn(cx + 0.5, cy + 0.5, 0, rng, SPECTATOR_TRAITS);
+    if (idx < 0) throw new Error(`colony capacity hit at k=${k}`);
+  }
+}
+
+function countFood(w: World): number {
+  let n = 0;
+  for (let i = 0; i < w.food.length; i++) if (w.food[i]! > 0) n++;
+  return n;
+}
+
+// Test species with small clumpSize so the accumulator fires
+// quickly and we don't need millions of ticks to see effects.
+const FAST: AntSpecies = {
+  ...HARVESTER,
+  clumpSize: 1,        // one seed per "clump"
+  clumpRadius: 1,
+  seedsPerTick: 0,
+  // Disable everything that would consume food or change population.
+  forageProb: 0,
+  metabolism: 1e-3,    // bigger metabolism so accumulator fills fast
+  larvaMetabolism: 0,
+  necrophoresisProb: 0,
+  sproutProb: 0,
+  eggLayInterval: 1e9,
+  workerLifespan: 1e9,
+};
+
+describe('population-driven clump rain', () => {
+  it('rate scales with population', () => {
+    function run(workers: number): number {
+      const rng = new RNG(1);
+      const w = flatWorld();
+      w.foodCap = 1_000_000; // effectively no cap
+      const colony = new Colony(workers + 4);
+      seedWorkers(colony, workers, w);
+      const f = fields(w);
+      for (let t = 0; t < 5_000; t++) {
+        step(w, colony, f.dig, f.build, rng, DEFAULT_PARAMS, undefined, FAST);
       }
+      return countFood(w);
     }
-    expect(xs.length).toBeGreaterThan(5);
-    const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
-    const variance = xs.reduce((a, b) => a + (b - mean) ** 2, 0) / xs.length;
-    const stddev = Math.sqrt(variance);
-    // Within ~3σ of the configured clumpRadius.
-    expect(stddev).toBeLessThan(single.clumpRadius * 3);
+    const small = run(2);
+    const big = run(20);
+    expect(big).toBeGreaterThan(small * 3);
   });
 
-  it('default HARVESTER capacity covers ~10× max-colony metabolic demand', () => {
-    // Pure parameter check — no simulation needed.
-    const seedsPerDay = 720_000 / HARVESTER.clumpInterval * HARVESTER.clumpSize;
-    const energyPerDay = seedsPerDay * HARVESTER.foodValue;
-    const metabolismPerDay = HARVESTER.metabolism * 720_000;
-    const fullColonyDemand = HARVESTER.maxColonySize * metabolismPerDay;
-    // ≥ 10× the maxColonySize's daily metabolism.
-    expect(energyPerDay).toBeGreaterThan(fullColonyDemand * 5);
+  it('cap saturates at world.foodCap workers', () => {
+    function run(workers: number, foodCap: number): number {
+      const rng = new RNG(2);
+      const w = flatWorld();
+      w.foodCap = foodCap;
+      const colony = new Colony(workers + 4);
+      seedWorkers(colony, workers, w);
+      const f = fields(w);
+      for (let t = 0; t < 5_000; t++) {
+        step(w, colony, f.dig, f.build, rng, DEFAULT_PARAMS, undefined, FAST);
+      }
+      return countFood(w);
+    }
+    const atCap = run(10, 10);
+    const overCap = run(40, 10);
+    // Both colonies are at or above foodCap; the cap dominates the
+    // rate so the food count should be the same up to RNG-driven
+    // surface-collision losses (each clump might spawn into an
+    // already-occupied column and lose a seed).
+    const ratio = overCap / Math.max(1, atCap);
+    expect(ratio).toBeGreaterThan(0.7);
+    expect(ratio).toBeLessThan(1.3);
   });
 
-  it('non-granivorous species don\'t drop clumps', () => {
-    const rng = new RNG(4);
+  it('non-granivorous species do not drop clumps', () => {
+    const rng = new RNG(3);
     const w = flatWorld();
-    const colony = new Colony(0);
+    w.foodCap = 100;
+    const colony = new Colony(10);
+    seedWorkers(colony, 5, w);
     const f = fields(w);
-    const carnivore: AntSpecies = { ...HARVESTER, granivorous: false };
-    for (let t = 0; t < 50_000; t++) {
+    const carnivore: AntSpecies = { ...FAST, granivorous: false };
+    for (let t = 0; t < 5_000; t++) {
       step(w, colony, f.dig, f.build, rng, DEFAULT_PARAMS, undefined, carnivore);
     }
-    let count = 0;
-    for (let i = 0; i < w.food.length; i++) if (w.food[i]! > 0) count++;
-    expect(count).toBe(0);
+    expect(countFood(w)).toBe(0);
+  });
+
+  it('foodCap = 0 disables the rain', () => {
+    const rng = new RNG(4);
+    const w = flatWorld();
+    // foodCap left at 0 (the World constructor default)
+    const colony = new Colony(10);
+    seedWorkers(colony, 5, w);
+    const f = fields(w);
+    for (let t = 0; t < 5_000; t++) {
+      step(w, colony, f.dig, f.build, rng, DEFAULT_PARAMS, undefined, FAST);
+    }
+    expect(countFood(w)).toBe(0);
   });
 });

@@ -106,6 +106,20 @@ export class World {
    *  digs than lateral digs, or whether some unrelated bottleneck
    *  is keeping the architecture horizontal. Order: [N, S, E, W]. */
   readonly digsByDir = new Int32Array(4);
+  /** Hard cap on the population-driven seed-clump rate, expressed
+   *  as a count of equivalent worker ants. Each tick the colony's
+   *  metabolic demand is computed live; the food rate is set to
+   *  deliver 1.10× that demand, but no higher than `foodCap`
+   *  workers' worth of demand. Initialised in main.ts to 10× the
+   *  starting population. The user-facing knob is the original
+   *  population (?ants= URL param). */
+  foodCap = 0;
+  /** Running fractional-seed accumulator for the clump rain. Each
+   *  tick adds the dynamic target rate; whenever the total exceeds
+   *  the clump size, a clump fires and the accumulator is debited
+   *  by clumpSize. Persisted across saves so a tab refresh doesn't
+   *  reset the food schedule. */
+  clumpAccum = 0;
   tick = 0;
 
   constructor(width: number, height: number) {

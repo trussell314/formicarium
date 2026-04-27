@@ -59,6 +59,13 @@ function readSettings(): Settings {
 function build(s: Settings) {
   const rng = new RNG(s.seed);
   const world = new World(s.width, s.height);
+  // Food-rate cap. The clump rain inside step() computes a target
+  // rate every tick from live colony metabolic demand × 1.10, and
+  // saturates that rate at `foodCap` workers' worth of demand.
+  // 10× the starting-ant URL parameter gives the colony substantial
+  // growth headroom while preventing runaway food drops at maxed-out
+  // colony sizes.
+  world.foodCap = s.ants * 10;
   const surfaceRow = Math.floor(s.height * 0.30);
   const halfW = Math.max(6, Math.floor(s.width * 0.06));
   const depth = Math.max(4, Math.floor(s.height * 0.05));

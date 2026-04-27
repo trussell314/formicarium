@@ -253,52 +253,80 @@ export function step(
       }
     }
   }
-  if (
-    species.granivorous && species.clumpSize > 0 &&
-    species.clumpInterval > 0 && world.tick % species.clumpInterval === 0
-  ) {
-    // Pick a random surface column for the clump centre, then
-    // place clumpSize seeds at Gaussian offsets (1-σ = clumpRadius).
-    // Each seed seeks the topmost AIR cell above the natural surface
-    // in its column — past any mound/grain stacked there — and
-    // settles into it. If nothing's free in that column the seed is
-    // lost (real seeds bouncing off a mound roll away or get buried;
-    // we don't simulate the roll).
-    const cx = (rng.next() * world.width) | 0;
-    for (let k = 0; k < species.clumpSize; k++) {
-      const dx = Math.round(rng.gauss() * species.clumpRadius);
-      const sx = cx + dx;
-      if (sx < 0 || sx >= world.width) continue;
-      const sy = world.naturalSurface[sx]!;
-      if (sy < 1) continue;
-      // Walk upward from natural surface looking for the lowest free
-      // AIR cell. Allows seeds to land on top of grain mounds rather
-      // than disappearing if the surface column is occupied.
-      let placeIdx = -1;
-      for (let py = sy - 1; py >= 0; py--) {
-        const pIdx = py * world.width + sx;
-        const cell = world.cells[pIdx]!;
-        if (cell === CELL_AIR && world.food[pIdx] === 0) {
-          placeIdx = pIdx;
-          break;
-        }
-        if (cell === CELL_SOIL) break;
+  if (species.granivorous && species.clumpSize > 0 && world.foodCap > 0) {
+    // Population-driven food rate. Each tick we add to a fractional
+    // seed accumulator at a rate equal to 110% of the colony's
+    // current metabolic demand (in seed-equivalent units), capped at
+    // 10× the original-population's worker demand (world.foodCap is
+    // the cap expressed in equivalent worker count). Whenever the
+    // accumulator crosses the clumpSize threshold a clump fires.
+    //
+    // The cap prevents the food rate from running away as the colony
+    // grows toward maxColonySize; with the cap, a fully-populated
+    // (1000-ant) colony still receives the same drop rate as a
+    // 10×-original-pop "saturated" colony rather than scaling
+    // unboundedly. Outside the cap, smaller colonies get
+    // proportionally less so 10 starter ants don't see a windfall
+    // they can't possibly process.
+    let demand = 0;
+    for (let i = 0; i < colony.count; i++) {
+      const s = colony.state[i];
+      if (s === STATE_DEAD || s === STATE_EGG) continue;
+      if (s === STATE_LARVA) {
+        demand += species.larvaMetabolism;
+      } else if (s === STATE_QUEEN) {
+        demand += species.metabolism * 0.5;
+      } else {
+        demand += species.metabolism;
       }
-      if (placeIdx >= 0) {
-        world.food[placeIdx] = 1;
-        world.foodMoves[placeIdx] = 0;
-        // Tiny dust puff at the landing cell so a clump arrival is
-        // visible — without this, seeds just blink into existence.
-        if (particles) {
-          const py = (placeIdx / world.width) | 0;
-          const pxx = placeIdx - py * world.width;
-          const a = rng.range(-Math.PI, 0);
-          const sp = rng.range(0.04, 0.10);
-          particles.spawn(
-            pxx + 0.5, py + 0.3,
-            Math.cos(a) * sp, Math.sin(a) * sp - 0.04,
-            22 + ((rng.next() * 14) | 0),
-          );
+    }
+    const capDemand = world.foodCap * species.metabolism;
+    const targetEnergyPerTick = Math.min(demand * 1.10, capDemand);
+    const targetSeedsPerTick = targetEnergyPerTick / species.foodValue;
+    world.clumpAccum += targetSeedsPerTick;
+    // Fire as many clumps as the accumulator can pay for. Typically
+    // 0 clumps per tick (rate << clumpSize/tick); occasionally 1; at
+    // saturation this loop might fire 2-3 in a busy tick.
+    while (world.clumpAccum >= species.clumpSize) {
+      world.clumpAccum -= species.clumpSize;
+      // Pick a random surface column for the clump centre, then
+      // place clumpSize seeds at Gaussian offsets (1-σ = clumpRadius).
+      // Each seed seeks the topmost AIR cell above the natural surface
+      // in its column — past any mound/grain stacked there — and
+      // settles into it. If nothing's free in that column the seed is
+      // lost (real seeds bouncing off a mound roll away or get buried;
+      // we don't simulate the roll).
+      const cx = (rng.next() * world.width) | 0;
+      for (let k = 0; k < species.clumpSize; k++) {
+        const dx = Math.round(rng.gauss() * species.clumpRadius);
+        const sx = cx + dx;
+        if (sx < 0 || sx >= world.width) continue;
+        const sy = world.naturalSurface[sx]!;
+        if (sy < 1) continue;
+        let placeIdx = -1;
+        for (let py = sy - 1; py >= 0; py--) {
+          const pIdx = py * world.width + sx;
+          const cell = world.cells[pIdx]!;
+          if (cell === CELL_AIR && world.food[pIdx] === 0) {
+            placeIdx = pIdx;
+            break;
+          }
+          if (cell === CELL_SOIL) break;
+        }
+        if (placeIdx >= 0) {
+          world.food[placeIdx] = 1;
+          world.foodMoves[placeIdx] = 0;
+          if (particles) {
+            const py = (placeIdx / world.width) | 0;
+            const pxx = placeIdx - py * world.width;
+            const a = rng.range(-Math.PI, 0);
+            const sp = rng.range(0.04, 0.10);
+            particles.spawn(
+              pxx + 0.5, py + 0.3,
+              Math.cos(a) * sp, Math.sin(a) * sp - 0.04,
+              22 + ((rng.next() * 14) | 0),
+            );
+          }
         }
       }
     }

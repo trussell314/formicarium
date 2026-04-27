@@ -42,14 +42,11 @@ export interface AntSpecies {
    *  uniform-rain feel can set this nonzero. Both pathways can
    *  fire in the same tick. */
   readonly seedsPerTick: number;
-  /** Ticks between clump-rain events. Each event drops `clumpSize`
-   *  seeds clustered within `clumpRadius` cells of a randomly chosen
-   *  surface column — modelling a plant fruiting at a particular
-   *  location, or a windfall against a slope, rather than a uniform
-   *  drizzle. The default values give ~10× the per-tick foraging
-   *  capacity of the previous uniform rain, so the colony has
-   *  comfortable headroom to grow without seeds being a survival
-   *  pressure. Set very high to disable clump rain. */
+  /** Legacy field retained so existing species literals still type-
+   *  check; the population-driven clump scheduler in step() ignores
+   *  it. The actual rate is computed from current colony demand
+   *  (×1.10) capped at world.foodCap × species.metabolism, with the
+   *  accumulator firing one clump per `clumpSize` accumulated seeds. */
   readonly clumpInterval: number;
   /** Seeds per clump event. */
   readonly clumpSize: number;

@@ -23,8 +23,9 @@ const SAVE_KEY = 'formicarium:save';
 // Bump on schema change so old saves are silently discarded rather
 // than restored into mismatched buffer layouts. v2 added sprout +
 // sproutTick; v3 added the foraging trail pheromone; v4 added the
-// alarm pheromone.
-const SAVE_VERSION = 4;
+// alarm pheromone; v5 added the population-driven food rate
+// (foodCap, clumpAccum).
+const SAVE_VERSION = 5;
 
 // Chunked btoa to avoid argument-list length limits on very large arrays.
 function bytesToB64(view: ArrayBufferView): string {
@@ -44,8 +45,10 @@ function b64ToBytes(s: string): Uint8Array {
   return out;
 }
 
-interface SaveStateV4 {
-  v: 4;
+interface SaveStateV5 {
+  v: 5;
+  foodCap: number;
+  clumpAccum: number;
   // Settings — needed to validate that a save matches the requested run.
   seed: number;
   width: number;
@@ -115,7 +118,7 @@ export function captureSnapshot(
   digField: Pheromone, buildField: Pheromone, trailField: Pheromone,
   alarmField: Pheromone, rng: RNG, settings: SaveSettings,
 ): string | null {
-  const state: SaveStateV4 = {
+  const state: SaveStateV5 = {
     v: SAVE_VERSION,
     seed: settings.seed,
     width: settings.width,
@@ -127,6 +130,8 @@ export function captureSnapshot(
     wearLost: world.wearLost,
     totalBorn: world.totalBorn,
     totalDied: world.totalDied,
+    foodCap: world.foodCap,
+    clumpAccum: world.clumpAccum,
     digsByDir: Array.from(world.digsByDir),
     cells: bytesToB64(world.cells),
     naturalSurface: bytesToB64(world.naturalSurface),
@@ -217,7 +222,7 @@ export function restoreSnapshot(
 ): boolean {
   let raw: unknown;
   try { raw = JSON.parse(blob); } catch { return false; }
-  const s = raw as Partial<SaveStateV4>;
+  const s = raw as Partial<SaveStateV5>;
   if (
     !s ||
     s.v !== SAVE_VERSION ||
@@ -241,6 +246,8 @@ export function restoreSnapshot(
     world.wearLost = s.wearLost!;
     world.totalBorn = s.totalBorn!;
     world.totalDied = s.totalDied!;
+    world.foodCap = s.foodCap!;
+    world.clumpAccum = s.clumpAccum!;
     for (let i = 0; i < 4; i++) world.digsByDir[i] = s.digsByDir![i]!;
     copyBytes(s.cells!, world.cells);
     copyBytes(s.naturalSurface!, world.naturalSurface);
