@@ -163,7 +163,11 @@ export class Renderer {
 
   render(
     colony: Colony, alpha: number, particles?: ParticleSystem,
-    pheromones?: { dig: { current: Float32Array }; build: { current: Float32Array } },
+    pheromones?: {
+      dig: { current: Float32Array };
+      build: { current: Float32Array };
+      trail?: { current: Float32Array };
+    },
     daylight = 1,
   ): void {
     const w = this.world.width;
@@ -286,25 +290,34 @@ export class Renderer {
     if (this.showPheromones && pheromones) {
       const dig = pheromones.dig.current;
       const build = pheromones.build.current;
+      const trail = pheromones.trail?.current;
       const CAP = 0.5;
       for (let i = 0; i < dig.length; i++) {
         const dv = Math.min(1, dig[i]! / CAP);
         const bv = Math.min(1, build[i]! / CAP);
-        if (dv < 0.01 && bv < 0.01) continue;
+        const tv = trail ? Math.min(1, trail[i]! / CAP) : 0;
+        if (dv < 0.01 && bv < 0.01 && tv < 0.01) continue;
         const o = i * 4;
-        // Cyan = dig (boost B+G, dim R). Magenta = build (boost R+B, dim G).
+        // Cyan = dig, magenta = build, yellow = foraging trail.
+        // Yellow is a third primary that doesn't conflict with the
+        // brown/green terrain palette OR the existing two pheromone
+        // colors, so a trail leading to a green seed reads as a
+        // distinct visual layer.
         const ar = data[o]!;
         const ag = data[o + 1]!;
         const ab = data[o + 2]!;
         const aDig = dv * 0.55;
         const aBuild = bv * 0.55;
-        // Compose dig over base, then build over that.
+        const aTrail = tv * 0.65;  // slightly more opaque so trails pop on the sky
         let nr = ar * (1 - aDig) + 0  * aDig;
         let ng = ag * (1 - aDig) + 220 * aDig;
         let nb = ab * (1 - aDig) + 220 * aDig;
         nr = nr * (1 - aBuild) + 220 * aBuild;
         ng = ng * (1 - aBuild) + 0   * aBuild;
         nb = nb * (1 - aBuild) + 220 * aBuild;
+        nr = nr * (1 - aTrail) + 240 * aTrail;
+        ng = ng * (1 - aTrail) + 220 * aTrail;
+        nb = nb * (1 - aTrail) + 60  * aTrail;
         data[o]     = nr | 0;
         data[o + 1] = ng | 0;
         data[o + 2] = nb | 0;

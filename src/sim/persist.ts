@@ -22,8 +22,8 @@ import { World } from './world';
 const SAVE_KEY = 'formicarium:save';
 // Bump on schema change so old saves are silently discarded rather
 // than restored into mismatched buffer layouts. v2 added sprout +
-// sproutTick fields.
-const SAVE_VERSION = 2;
+// sproutTick fields; v3 added the foraging trail pheromone.
+const SAVE_VERSION = 3;
 
 // Chunked btoa to avoid argument-list length limits on very large arrays.
 function bytesToB64(view: ArrayBufferView): string {
@@ -43,8 +43,8 @@ function b64ToBytes(s: string): Uint8Array {
   return out;
 }
 
-interface SaveStateV2 {
-  v: 2;
+interface SaveStateV3 {
+  v: 3;
   // Settings — needed to validate that a save matches the requested run.
   seed: number;
   width: number;
@@ -93,6 +93,7 @@ interface SaveStateV2 {
   // Pheromone fields — only `current` is stored (scratch is rebuilt fresh).
   digCurrent: string;
   buildCurrent: string;
+  trailCurrent: string;
 }
 
 export interface SaveSettings {
@@ -109,10 +110,10 @@ export interface SaveSettings {
  */
 export function captureSnapshot(
   world: World, colony: Colony,
-  digField: Pheromone, buildField: Pheromone, rng: RNG,
-  settings: SaveSettings,
+  digField: Pheromone, buildField: Pheromone, trailField: Pheromone,
+  rng: RNG, settings: SaveSettings,
 ): string | null {
-  const state: SaveStateV2 = {
+  const state: SaveStateV3 = {
     v: SAVE_VERSION,
     seed: settings.seed,
     width: settings.width,
@@ -155,6 +156,7 @@ export function captureSnapshot(
     age: bytesToB64(colony.age),
     digCurrent: bytesToB64(digField.current),
     buildCurrent: bytesToB64(buildField.current),
+    trailCurrent: bytesToB64(trailField.current),
   };
   return JSON.stringify(state);
 }
@@ -207,11 +209,12 @@ export function readSavedBlob(): string | null {
 export function restoreSnapshot(
   blob: string, settings: SaveSettings,
   world: World, colony: Colony,
-  digField: Pheromone, buildField: Pheromone, rng: RNG,
+  digField: Pheromone, buildField: Pheromone, trailField: Pheromone,
+  rng: RNG,
 ): boolean {
   let raw: unknown;
   try { raw = JSON.parse(blob); } catch { return false; }
-  const s = raw as Partial<SaveStateV2>;
+  const s = raw as Partial<SaveStateV3>;
   if (
     !s ||
     s.v !== SAVE_VERSION ||
@@ -266,6 +269,7 @@ export function restoreSnapshot(
     copyBytes(s.age!, colony.age);
     copyBytes(s.digCurrent!, digField.current);
     copyBytes(s.buildCurrent!, buildField.current);
+    copyBytes(s.trailCurrent!, trailField.current);
   } catch {
     return false;
   }

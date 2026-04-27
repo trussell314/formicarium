@@ -88,6 +88,14 @@ function build(s: Settings) {
   //                 0.40 (cell-scaled).
   const digField = new Pheromone(world.width, world.height, 0.24, 0.9999);
   const buildField = new Pheromone(world.width, world.height, 0.40, 0.99995);
+  // Foraging recruitment trail (Bonabeau et al. 1998). Lives entirely
+  // above the natural surface; CARRY_FOOD ants returning from a
+  // patch lay a fading breadcrumb chain that other FORAGE ants
+  // bias their heading along. Half-life ~700 ticks (~84 sec
+  // biological — matches Pheidole / Solenopsis trail volatility,
+  // shorter than the dig pheromone so a stale trail doesn't keep
+  // pulling foragers to a long-empty patch).
+  const trailField = new Pheromone(world.width, world.height, 0.40, 0.999);
 
   // Capacity = species cap, so brood production has slots to fill.
   const colony = new Colony(HARVESTER.maxColonySize);
@@ -194,19 +202,19 @@ function build(s: Settings) {
     const ok = restoreSnapshot(
       saved,
       { seed: s.seed, width: s.width, height: s.height },
-      world, colony, digField, buildField, rng,
+      world, colony, digField, buildField, trailField, rng,
     );
     if (ok) {
       // eslint-disable-next-line no-console
       console.log(`[formicarium] restored from save at tick ${world.tick.toLocaleString()}`);
     }
   }
-  return { rng, world, colony, digField, buildField };
+  return { rng, world, colony, digField, buildField, trailField };
 }
 
 function main(): void {
   const settings = readSettings();
-  let { rng, world, colony, digField, buildField } = build(settings);
+  let { rng, world, colony, digField, buildField, trailField } = build(settings);
 
   const canvas = document.getElementById('screen') as HTMLCanvasElement;
   const hud = document.getElementById('hud') as HTMLDivElement;
@@ -360,6 +368,7 @@ function main(): void {
       colony = built.colony;
       digField = built.digField;
       buildField = built.buildField;
+      trailField = built.trailField;
       renderer.setWorld(world);
     },
   };
@@ -397,7 +406,7 @@ function main(): void {
   const AUTO_SAVE_MS = 30_000;
   const autoSaveTimer = window.setInterval(() => {
     const blob = captureSnapshot(
-      world, colony, digField, buildField, rng,
+      world, colony, digField, buildField, trailField, rng,
       { seed: settings.seed, width: settings.width, height: settings.height },
     );
     if (blob !== null) saveToLocalStorage(blob);
@@ -408,7 +417,7 @@ function main(): void {
   // beforeunload is a belt-and-braces extra hook.
   const flushSnapshot = () => {
     const blob = captureSnapshot(
-      world, colony, digField, buildField, rng,
+      world, colony, digField, buildField, trailField, rng,
       { seed: settings.seed, width: settings.width, height: settings.height },
     );
     if (blob !== null) saveToLocalStorage(blob);
@@ -429,7 +438,7 @@ function main(): void {
 
     if (!paused) {
       for (let i = 0; i < stepsPerFrame; i++) {
-        step(world, colony, digField, buildField, rng, DEFAULT_PARAMS, particles, HARVESTER);
+        step(world, colony, digField, buildField, rng, DEFAULT_PARAMS, particles, HARVESTER, trailField);
       }
       // No fixed-timestep accumulator yet — render alpha=1 (no
       // interpolation) is fine while sub-stepping multiple sim ticks
@@ -438,7 +447,7 @@ function main(): void {
     }
 
     const day = daylight(world.tick);
-    renderer.render(colony, alpha, particles, { dig: digField, build: buildField }, day);
+    renderer.render(colony, alpha, particles, { dig: digField, build: buildField, trail: trailField }, day);
 
     if (now - lastHud > 250) {
       lastHud = now;

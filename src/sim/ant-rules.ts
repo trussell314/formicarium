@@ -211,6 +211,7 @@ export function step(
   params: SimParams = DEFAULT_PARAMS,
   particles?: ParticleSystem,
   species: AntSpecies = HARVESTER,
+  trailField?: Pheromone,
 ): void {
   world.tick++;
 
@@ -250,6 +251,7 @@ export function step(
   // dust particle ringbuffer ages and gravity-falls one tick.
   digField.step();
   buildField.step();
+  if (trailField) trailField.step();
   if (particles) particles.step();
 
   // Seed germination + sprout decay sweep. Tschinkel (1999): some
@@ -730,9 +732,25 @@ export function step(
       } else {
         h += rng.gauss() * colony.turnNoise[i]!;
         // Below natural surface: hard upward bias toward exit. Above
-        // surface: pure random walk on the open ground.
+        // surface: pure random walk on the open ground, OR — if a
+        // foraging trail pheromone gradient is available — bias up
+        // the trail toward whatever food source the returning carrier
+        // marked. Bonabeau et al. 1998: foragers follow the recruit
+        // pheromone gradient laid by successful returners; the
+        // result is the visible "ant column" converging on a food
+        // patch. We multiply the bias by min(1, trail/0.05) so the
+        // ant only commits to a trail with measurable concentration.
         if (iy >= world.naturalSurface[ix]!) {
           h += wrapAngle(-Math.PI / 2 - h) * geotaxis;
+        } else if (trailField) {
+          const grad = trailField.gradient(ix, iy);
+          const gMag = Math.hypot(grad.dx, grad.dy);
+          if (gMag > 1e-5) {
+            const want = Math.atan2(grad.dy, grad.dx);
+            const local = trailField.sample(ix, iy);
+            const strength = Math.min(1, local / 0.05) * colony.stigmergy[i]!;
+            h += wrapAngle(want - h) * strength;
+          }
         }
         h = wrapAngle(h);
         colony.heading[i] = h;
@@ -767,6 +785,15 @@ export function step(
         }
         if (fIdx >= 0) {
           colony.carryMoves[i] = world.foodMoves[fIdx]!;
+          // Strong trail anchor at the pickup site. Bonabeau et al.
+          // 1998: the source location gets a heavier deposit than
+          // the path, so the gradient sharpens at the food rather
+          // than smearing along the trail. 1.0 vs 0.10 per-step.
+          if (trailField) {
+            const fy = (fIdx / world.width) | 0;
+            const fxx = fIdx - fy * world.width;
+            trailField.deposit(fxx, fy, 1.0);
+          }
           world.food[fIdx] = 0;
           world.foodMoves[fIdx] = 0;
           colony.setState(i, STATE_CARRY_FOOD);
@@ -804,6 +831,23 @@ export function step(
       }
       colony.posX[i] = nx;
       colony.posY[i] = ny;
+      // Recruitment trail. CARRY_FOOD ants returning from a food
+      // source lay a small amount of trail pheromone at every
+      // step. This is the classical Bonabeau et al. 1998 mechanism
+      // that turns successful foraging trips into recruitment
+      // signals: the trip backwards from food draws a fading
+      // breadcrumb chain that other foragers can read on their
+      // outbound trip. Strongest near the food source (the trail
+      // accumulates as bouts converge there) and decays along the
+      // return path. Only deposit above the surface — underground
+      // recruitment goes via dig pheromone, not trail.
+      if (trailField) {
+        const tx = nx | 0;
+        const ty = ny | 0;
+        if (ty < world.naturalSurface[tx]!) {
+          trailField.deposit(tx, ty, 0.10);
+        }
+      }
       // Deposit if we're in a below-surface AIR cell with no food
       // already there.
       const dxIdx = nx | 0;
