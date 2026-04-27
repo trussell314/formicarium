@@ -34,16 +34,13 @@ const SKY_BOTTOM_DAY: [number, number, number] = [185, 195, 215];
 // fog blends toward.
 const TUNNEL_NEAR: [number, number, number] = [148, 110, 78];
 const TUNNEL_DEEP: [number, number, number] = [42, 28, 20];
-// Solid soil — single dark palette. Per-grain wear lives on the
-// GRAIN cells (world.grainMoves), not on undisturbed soil.
+// Solid soil — single dark palette. GRAIN cells (excavated spoil)
+// share this palette: a real Pogonomyrmex mound and the undisturbed
+// substrate around it are made of the same earth and look visually
+// indistinguishable; the only cue that something is "mound" rather
+// than "ground" is its position above the natural surface row.
 const SOIL_TOP: [number, number, number] = [70, 44, 22];
 const SOIL_BOTTOM: [number, number, number] = [42, 24, 12];
-// Grain has its own dark→light gradient driven by world.grainMoves
-// per cell. Fresh-from-the-soil grain (moves = 1) reads close to
-// soil colour; grain that's been picked up and re-deposited many
-// times trends toward the brighter, dried "weathered" end.
-const GRAIN_FRESH: [number, number, number] = [110, 70, 38];
-const GRAIN_WORN: [number, number, number] = [220, 168, 100];
 // Food (seeds) — bright green when freshly delivered (moves = 0,
 // surface seed rain), darkening as ants pick up and re-deposit.
 const FOOD_FRESH: [number, number, number] = [90, 220, 70];
@@ -243,16 +240,21 @@ export class Renderer {
             b *= 1 - 0.55 * f;
           }
         } else {
-          // GRAIN — colour lerps fresh → worn by per-cell move count.
-          // moves=1 (just dug & dropped) reads close to soil; many
-          // re-handlings push it toward the bright weathered end.
-          const moves = this.world.grainMoves[idx]!;
-          const t = Math.min(1, moves / MOVE_COLOUR_CAP);
-          const grain = lerp3(GRAIN_FRESH, GRAIN_WORN, t);
+          // GRAIN — render with the SOIL palette. Real spoil mounds
+          // and undisturbed soil are made of the same earth and look
+          // visually indistinguishable; the previous fresh→worn
+          // lighter lerp made spoil heaps tan-coloured against the
+          // brown undisturbed substrate, which read as a different
+          // material. All soil stays brown forever; the only way to
+          // tell mound from undisturbed ground is its position above
+          // the natural surface row.
+          const sy = surfRow[x]!;
+          const t = (y - sy) / Math.max(1, h - sy);
+          const soil = lerp3(SOIL_TOP, SOIL_BOTTOM, Math.min(1, t));
           const n = (noise[idx]! / 255 - 0.5) * 0.18;
-          r = grain[0] * (1 + n);
-          g = grain[1] * (1 + n);
-          b = grain[2] * (1 + n);
+          r = soil[0] * (1 + n);
+          g = soil[1] * (1 + n);
+          b = soil[2] * (1 + n);
         }
         // Food overlay. Food sits on top of (or inside) AIR cells,
         // independent of cell type. Draw it after the substrate so
