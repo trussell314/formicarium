@@ -112,6 +112,16 @@ export class Colony {
    *  deeper nest work, older ants bias toward foraging. Frozen
    *  on death. */
   readonly age: Int32Array;
+  /** Consecutive ticks the ant has tried to move and failed (tryStep
+   *  returned hitSoil with no cell-level position change). Used as
+   *  a give-up signal: a CARRY or CARRY_FOOD worker stuck for too
+   *  long drops her cargo at an adjacent cell and transitions to
+   *  WANDER, freeing her to participate in digging. Without this,
+   *  alarm-pheromone responders pile up around a permanently-stuck
+   *  carrier and form a self-sustaining REST cluster. Saturates at
+   *  255 — values that high never actually trigger anything beyond
+   *  the give-up threshold (~60). */
+  readonly stuckTicks: Uint8Array;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -131,6 +141,7 @@ export class Colony {
     this.carryMoves = new Uint8Array(capacity);
     this.energy = new Float32Array(capacity);
     this.age = new Int32Array(capacity);
+    this.stuckTicks = new Uint8Array(capacity);
   }
 
   /**

@@ -24,8 +24,8 @@ const SAVE_KEY = 'formicarium:save';
 // than restored into mismatched buffer layouts. v2 added sprout +
 // sproutTick; v3 added the foraging trail pheromone; v4 added the
 // alarm pheromone; v5 added the population-driven food rate
-// (foodCap, clumpAccum).
-const SAVE_VERSION = 5;
+// (foodCap, clumpAccum); v6 added per-ant stuckTicks.
+const SAVE_VERSION = 6;
 
 // Chunked btoa to avoid argument-list length limits on very large arrays.
 function bytesToB64(view: ArrayBufferView): string {
@@ -45,8 +45,8 @@ function b64ToBytes(s: string): Uint8Array {
   return out;
 }
 
-interface SaveStateV5 {
-  v: 5;
+interface SaveStateV6 {
+  v: 6;
   foodCap: number;
   clumpAccum: number;
   // Settings — needed to validate that a save matches the requested run.
@@ -94,6 +94,7 @@ interface SaveStateV5 {
   carryMoves: string;
   energy: string;
   age: string;
+  stuckTicks: string;
   // Pheromone fields — only `current` is stored (scratch is rebuilt fresh).
   digCurrent: string;
   buildCurrent: string;
@@ -118,7 +119,7 @@ export function captureSnapshot(
   digField: Pheromone, buildField: Pheromone, trailField: Pheromone,
   alarmField: Pheromone, rng: RNG, settings: SaveSettings,
 ): string | null {
-  const state: SaveStateV5 = {
+  const state: SaveStateV6 = {
     v: SAVE_VERSION,
     seed: settings.seed,
     width: settings.width,
@@ -161,6 +162,7 @@ export function captureSnapshot(
     carryMoves: bytesToB64(colony.carryMoves),
     energy: bytesToB64(colony.energy),
     age: bytesToB64(colony.age),
+    stuckTicks: bytesToB64(colony.stuckTicks),
     digCurrent: bytesToB64(digField.current),
     buildCurrent: bytesToB64(buildField.current),
     trailCurrent: bytesToB64(trailField.current),
@@ -222,7 +224,7 @@ export function restoreSnapshot(
 ): boolean {
   let raw: unknown;
   try { raw = JSON.parse(blob); } catch { return false; }
-  const s = raw as Partial<SaveStateV5>;
+  const s = raw as Partial<SaveStateV6>;
   if (
     !s ||
     s.v !== SAVE_VERSION ||
@@ -277,6 +279,7 @@ export function restoreSnapshot(
     copyBytes(s.carryMoves!, colony.carryMoves);
     copyBytes(s.energy!, colony.energy);
     copyBytes(s.age!, colony.age);
+    copyBytes(s.stuckTicks!, colony.stuckTicks);
     copyBytes(s.digCurrent!, digField.current);
     copyBytes(s.buildCurrent!, buildField.current);
     copyBytes(s.trailCurrent!, trailField.current);

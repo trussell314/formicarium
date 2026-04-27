@@ -1041,6 +1041,52 @@ export function step(
       }
       colony.posX[i] = nx;
       colony.posY[i] = ny;
+      // Stuck-tick tracking. Asymmetric counter so an ant thrashing
+      // between two cells (a "stuck" tick of bouncing into a wall
+      // alternated with a "progress" tick of falling back into the
+      // same pocket) still accumulates toward the give-up threshold.
+      // +2 on stuck, -1 on progress: pure-stuck ants bail in ~30
+      // ticks; 50/50 thrashers bail in ~120; ants making real
+      // progress never accumulate (clamped at 0).
+      const newAxF = nx | 0;
+      const newAyF = ny | 0;
+      const stuckThisTickF =
+        cfHitSoil && newAxF === ix && newAyF === iy;
+      if (stuckThisTickF) {
+        colony.stuckTicks[i] = Math.min(255, colony.stuckTicks[i]! + 2);
+      } else if (colony.stuckTicks[i]! > 0) {
+        colony.stuckTicks[i]!--;
+      }
+      // Give-up: a CARRY_FOOD ant who's been jammed against a wall
+      // for ~7 sec biological drops her cargo at an adjacent AIR
+      // cell, transitions to WANDER, and joins the dig effort. The
+      // alarm-pheromone responders piling up around her can then
+      // actually relieve the obstruction instead of compounding it.
+      const STUCK_GIVE_UP_TICKS = 60;
+      if (colony.stuckTicks[i]! >= STUCK_GIVE_UP_TICKS) {
+        const wW = world.width;
+        const cargoMoves = colony.carryMoves[i]!;
+        const offsetsCF: ReadonlyArray<readonly [number, number]> = [
+          [0, 1], [0, -1], [1, 0], [-1, 0],
+          [1, 1], [1, -1], [-1, 1], [-1, -1],
+        ];
+        for (const [dxx, dyy] of offsetsCF) {
+          const px = newAxF + dxx;
+          const py = newAyF + dyy;
+          if (px < 0 || py < 0 || px >= wW || py >= world.height) continue;
+          const pIdx = py * wW + px;
+          if (world.cells[pIdx] !== CELL_AIR) continue;
+          if (world.food[pIdx]! > 0) continue;
+          world.food[pIdx] = 1;
+          world.foodMoves[pIdx] = Math.min(255, cargoMoves + 1);
+          break;
+        }
+        colony.carryMoves[i] = 0;
+        colony.stuckTicks[i] = 0;
+        colony.setState(i, STATE_WANDER);
+        colony.heading[i] = rng.range(0, Math.PI * 2);
+        continue;
+      }
       // Stranded-forager alarm. A CARRY_FOOD ant that hits soil
       // above the natural surface is being denied entry to the nest
       // (e.g. the entrance is buried by a grain cascade). Each bump
@@ -1332,6 +1378,53 @@ export function step(
     }
     colony.posX[i] = nx;
     colony.posY[i] = ny;
+    // Stuck-tick tracking + give-up bail for CARRY workers. Same
+    // semantics as the CARRY_FOOD case above: increment when we
+    // hit soil and didn't actually change cell this tick; bail
+    // after STUCK_GIVE_UP_TICKS (60 ≈ 7 sec biological) by
+    // dropping the grain at an adjacent AIR cell and transitioning
+    // to WANDER. WANDER ants don't track stuckness — bouncing
+    // around in exploration isn't "stuck" the way a CARRY worker
+    // who can't reach her deposit site is. Reset for non-CARRY
+    // ants so a worker who finished a CARRY trip starts fresh.
+    const newAxC = nx | 0;
+    const newAyC = ny | 0;
+    if (stateIn === STATE_CARRY) {
+      // Same asymmetric counter as the CARRY_FOOD block — see the
+      // longer comment there. +2 on stuck, -1 on progress.
+      const stuckThisTickC =
+        hitSoil && newAxC === ix && newAyC === iy;
+      if (stuckThisTickC) {
+        colony.stuckTicks[i] = Math.min(255, colony.stuckTicks[i]! + 2);
+      } else if (colony.stuckTicks[i]! > 0) {
+        colony.stuckTicks[i]!--;
+      }
+      const STUCK_GIVE_UP_TICKS = 60;
+      if (colony.stuckTicks[i]! >= STUCK_GIVE_UP_TICKS) {
+        const wW = world.width;
+        const cargoMoves = colony.carryMoves[i]!;
+        const offsetsC: ReadonlyArray<readonly [number, number]> = [
+          [0, 1], [0, -1], [1, 0], [-1, 0],
+          [1, 1], [1, -1], [-1, 1], [-1, -1],
+        ];
+        for (const [dxx, dyy] of offsetsC) {
+          const px = newAxC + dxx;
+          const py = newAyC + dyy;
+          if (px < 0 || py < 0 || px >= wW || py >= world.height) continue;
+          const pIdx = py * wW + px;
+          if (world.cells[pIdx] !== CELL_AIR) continue;
+          // placeGrain handles the grain-cascade settle if needed.
+          if (placeGrain(world, px, py, rng, cargoMoves + 1) !== null) break;
+        }
+        colony.carryMoves[i] = 0;
+        colony.stuckTicks[i] = 0;
+        colony.setState(i, STATE_WANDER);
+        colony.heading[i] = rng.range(0, Math.PI * 2);
+        continue;
+      }
+    } else {
+      colony.stuckTicks[i] = 0;
+    }
     // Trapped-worker alarm. A CARRY ant that hits soil while still
     // below the natural surface is being denied access to the
     // mound (e.g. a tunnel or shaft has caved in around her).
