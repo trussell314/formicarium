@@ -87,7 +87,11 @@ describe('brood: queen', () => {
     const w = makeWorld();
     const colony = new Colony(50);
     const qi = spawnQueen(colony, rng);
-    const fastDeath: AntSpecies = { ...HARVESTER, metabolism: 0.1 };
+    // Queen drains energy at 0.05× the species metabolism rate; bump
+    // to 0.5 so 50 ticks of drain (= 1.25 energy) crashes her below
+    // zero. Worker rate would have killed her in 10 ticks here, but
+    // queens are tougher by design.
+    const fastDeath: AntSpecies = { ...HARVESTER, metabolism: 0.5 };
     const { dig, build } = fields(w);
     for (let t = 0; t < 50; t++) {
       step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, fastDeath);

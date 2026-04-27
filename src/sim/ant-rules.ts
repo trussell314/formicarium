@@ -661,14 +661,19 @@ export function step(
     // species.eggLayInterval ticks while alive, energy permitting,
     // and the colony is below maxColonySize. Hölldobler & Wilson
     // 1990 Ch. 5 (claustral founding); Tschinkel 1998 (P. barbatus
-    // colony growth). She drains energy at half the worker rate
-    // (real queens are well-fed via trophallaxis — that mechanic
-    // lands later; for now treat metabolism as small enough that
-    // founding-queen claustral survival is preserved).
+    // colony growth). She drains energy at 0.05× the worker rate —
+    // real queens are well-fed via trophallaxis from attendants, but
+    // we don't yet model attendant-orientation behaviour (e.g., a
+    // queen-pheromone field), so workers reach her sporadically. The
+    // very low drain ensures founding-queen survival even with
+    // unreliable feeding; the trophallaxis pathway tops her up the
+    // rest of the way when nestmates do happen by. Empirically the
+    // previous 0.5× rate left the queen below the lay-energy
+    // threshold by ~3 hours biological in small worlds.
     if (stateNow === STATE_QUEEN) {
       colony.prevX[i] = colony.posX[i]!;
       colony.prevY[i] = colony.posY[i]!;
-      colony.energy[i]! -= species.metabolism * 0.5;
+      colony.energy[i]! -= species.metabolism * 0.05;
       if (colony.energy[i]! <= 0) {
         // Queen death → colony doom. We mark her STATE_DEAD just
         // like a worker; brood production stops and the colony
@@ -691,7 +696,12 @@ export function step(
       // will tick it through to adulthood.
       if (
         colony.stateTicks[i]! >= species.eggLayInterval &&
-        colony.energy[i]! > 0.4 &&
+        // Lower threshold (0.2 vs the original 0.4) so a queen who's
+        // had a long drought between trophallaxis bouts still keeps
+        // brood production ticking. She uses ~10% energy per egg-
+        // laying interval at the new metabolism, so 0.2 leaves room
+        // for several lays before she'd actually starve.
+        colony.energy[i]! > 0.2 &&
         colony.count < colony.capacity &&
         colony.count < species.maxColonySize
       ) {
