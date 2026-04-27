@@ -38,20 +38,19 @@ function readSettings(): Settings {
   };
   return {
     seed: num('seed', (Date.now() & 0xffffffff) >>> 0),
-    // Default world is 200×100 cells. The Khuong+Buhl regime where
-    // multiple tunnel fronts emerge requires both critical density
-    // AND room for the fronts to spread without immediately colliding.
-    // 200×100 with 100 ants gives ~1 ant per 200 cells — the upper end
-    // of the medium-density range Buhl 2004 reports producing branched
-    // (rather than single-gallery or diffuse-chamber) architecture.
-    // Default world: 400×200 cells × 3 mm/cell = 1.2 m × 60 cm —
-    // same physical area as the previous default at 6 mm/cell, just
-    // 2× finer resolution. Sim cost scales linearly with W×H so the
-    // pheromone field update is 4× more work; still well under 1 ms
-    // per tick budget on modern browsers.
-    width: Math.max(40, num('width', 400) | 0),
-    height: Math.max(30, num('height', 200) | 0),
-    ants: Math.max(1, num('ants', 100) | 0),
+    // Default world is 280×140 cells × 3 mm/cell = 84 cm × 42 cm
+    // physical, scaled down from the previous 400×200 / 100-ant
+    // default to roughly half the cell area now that the starter
+    // colony is 50 ants. Aspect ratio (2:1) preserved. The
+    // Khuong+Buhl medium-density regime — ~1 ant per 200 cells,
+    // upper end of "branched architecture" rather than single-
+    // gallery — still holds: 50 ants in 39,200 cells = 1 per 784,
+    // a bit lighter than before, which fits a smaller starter
+    // colony's looser dig effort. Sim cost scales linearly with
+    // W·H so the pheromone field update is ~half the work too.
+    width: Math.max(40, num('width', 280) | 0),
+    height: Math.max(30, num('height', 140) | 0),
+    ants: Math.max(1, num('ants', 50) | 0),
     simStepsPerFrame: Math.max(1, num('speed', 8) | 0),
   };
 }
