@@ -407,16 +407,16 @@ export function step(
     }
   }
 
-  // Corpse gravity. Stamped corpses don't move on their own, so a
-  // body dropped on top of a grain mound becomes "floating" the
-  // moment another worker picks up that supporting grain. Cheap
-  // recovery: every 30 ticks (~3.5 sec biological), scan upward —
-  // bottom row first — and shift any corpse marker down one row if
-  // the cell beneath is AIR with no corpse already there. The
-  // bottom-up order means a stack of N orphaned corpses settles in
-  // a single sweep rather than needing N sweeps. The sweep is also
-  // cheap because the corpse field is mostly zero — branch prediction
-  // skips the empty cells.
+  // Corpse + food gravity. Cell-overlay markers (corpse, food)
+  // don't have movement of their own, so a body or seed dropped on
+  // top of a grain mound becomes "floating" the moment another
+  // worker picks up that supporting grain. Cheap recovery: every
+  // 30 ticks (~3.5 sec biological), scan upward — bottom row first
+  // — and shift any marker down one row if the cell beneath is AIR
+  // with no other occupant. Bottom-up so a stack of N orphaned
+  // markers settles in a single sweep rather than needing N sweeps.
+  // The sweep is also cheap because both fields are mostly zero —
+  // branch prediction skips the empty cells.
   if (world.tick % 30 === 0) {
     const wW = world.width;
     const wH = world.height;
@@ -424,13 +424,37 @@ export function step(
       const row = y * wW;
       const below = (y + 1) * wW;
       for (let x = 0; x < wW; x++) {
-        if (world.corpse[row + x]! === 0) continue;
-        if (
-          world.cells[below + x] === CELL_AIR &&
-          world.corpse[below + x]! === 0
-        ) {
-          world.corpse[below + x] = 1;
-          world.corpse[row + x] = 0;
+        const ridx = row + x;
+        const bidx = below + x;
+        // Corpses fall through AIR cells with no existing occupant.
+        if (world.corpse[ridx]! > 0) {
+          if (
+            world.cells[bidx] === CELL_AIR &&
+            world.corpse[bidx]! === 0 &&
+            world.food[bidx]! === 0
+          ) {
+            world.corpse[bidx] = 1;
+            world.corpse[ridx] = 0;
+          }
+        }
+        // Food (seeds) settle the same way. Without this, a seed
+        // dropped on a grain pile or on a chamber ceiling stays put
+        // when the supporting cell gets dug or hauled away — visible
+        // as floating green pixels mid-air. Carry-over the seed's
+        // foodMoves counter so the renderer's age-based saturation
+        // is preserved across the fall.
+        if (world.food[ridx]! > 0) {
+          if (
+            world.cells[bidx] === CELL_AIR &&
+            world.food[bidx]! === 0 &&
+            world.corpse[bidx]! === 0 &&
+            world.sprout[bidx]! === 0
+          ) {
+            world.food[bidx] = world.food[ridx]!;
+            world.foodMoves[bidx] = world.foodMoves[ridx]!;
+            world.food[ridx] = 0;
+            world.foodMoves[ridx] = 0;
+          }
         }
       }
     }

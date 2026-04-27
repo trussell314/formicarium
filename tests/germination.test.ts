@@ -73,16 +73,26 @@ describe('seed germination', () => {
   it('a fresh surface seed does NOT sprout', () => {
     const rng = new RNG(2);
     const w = emptyWorld(30, 20);
-    const seedIdx = w.index(12, 4); // above surface
-    w.food[seedIdx] = 1;
-    w.foodMoves[seedIdx] = 0; // brand new (just fell from sky)
+    // Place an unstored seed (foodMoves = 0) above the surface.
+    // Food gravity will settle it down to the substrate floor, but
+    // the germination roll still skips it because foodMoves stays
+    // at 0 — the gate is "deposited via CARRY_FOOD", not "currently
+    // sitting on the surface".
+    w.food[w.index(12, 4)] = 1;
+    w.foodMoves[w.index(12, 4)] = 0;
     const c = new Colony(0);
     const { dig, build } = makeFields(w);
     for (let t = 0; t < 500; t++) {
       step(w, c, dig, build, rng, DEFAULT_PARAMS, undefined, FAST_GERM);
     }
-    expect(w.sprout[seedIdx]).toBe(0);
-    expect(w.food[seedIdx]).toBe(1);
+    // No sprouts anywhere.
+    let sproutCount = 0;
+    for (let i = 0; i < w.sprout.length; i++) if (w.sprout[i]! > 0) sproutCount++;
+    expect(sproutCount).toBe(0);
+    // Seed still exists somewhere — gravity may have moved it.
+    let foodCount = 0;
+    for (let i = 0; i < w.food.length; i++) if (w.food[i]! > 0) foodCount++;
+    expect(foodCount).toBe(1);
   });
 
   it('sprouts decay after sproutLifetimeTicks', () => {
