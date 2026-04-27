@@ -10,6 +10,30 @@ export const CELL_GRAIN = 2;
 
 export type CellKind = 0 | 1 | 2;
 
+/** Ticks per biological day. 1 tick ≈ 120 ms (see species.ts), so
+ *  720,000 ticks = 24 biological hours. The day/night cycle is a
+ *  modulo of world.tick by this constant. */
+export const DAY_TICKS = 720_000;
+
+/**
+ * Daylight intensity in [0, 1] for a given tick. 0 at midnight,
+ * 1 at noon, sinusoidal-clamped between them so the transitions
+ * around dawn (~6 a.m. biological) and dusk (~6 p.m.) span ~3
+ * biological hours each rather than flipping instantly. Used to
+ * gate diurnal forager activity (Gordon 1991: P. barbatus stops
+ * foraging at sunset, resumes at dawn) and to modulate sky colour
+ * in the renderer.
+ *
+ * Convention: tick=0 is solar midnight. timeOfDay = (tick / DAY_TICKS)
+ * mod 1 in [0, 1); 0.25 = sunrise, 0.5 = noon, 0.75 = sunset.
+ *
+ *   daylight(t) = max(0, -cos(2π · t / DAY_TICKS))
+ */
+export function daylight(tick: number): number {
+  const phase = (tick % DAY_TICKS) / DAY_TICKS;
+  return Math.max(0, -Math.cos(phase * Math.PI * 2));
+}
+
 export class World {
   readonly width: number;
   readonly height: number;

@@ -208,6 +208,11 @@ describe('foraging cycle', () => {
   it('FORAGE ant on the surface picks up an adjacent food cell and becomes CARRY_FOOD', () => {
     const rng = new RNG(8);
     const w = flatWorld(20, 15, 8);
+    // Run at noon so the diurnal forage gate doesn't immediately
+    // recall the ant — without this, the FORAGE→CARRY_FOOD pickup
+    // never gets a chance because the night-recall fires first.
+    // 360,000 ticks = solar noon (DAY_TICKS / 2 from world.ts).
+    w.tick = 360_000;
     // Ant on surface at (10, 7) with a seed adjacent at (11, 7).
     w.food[w.index(11, 7)] = 1;
     const colony = new Colony(1);

@@ -127,6 +127,15 @@ export interface AntSpecies {
    *  3m depth, just slower; we floor at 0.4 to keep deep extension
    *  always achievable. */
   readonly compactionFloor: number;
+
+  // ── Activity phase ──────────────────────────────────────────────
+
+  /** True if the species forages during the day (diurnal). Gordon
+   *  (1991) reports P. barbatus is strictly diurnal: foraging halts
+   *  at sunset, resumes at dawn. Setting this gates `forageProb` by
+   *  the daylight curve in world.ts. False would mean a nocturnal
+   *  species (e.g. some Camponotus); we don't ship one yet. */
+  readonly diurnal: boolean;
 }
 
 /**
@@ -224,4 +233,8 @@ export const HARVESTER: AntSpecies = {
   // levelling off in P. badius soil profiles.
   compactionDepth: 333,
   compactionFloor: 0.4,
+  // Gordon 1991: Pogonomyrmex barbatus is strictly diurnal. Foragers
+  // stay underground from sunset to dawn; surface activity restarts
+  // when ground temperature crosses ~25°C in the morning.
+  diurnal: true,
 };

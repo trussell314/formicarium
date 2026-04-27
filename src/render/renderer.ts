@@ -13,8 +13,17 @@ import {
 import type { ParticleSystem } from '../sim/particles';
 import { CELL_AIR, CELL_SOIL, World } from '../sim/world';
 
-const SKY_TOP: [number, number, number] = [22, 30, 50];
-const SKY_BOTTOM: [number, number, number] = [70, 75, 96];
+// Sky palette is two pairs: a NIGHT pair (cool deep blue, near-black at
+// the horizon) and a DAY pair (pale slate above, hazy off-white at the
+// horizon). The render() pass lerps between them based on the
+// `daylight` parameter (0 = midnight, 1 = noon). At the dawn/dusk
+// shoulder the lerp produces a warm muted in-between, which is fine
+// for a screensaver — adding a separate sunrise/sunset accent would
+// require a triple-key lerp and isn't worth the complexity.
+const SKY_TOP_NIGHT: [number, number, number] = [10, 14, 28];
+const SKY_BOTTOM_NIGHT: [number, number, number] = [22, 22, 36];
+const SKY_TOP_DAY: [number, number, number] = [120, 145, 180];
+const SKY_BOTTOM_DAY: [number, number, number] = [185, 195, 215];
 // Tunnel air. Real ant-farm tunnels are LIGHTER than the surrounding
 // substrate — light enters from the top, dust on the gel reflects, the
 // dug area reads as paler than the dirt. The previous TUNNEL value
@@ -154,6 +163,7 @@ export class Renderer {
   render(
     colony: Colony, alpha: number, particles?: ParticleSystem,
     pheromones?: { dig: { current: Float32Array }; build: { current: Float32Array } },
+    daylight = 1,
   ): void {
     const w = this.world.width;
     const h = this.world.height;
@@ -164,9 +174,16 @@ export class Renderer {
     const tick = this.world.tick;
     const data = this.buf;
 
+    // Sky palette lerps between night and day pairs by the daylight
+    // parameter passed in by main(). Computed once outside the pixel
+    // loop — every air pixel above the natural surface uses the same
+    // pair of stops, just at different vertical fractions.
+    const skyTop = lerp3(SKY_TOP_NIGHT, SKY_TOP_DAY, daylight);
+    const skyBottom = lerp3(SKY_BOTTOM_NIGHT, SKY_BOTTOM_DAY, daylight);
+
     for (let y = 0; y < h; y++) {
       const skyT = y / Math.max(1, h * 0.5);
-      const sky = lerp3(SKY_TOP, SKY_BOTTOM, Math.min(1, skyT));
+      const sky = lerp3(skyTop, skyBottom, Math.min(1, skyT));
       for (let x = 0; x < w; x++) {
         const idx = y * w + x;
         const k = cells[idx]!;

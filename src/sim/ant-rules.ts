@@ -46,7 +46,7 @@ import { Pheromone } from './pheromone';
 import { digCell, pickGrain, placeGrain, settle, tryStep } from './physics';
 import type { RNG } from './rng';
 import { type AntSpecies, HARVESTER } from './species';
-import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from './world';
+import { CELL_AIR, CELL_GRAIN, CELL_SOIL, daylight, World } from './world';
 
 export interface SimParams {
   /** Cells/tick walking speed. Sub-stepped so soil contacts aren't skipped. */
@@ -212,6 +212,14 @@ export function step(
   species: AntSpecies = HARVESTER,
 ): void {
   world.tick++;
+
+  // Diurnal/nocturnal foraging gate. Gordon (1991) tracked P. barbatus
+  // forager activity by time of day and found it crashes to zero at
+  // sunset and only resumes at dawn; the underground colony continues
+  // doing nest work throughout. Cached once per tick because every
+  // WANDER ant rolls forageProb every tick they're underground.
+  const day = daylight(world.tick);
+  const forageActivity = species.diurnal ? day : 1 - day;
 
   // Surface seed rain. Stochastic deposition of food items onto
   // intact natural-surface rows — the wind/plant-fall/animal-scat
@@ -581,10 +589,23 @@ export function step(
     //   Gordon (1989). Dynamics of task switching in harvester ants.
     if (stateIn === STATE_FORAGE) {
       colony.stateTicks[i]!++;
-      if (colony.stateTicks[i]! >= species.forageDuration) {
+      // Trip ends on EITHER a fixed-duration timeout OR the
+      // species' active phase ending. Real diurnal harvester
+      // foragers head home at sunset rather than continuing to
+      // patrol (Gordon 1991), so when forageActivity drops to
+      // ~0 we send them back. We use 0.05 not 0 so the threshold
+      // crosses cleanly through the dawn/dusk shoulder rather
+      // than flipping a tick before the daylight curve does.
+      if (
+        colony.stateTicks[i]! >= species.forageDuration ||
+        forageActivity < 0.05
+      ) {
         colony.setState(i, STATE_WANDER);
         colony.collisionCount[i] = 0;
-        colony.heading[i] = rng.range(0, Math.PI * 2);
+        // Reset heading toward the nest entrance so the trip
+        // unwinds in a sensible direction (positive geotaxis
+        // does the rest from below the surface).
+        colony.heading[i] = Math.PI / 2 + rng.range(-0.3, 0.3);
       } else {
         h += rng.gauss() * colony.turnNoise[i]!;
         // Below natural surface: hard upward bias toward exit. Above
@@ -686,9 +707,10 @@ export function step(
     // the nest (positive geotaxis below) so we don't pull them
     // back out immediately. Probability is constant per Mersch et
     // al.; the age-modulation was reverted (see comment at age++
-    // above).
+    // above). Diurnal species (HARVESTER) only roll at daylight;
+    // nocturnal species at darkness — see `forageActivity` above.
     if (stateIn === STATE_WANDER && iy >= world.naturalSurface[ix]! &&
-        rng.next() < species.forageProb) {
+        rng.next() < species.forageProb * forageActivity) {
       colony.setState(i, STATE_FORAGE);
       colony.collisionCount[i] = 0;
       // Heading reset toward the surface so the trip starts in the

@@ -16,7 +16,7 @@ import {
 } from './sim/persist';
 import { RNG } from './sim/rng';
 import { HARVESTER } from './sim/species';
-import { World } from './sim/world';
+import { daylight, World } from './sim/world';
 import { Renderer } from './render/renderer';
 
 interface Settings {
@@ -437,7 +437,8 @@ function main(): void {
       alpha = 1;
     }
 
-    renderer.render(colony, alpha, particles, { dig: digField, build: buildField });
+    const day = daylight(world.tick);
+    renderer.render(colony, alpha, particles, { dig: digField, build: buildField }, day);
 
     if (now - lastHud > 250) {
       lastHud = now;
@@ -494,12 +495,25 @@ function main(): void {
         : bioHours > 0
           ? `${bioHours}h ${bioMins}m ${bioSecsR}s`
           : `${bioMins}m ${bioSecsR}s`;
+      // Day-night phase label. The `daylight` curve in world.ts is
+      // sinusoidal with 0 at midnight, 1 at noon; we discretise into
+      // four named phases so the HUD reads as a clock label rather
+      // than a percentage. tick=0 corresponds to solar midnight.
+      const dayPhase = (world.tick % 720000) / 720000; // [0, 1)
+      const phaseLabel =
+        dayPhase < 0.20 ? 'night'
+          : dayPhase < 0.30 ? 'dawn'
+            : dayPhase < 0.45 ? 'morning'
+              : dayPhase < 0.55 ? 'noon'
+                : dayPhase < 0.70 ? 'afternoon'
+                  : dayPhase < 0.80 ? 'dusk'
+                    : 'night';
       hud.textContent =
         `formicarium · ${HARVESTER.commonName} · seed 0x${settings.seed.toString(16)}` +
         `  ·  ${world.width}×${world.height}` +
         `  ·  ants ${alive} (start ${start}, +${world.totalBorn} born, −${world.totalDied} died)` +
         `  ·  Q ${queens} eggs ${eggs}` +
-        `  ·  t=${world.tick.toLocaleString()} (${bioTime})` +
+        `  ·  t=${world.tick.toLocaleString()} (${bioTime}, ${phaseLabel})` +
         `  ·  dug ${dugTotal}  grains ${grains}  food ${foodCount}` +
         `  ·  nest ${nestVol} (depth ${maxDepth})` +
         `  ·  speed ${stepsPerFrame}×${paused ? '  ·  PAUSED' : ''}` +
