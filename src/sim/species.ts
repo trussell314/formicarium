@@ -200,6 +200,26 @@ export interface AntSpecies {
    *  produces visible motion over the day cycle without making
    *  brood positions twitchy. */
   readonly broodMigrateInterval: number;
+
+  // ── Seed germination ───────────────────────────────────────────
+
+  /** Per-stored-seed probability of germinating in one full sweep
+   *  over the food field. Tschinkel (1999) observed that uneaten
+   *  seeds in P. badius granaries sometimes sprout — the colony
+   *  treats them as failed-to-eat and removes the sprout. The
+   *  sweep runs once per germinationSweepInterval ticks, so the
+   *  effective per-tick rate is sproutProb / sweepInterval. Set
+   *  to 0 for non-granivorous species (no stored seeds). */
+  readonly sproutProb: number;
+  /** Ticks before a sprout decays naturally to nothing. Real
+   *  sprouts in granaries last a day or two before drying up; we
+   *  pick a value that lets a viewer see the sprout-then-fade
+   *  cycle within a reasonable session. */
+  readonly sproutLifetimeTicks: number;
+  /** Ticks between full sweeps of the food field for germination
+   *  rolls. A full O(W·H) sweep is amortised across the interval —
+   *  at default 1000 ticks the per-tick cost is W·H/1000 ops. */
+  readonly germinationSweepInterval: number;
 }
 
 /**
@@ -342,4 +362,16 @@ export const HARVESTER: AntSpecies = {
   // pair "ant at 0.4 / ant at 0.5" is the boundary case — the donor
   // gives, recipient accepts, energy drifts toward the average.
   trophallaxisRecipientThreshold: 0.4,
+  // Tschinkel (1999): granaries occasionally have a sprouted seed.
+  // Real rate is rare — most stored seeds get eaten or removed
+  // before germination. 5e-3 per stored seed per sweep, with
+  // sweeps every 1000 ticks, gives ~5e-6/tick per seed — a few
+  // sprouts per biological day in a busy granary.
+  sproutProb: 5e-3,
+  // 24 biological hours = 720,000 ticks; we pick 5,000 so a sprout
+  // lives ~10 minutes biological before drying up. Long enough to
+  // be visible across many frames, short enough that the granary
+  // doesn't accumulate dead sprouts indefinitely.
+  sproutLifetimeTicks: 5000,
+  germinationSweepInterval: 1000,
 };

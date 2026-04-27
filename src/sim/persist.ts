@@ -20,7 +20,10 @@ import { RNG } from './rng';
 import { World } from './world';
 
 const SAVE_KEY = 'formicarium:save';
-const SAVE_VERSION = 1;
+// Bump on schema change so old saves are silently discarded rather
+// than restored into mismatched buffer layouts. v2 added sprout +
+// sproutTick fields.
+const SAVE_VERSION = 2;
 
 // Chunked btoa to avoid argument-list length limits on very large arrays.
 function bytesToB64(view: ArrayBufferView): string {
@@ -40,8 +43,8 @@ function b64ToBytes(s: string): Uint8Array {
   return out;
 }
 
-interface SaveStateV1 {
-  v: 1;
+interface SaveStateV2 {
+  v: 2;
   // Settings — needed to validate that a save matches the requested run.
   seed: number;
   width: number;
@@ -65,6 +68,8 @@ interface SaveStateV1 {
   food: string;
   foodMoves: string;
   corpse: string;
+  sprout: string;
+  sproutTick: string;
   digTick: string;
   // Colony scalars
   colonyCount: number;
@@ -107,7 +112,7 @@ export function captureSnapshot(
   digField: Pheromone, buildField: Pheromone, rng: RNG,
   settings: SaveSettings,
 ): string | null {
-  const state: SaveStateV1 = {
+  const state: SaveStateV2 = {
     v: SAVE_VERSION,
     seed: settings.seed,
     width: settings.width,
@@ -128,6 +133,8 @@ export function captureSnapshot(
     food: bytesToB64(world.food),
     foodMoves: bytesToB64(world.foodMoves),
     corpse: bytesToB64(world.corpse),
+    sprout: bytesToB64(world.sprout),
+    sproutTick: bytesToB64(world.sproutTick),
     digTick: bytesToB64(world.digTick),
     colonyCount: colony.count,
     posX: bytesToB64(colony.posX),
@@ -204,7 +211,7 @@ export function restoreSnapshot(
 ): boolean {
   let raw: unknown;
   try { raw = JSON.parse(blob); } catch { return false; }
-  const s = raw as Partial<SaveStateV1>;
+  const s = raw as Partial<SaveStateV2>;
   if (
     !s ||
     s.v !== SAVE_VERSION ||
@@ -237,6 +244,8 @@ export function restoreSnapshot(
     copyBytes(s.food!, world.food);
     copyBytes(s.foodMoves!, world.foodMoves);
     copyBytes(s.corpse!, world.corpse);
+    copyBytes(s.sprout!, world.sprout);
+    copyBytes(s.sproutTick!, world.sproutTick);
     copyBytes(s.digTick!, world.digTick);
     colony.count = s.colonyCount!;
     copyBytes(s.posX!, colony.posX);

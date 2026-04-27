@@ -69,6 +69,19 @@ export class World {
    *  colony lost workers. Multiple corpses in the same cell are
    *  collapsed to a single marker (we don't track count). */
   readonly corpse: Uint8Array;
+  /** Per-cell sprout marker. 0 = none, 1 = a stored seed germinated
+   *  in place. Tschinkel (1999, "Self-Organization in Biological
+   *  Systems") observed that uneaten seeds in P. badius granaries
+   *  occasionally sprout. Visually a sprout reads as a small green
+   *  shoot rising from a granary cell; it persists for a while and
+   *  then either decays naturally or gets cleared by an ant that
+   *  walks through. */
+  readonly sprout: Uint8Array;
+  /** Tick at which each cell's sprout last germinated. Renderer
+   *  uses (world.tick - sproutTick[idx]) for the age-driven visual
+   *  ramp; the sim uses it for natural decay back to AIR after
+   *  species.sproutLifetimeTicks. */
+  readonly sproutTick: Int32Array;
   /** Tick at which each cell was last carved (for "fresh dig" highlight). */
   readonly digTick: Int32Array;
   initialSoilCells = 0;
@@ -106,6 +119,9 @@ export class World {
     this.food = new Uint8Array(width * height);
     this.foodMoves = new Uint8Array(width * height);
     this.corpse = new Uint8Array(width * height);
+    this.sprout = new Uint8Array(width * height);
+    this.sproutTick = new Int32Array(width * height);
+    this.sproutTick.fill(-1_000_000);
     this.digTick = new Int32Array(width * height);
     this.digTick.fill(-1_000_000);
   }

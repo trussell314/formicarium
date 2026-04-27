@@ -252,6 +252,39 @@ export function step(
   buildField.step();
   if (particles) particles.step();
 
+  // Seed germination + sprout decay sweep. Tschinkel (1999): some
+  // stored seeds in granaries occasionally sprout instead of being
+  // eaten. We sweep the food field once per germinationSweepInterval
+  // ticks and roll sproutProb on each stored seed (foodMoves > 0,
+  // i.e. previously deposited rather than freshly fallen on the
+  // surface). Decay path: any sprout older than sproutLifetimeTicks
+  // dries up and is cleared. The combined cost is a single O(W·H)
+  // pass per interval.
+  if (species.sproutProb > 0 && world.tick % species.germinationSweepInterval === 0) {
+    const total = world.food.length;
+    for (let idx = 0; idx < total; idx++) {
+      // Germination roll on stored seeds.
+      if (
+        world.food[idx]! > 0 &&
+        world.foodMoves[idx]! > 0 &&
+        rng.next() < species.sproutProb
+      ) {
+        world.food[idx] = 0;
+        world.foodMoves[idx] = 0;
+        world.sprout[idx] = 1;
+        world.sproutTick[idx] = world.tick;
+      }
+      // Decay aged sprouts back to nothing. Renderer treats
+      // sprout=0 as "no sprout here".
+      if (
+        world.sprout[idx]! > 0 &&
+        world.tick - world.sproutTick[idx]! > species.sproutLifetimeTicks
+      ) {
+        world.sprout[idx] = 0;
+      }
+    }
+  }
+
   // walkSpeed, geotaxis, and the deposit amounts stay as colony-wide
   // constants; the per-ant heterogeneity (digProb, pickProb,
   // stigmergy, turnNoise) is sampled at spawn into Colony arrays.
@@ -852,6 +885,31 @@ export function step(
         }
       }
       continue;
+    }
+
+    // Sprout removal. WANDER ants standing on or cardinally
+    // adjacent to a sprout cell clear it (real ants either eat or
+    // remove accidental germinations from the granary; Tschinkel
+    // 1999). Adjacency mirrors the food-pickup pattern: an ant in
+    // a tunnel one cell away from a sprout shouldn't walk past it
+    // forever just because their continuous-position cell didn't
+    // exactly land on the sprout. No state transition; the ant
+    // just continues its current behaviour.
+    if (
+      stateIn === STATE_WANDER &&
+      ix >= 0 && iy >= 0 && ix < world.width && iy < world.height
+    ) {
+      const wW = world.width;
+      const here = iy * wW + ix;
+      let sIdx = -1;
+      if (world.sprout[here]! > 0) sIdx = here;
+      else if (ix > 0 && world.sprout[here - 1]! > 0) sIdx = here - 1;
+      else if (ix < wW - 1 && world.sprout[here + 1]! > 0) sIdx = here + 1;
+      else if (iy > 0 && world.sprout[here - wW]! > 0) sIdx = here - wW;
+      else if (iy < world.height - 1 && world.sprout[here + wW]! > 0) sIdx = here + wW;
+      if (sIdx >= 0 && rng.next() < 0.5) {
+        world.sprout[sIdx] = 0;
+      }
     }
 
     // Necrophoresis pickup. WANDER ants on (or cardinally adjacent

@@ -259,6 +259,19 @@ export class Renderer {
         if (this.world.corpse[idx]! > 0) {
           r = 90; g = 70; b = 92;
         }
+        // Sprout marker — a small bright-green pixel for cells where
+        // a stored seed has germinated. The sprout cell uses a
+        // markedly brighter green than fresh food so the viewer can
+        // tell "an old seed sprouted" apart from "a new seed
+        // arrived". Brightness ramps with sprout age so freshly-
+        // germinated cells are dim and mature ones pop.
+        if (this.world.sprout[idx]! > 0) {
+          const age = tick - this.world.sproutTick[idx]!;
+          // Half-bright at age 0, full bright by ~1000 ticks, then
+          // hold to lifetimeTicks where decay clears the cell.
+          const t = Math.min(1, Math.max(0.4, age / 1000));
+          r = 70 * t; g = 230 * t; b = 50 * t;
+        }
         const o = idx * 4;
         data[o] = r;
         data[o + 1] = g;
