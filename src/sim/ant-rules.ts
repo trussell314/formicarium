@@ -602,15 +602,39 @@ export function step(
     const ix = colony.posX[i]! | 0;
     const iy = colony.posY[i]! | 0;
 
-    // Per-ant aging. The age field is updated for future use (brood-
-    // production-driven polyethism, where young workers continuously
-    // replace foragers). The age-derived behavioural modulations from
-    // Mersch et al. 2013 were tried (forage-rate scaling, deeper-
-    // diving nurses) and reverted — without brood, all workers age
-    // monotonically into foragers and dig productivity collapses.
-    // We keep the age data so the polyethism layer can be added back
-    // once brood is in.
+    // Per-ant aging.
     colony.age[i]!++;
+
+    // Caste-based polyethism (age polyethism). Mersch, Crespi &
+    // Keller 2013 tracked individual Camponotus fellah workers
+    // through nurse → cleaner → forager phases over weeks; Beshers
+    // & Fewell 2001 review the broader principle. Three smooth
+    // multipliers driven by ageFrac = age / matureAge, applied to
+    // the relevant per-ant decisions. Floors are non-zero so even
+    // freshly-spawned (age=0) ants retain some forage / dig capacity
+    // — a hard zero would freeze the colony in tests where workers
+    // are seeded young.
+    //   - geoMult on belowGeotaxis: 1.0 → 0.3 across [0, 1].
+    //     Young workers stay deep near brood; old workers roam
+    //     shallow toward the surface.
+    //   - forageMult on forageProb: 0.1 → 1.5 across [0, 1].
+    //     Foraging is the senescent specialty (Mersch et al. found
+    //     real workers transition to forager last).
+    //   - digMult on digProb: bell curve, peaks 1.5 at ageFrac=0.5,
+    //     floor 0.5 at the extremes. Excavation is the
+    //     middle-aged specialty.
+    // The earlier (pre-brood) version of this was reverted because
+    // monotone aging without replenishment collapsed dig throughput
+    // by old age. With egg → larva → adult brood now in, workers
+    // are continuously replaced and the cohort balance is stable.
+    const ageFrac = Math.min(1, colony.age[i]! / species.matureAge);
+    const geoMult = Math.max(0.3, 1.0 - 0.7 * ageFrac);
+    const forageMult = Math.max(0.1, Math.min(1.5, 1.5 * ageFrac));
+    // Bell curve: 0.7 at the extremes, 1.5 at middle age. Floor of
+    // 0.7 (rather than the more aggressive 0.5 originally tried)
+    // keeps dig productivity from collapsing at age=0; the
+    // excavator caste still has a clear 2× advantage.
+    const digMult = 0.7 + 0.8 * (1 - 2 * Math.abs(ageFrac - 0.5));
 
     // Senescence: workers die of old age once they exceed
     // species.workerLifespan. Real Pogonomyrmex barbatus workers
@@ -1060,7 +1084,7 @@ export function step(
     // above). Diurnal species (HARVESTER) only roll at daylight;
     // nocturnal species at darkness — see `forageActivity` above.
     if (stateIn === STATE_WANDER && iy >= world.naturalSurface[ix]! &&
-        rng.next() < species.forageProb * forageActivity) {
+        rng.next() < species.forageProb * forageActivity * forageMult) {
       colony.setState(i, STATE_FORAGE);
       colony.collisionCount[i] = 0;
       // Heading reset toward the surface so the trip starts in the
@@ -1108,7 +1132,11 @@ export function step(
       if (iy < world.naturalSurface[ix]!) {
         h += wrapAngle(Math.PI / 2 - h) * geotaxis;
       } else {
-        h += wrapAngle(Math.PI / 2 - h) * species.belowGeotaxis;
+        // Below-surface depth-bias scaled by age caste: nurses
+        // (young) get the strongest pull toward the brood pile,
+        // foragers (old) get a much weaker one because they're
+        // staging near the entrance to leave.
+        h += wrapAngle(Math.PI / 2 - h) * species.belowGeotaxis * geoMult;
       }
     }
     h = wrapAngle(h);
@@ -1241,7 +1269,7 @@ export function step(
         const vAir = airAbove + airBelow;
         const lAir = airLeft + airRight;
         const dirBonus = vAir > lAir ? 1.5 : (lAir > vAir ? 0.3 : 1.0);
-        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus * dirBonus) {
+        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus * dirBonus * digMult) {
           if (digCell(world, target.x, target.y, rng)) {
             // Track dig direction relative to the digger's cell, so
             // the diag can surface a vertical-vs-lateral histogram.
