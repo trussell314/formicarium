@@ -28,14 +28,19 @@ const FAST_MIGRATE: AntSpecies = {
 
 function deepChamberWorld(): World {
   // 40-cell-wide × 80-cell-tall world with surface at row 10 and
-  // an open shaft straight down through column 20. Eggs in the
-  // shaft can migrate to any depth.
+  // a 3-cell-wide vertical chamber down column 19..21. Brood
+  // migration requires "chamber" cells (lateral non-SOIL neighbour
+  // present) — a 1-cell-wide shaft would be rejected as the
+  // entrance tunnel, so the test geometry uses a wider corridor
+  // to validate the depth-tracking behaviour proper.
   const world = new World(40, 80);
   for (let x = 0; x < 40; x++) world.naturalSurface[x] = 10;
   for (let y = 10; y < 80; y++) {
     for (let x = 0; x < 40; x++) world.cells[world.index(x, y)] = 1; // SOIL
   }
-  for (let y = 10; y < 80; y++) world.cells[world.index(20, y)] = CELL_AIR;
+  for (let y = 10; y < 80; y++) {
+    for (let x = 19; x <= 21; x++) world.cells[world.index(x, y)] = CELL_AIR;
+  }
   world.initialSoilCells = world.countSoil();
   return world;
 }
@@ -117,5 +122,41 @@ describe('brood thermoregulation', () => {
     const finalDepth = (c.posY[0]! | 0) - 10; // surface row = 10
     expect(finalDepth).toBeLessThanOrEqual(FAST_MIGRATE.broodMaxDepth + 1);
     expect(finalDepth).toBeGreaterThanOrEqual(FAST_MIGRATE.broodMaxDepth - 1);
+  });
+
+  it('an egg in a 1-cell-wide entrance shaft will not migrate up the shaft', () => {
+    // Real brood stays in chambers, not in connecting tunnels.
+    // World: solid soil with a 1-cell-wide vertical shaft from
+    // surface to row 30 and a 3-cell-wide pocket at the bottom
+    // (rows 30-33 × cols 19-21). Spawn an egg in the pocket bottom
+    // (row 33). Run at midnight so the daylight target is
+    // broodMinDepth — which the egg should approach from below
+    // BUT not by climbing through the 1-wide shaft. It can move
+    // up within the pocket but stops at the pocket ceiling.
+    const rng = new RNG(5);
+    const w = new World(40, 60);
+    for (let x = 0; x < 40; x++) w.naturalSurface[x] = 10;
+    for (let y = 10; y < 60; y++) {
+      for (let x = 0; x < 40; x++) w.cells[w.index(x, y)] = 1;
+    }
+    // Shaft: column 20, rows 10..29.
+    for (let y = 10; y < 30; y++) w.cells[w.index(20, y)] = CELL_AIR;
+    // Pocket: rows 30..33, cols 19..21.
+    for (let y = 30; y <= 33; y++) {
+      for (let x = 19; x <= 21; x++) w.cells[w.index(x, y)] = CELL_AIR;
+    }
+    w.initialSoilCells = w.countSoil();
+    w.tick = -1; // step() bumps to 0 (midnight, lowest target)
+    const c = new Colony(1);
+    spawnEgg(c, 20.5, 33.5, rng);
+    const dig = new Pheromone(w.width, w.height, 0.12, 0.99);
+    const build = new Pheromone(w.width, w.height, 0.10, 0.997);
+    for (let t = 0; t < 200; t++) {
+      step(w, c, dig, build, rng, DEFAULT_PARAMS, undefined, FAST_MIGRATE);
+    }
+    // Egg cannot climb above row 30 — that's the top of the pocket;
+    // any cell at row 29 is in the 1-wide shaft and is rejected by
+    // the chamber-only filter.
+    expect(c.posY[0]! | 0).toBeGreaterThanOrEqual(30);
   });
 });

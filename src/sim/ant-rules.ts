@@ -638,9 +638,24 @@ export function step(
           else if (eyNow > targetY) dy = -1;
           if (dy !== 0) {
             const newY = eyNow + dy;
+            // Chamber-only constraint: brood is kept in chambers,
+            // not in the 1-cell-wide entrance shaft. Real nurses
+            // don't shelve eggs in the connecting tunnel; they stay
+            // in the broodpile chamber. A "chamber" cell here is
+            // one with at least one lateral non-SOIL neighbour, so
+            // shaft cells (SOIL on both sides) are rejected. Without
+            // this, eggs follow the daylight target straight up the
+            // shaft to within a few cells of the surface.
+            const wW = world.width;
+            const leftIsSoil =
+              ex > 0 && world.cells[newY * wW + (ex - 1)] === CELL_SOIL;
+            const rightIsSoil =
+              ex < wW - 1 && world.cells[newY * wW + (ex + 1)] === CELL_SOIL;
+            const isChamber = !leftIsSoil || !rightIsSoil;
             if (
               newY >= 0 && newY < world.height &&
-              world.cells[world.index(ex, newY)] === CELL_AIR
+              world.cells[world.index(ex, newY)] === CELL_AIR &&
+              isChamber
             ) {
               colony.posY[i] = colony.posY[i]! + dy;
             }
@@ -699,9 +714,24 @@ export function step(
           else if (eyNow > targetY) dy = -1;
           if (dy !== 0) {
             const newY = eyNow + dy;
+            // Chamber-only constraint: brood is kept in chambers,
+            // not in the 1-cell-wide entrance shaft. Real nurses
+            // don't shelve eggs in the connecting tunnel; they stay
+            // in the broodpile chamber. A "chamber" cell here is
+            // one with at least one lateral non-SOIL neighbour, so
+            // shaft cells (SOIL on both sides) are rejected. Without
+            // this, eggs follow the daylight target straight up the
+            // shaft to within a few cells of the surface.
+            const wW = world.width;
+            const leftIsSoil =
+              ex > 0 && world.cells[newY * wW + (ex - 1)] === CELL_SOIL;
+            const rightIsSoil =
+              ex < wW - 1 && world.cells[newY * wW + (ex + 1)] === CELL_SOIL;
+            const isChamber = !leftIsSoil || !rightIsSoil;
             if (
               newY >= 0 && newY < world.height &&
-              world.cells[world.index(ex, newY)] === CELL_AIR
+              world.cells[world.index(ex, newY)] === CELL_AIR &&
+              isChamber
             ) {
               colony.posY[i] = colony.posY[i]! + dy;
             }
