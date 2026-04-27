@@ -155,6 +155,29 @@ export interface AntSpecies {
    *  Below this many ticks the drop logic refuses, so corpses don't
    *  pile up at the doorstep. */
   readonly necroHaulMinTicks: number;
+
+  // ── Trophallaxis (worker-worker food sharing) ──────────────────
+
+  /** Energy transferred per tick of contact between a "well-fed"
+   *  donor and a "hungry" recipient. Hölldobler & Wilson (1990
+   *  Ch. 7) describe trophallaxis as the dominant nutritional
+   *  pathway in many ant species: foragers fill the crop, return
+   *  to the nest, and regurgitate small aliquots to nestmates
+   *  through repeated brief contacts. Cassill & Tschinkel (1999)
+   *  measured per-bout transfer of ~0.5–5% of crop volume in
+   *  Solenopsis invicta. We pick a small fraction of maxEnergy so
+   *  multiple contact-bouts are needed to fully refuel a hungry ant. */
+  readonly trophallaxisAmount: number;
+  /** Donor threshold: the higher-energy partner only gives if its
+   *  own energy is above this fraction of maxEnergy. Below it,
+   *  ants don't share — they can't afford to. */
+  readonly trophallaxisDonorThreshold: number;
+  /** Recipient threshold: the lower-energy partner only accepts if
+   *  it's below this fraction of maxEnergy. Above it, satisfied
+   *  ants don't beg. Setting recipientThreshold > donorThreshold
+   *  would oscillate energy back and forth; we keep recipient ≤
+   *  donor so each bout is monotonic. */
+  readonly trophallaxisRecipientThreshold: number;
 }
 
 /**
@@ -269,4 +292,19 @@ export const HARVESTER: AntSpecies = {
   // than the ant will actually walk above-surface, so the gate is
   // really about "got out of the chamber" plus a short surface walk.
   necroHaulMinTicks: 500,
+  // Cassill & Tschinkel (1999) measured per-bout trophallactic
+  // transfers of 0.5-5% of the donor's crop in S. invicta. We use
+  // 0.005 = 0.5% of maxEnergy per tick of contact, which sums over
+  // a multi-tick neighbourhood encounter into a meaningful refill
+  // (~0.05–0.10 over 10–20 ticks of close contact) without
+  // overshooting the food-cell value.
+  trophallaxisAmount: 0.005,
+  // Donor must be ≥50% full; this matches "well-fed" in the
+  // hunger-threshold scheme (hungerThreshold=0.6, donorThreshold=0.5
+  // means donors aren't simultaneously seeking food themselves).
+  trophallaxisDonorThreshold: 0.5,
+  // Recipient must be below 40%. Together with donorThreshold the
+  // pair "ant at 0.4 / ant at 0.5" is the boundary case — the donor
+  // gives, recipient accepts, energy drifts toward the average.
+  trophallaxisRecipientThreshold: 0.4,
 };

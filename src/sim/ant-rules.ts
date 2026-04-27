@@ -282,9 +282,14 @@ export function step(
   const bh = world.height;
   const { head, link } = getCollisionBins(bw * bh, colony.count);
   head.fill(-1, 0, bw * bh);
+  // Include queens and eggs in the spatial bins so trophallaxis
+  // (below) can find queens as recipients of nestmate feeding.
+  // Collision-count increments below specifically skip queens and
+  // eggs so a worker near them doesn't accumulate fake "collisions"
+  // and bounce into REST.
   for (let i = 0; i < colony.count; i++) {
     const sB = colony.state[i];
-    if (sB === STATE_DEAD || sB === STATE_QUEEN || sB === STATE_EGG) {
+    if (sB === STATE_DEAD) {
       link[i] = -1;
       continue;
     }
@@ -297,7 +302,7 @@ export function step(
   }
   for (let i = 0; i < colony.count; i++) {
     const sP = colony.state[i];
-    if (sP === STATE_DEAD || sP === STATE_QUEEN || sP === STATE_EGG) continue;
+    if (sP === STATE_DEAD) continue;
     const bx = colony.posX[i]! | 0;
     const by = colony.posY[i]! | 0;
     if (bx < 0 || by < 0 || bx >= bw || by >= bh) continue;
@@ -314,8 +319,57 @@ export function step(
           const dy = colony.posY[j]! - colony.posY[i]!;
           const d2 = dx * dx + dy * dy;
           if (d2 < cr2 && d2 > 1e-6) {
-            colony.collisionCount[i]! += 1;
-            colony.collisionCount[j]! += 1;
+            const stI = colony.state[i]!;
+            const stJ = colony.state[j]!;
+            // Skip eggs entirely — they can't collide or trophallax.
+            if (stI === STATE_EGG || stJ === STATE_EGG) continue;
+            // Collision count only between mobile workers; queens
+            // are stationary attractors so a hungry worker pressed
+            // against the queen for trophallaxis shouldn't trigger
+            // her into REST (and the queen herself doesn't have
+            // a REST state).
+            if (stI !== STATE_QUEEN && stJ !== STATE_QUEEN) {
+              colony.collisionCount[i]! += 1;
+              colony.collisionCount[j]! += 1;
+            }
+            // Trophallaxis. Hölldobler & Wilson (1990) Ch. 7: the
+            // higher-energy partner regurgitates a small aliquot
+            // into the lower-energy partner. Pair gates: donor ≥
+            // donorThreshold, recipient ≤ recipientThreshold,
+            // recipient is alive (not DEAD/EGG), donor is a
+            // worker-class state (not DEAD/EGG; QUEEN can receive
+            // but never donates her own reserves). The transfer
+            // amount is capped at the recipient's missing energy
+            // and at the donor's surplus above the threshold so
+            // a single contact never fully drains either ant.
+            if (species.trophallaxisAmount > 0) {
+              const ei = colony.energy[i]!;
+              const ej = colony.energy[j]!;
+              const donor = ei >= ej ? i : j;
+              const recip = ei >= ej ? j : i;
+              const donorE = colony.energy[donor]!;
+              const recipE = colony.energy[recip]!;
+              const donorState = colony.state[donor]!;
+              const recipState = colony.state[recip]!;
+              const donorOk =
+                donorState !== STATE_DEAD &&
+                donorState !== STATE_EGG &&
+                donorState !== STATE_QUEEN &&
+                donorE > species.trophallaxisDonorThreshold;
+              const recipOk =
+                recipState !== STATE_DEAD &&
+                recipState !== STATE_EGG &&
+                recipE < species.trophallaxisRecipientThreshold;
+              if (donorOk && recipOk) {
+                const want = species.maxEnergy - recipE;
+                const surplus = donorE - species.trophallaxisDonorThreshold;
+                const give = Math.min(species.trophallaxisAmount, want, surplus);
+                if (give > 0) {
+                  colony.energy[donor] = donorE - give;
+                  colony.energy[recip] = recipE + give;
+                }
+              }
+            }
           }
         }
       }
