@@ -178,6 +178,28 @@ export interface AntSpecies {
    *  would oscillate energy back and forth; we keep recipient ≤
    *  donor so each bout is monotonic. */
   readonly trophallaxisRecipientThreshold: number;
+
+  // ── Brood thermoregulation ─────────────────────────────────────
+
+  /** Target depth (cells below the natural surface) for brood at
+   *  midnight, when the surface is coolest. Real ants move brood to
+   *  shallower strata at night to capture residual warmth retained
+   *  from the day. Penick & Tschinkel (2008) tracked this in
+   *  Pogonomyrmex badius; we collapse the temperature gradient into
+   *  a depth target without modelling the temperature field
+   *  explicitly. */
+  readonly broodMinDepth: number;
+  /** Target depth (cells below the natural surface) for brood at
+   *  noon, when the surface is hottest. The ants escape the surface
+   *  heat by descending to cooler strata. The depth swings linearly
+   *  between min and max as the daylight curve goes from 0 to 1. */
+  readonly broodMaxDepth: number;
+  /** How many ticks an egg waits between thermoregulatory migration
+   *  steps. The egg moves at most one cell per interval, so a
+   *  smaller interval means faster drift. We pick a value that
+   *  produces visible motion over the day cycle without making
+   *  brood positions twitchy. */
+  readonly broodMigrateInterval: number;
 }
 
 /**
@@ -292,6 +314,19 @@ export const HARVESTER: AntSpecies = {
   // than the ant will actually walk above-surface, so the gate is
   // really about "got out of the chamber" plus a short surface walk.
   necroHaulMinTicks: 500,
+  // Penick & Tschinkel (2008) measured P. badius brood depth diel
+  // movement: brood found 5-30 cm below surface, with deeper
+  // positions at midday. At 3 mm/cell that's 17-100 cells. We use
+  // 4 cells (~12 mm, midnight) to 30 cells (~90 mm, noon) — slightly
+  // compressed so the migration is visible at the default 60 cm
+  // world height without brood pressing against the world floor.
+  broodMinDepth: 4,
+  broodMaxDepth: 30,
+  // 600 ticks ≈ 72 sec biological at 1 tick = 120 ms. Eggs drift up
+  // to 60 cells over a 12-hour daytime, which matches the ~30-cell
+  // total swing between min and max depth (≥ enough motion to track
+  // the target without overshooting).
+  broodMigrateInterval: 600,
   // Cassill & Tschinkel (1999) measured per-bout trophallactic
   // transfers of 0.5-5% of the donor's crop in S. invicta. We use
   // 0.005 = 0.5% of maxEnergy per tick of contact, which sums over

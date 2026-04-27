@@ -395,6 +395,39 @@ export function step(
       colony.prevX[i] = colony.posX[i]!;
       colony.prevY[i] = colony.posY[i]!;
       colony.stateTicks[i]!++;
+      // Brood thermoregulation. Penick & Tschinkel (2008): real
+      // ants move eggs/larvae between depth strata to track the
+      // optimal temperature range — deeper at noon (escaping heat),
+      // shallower at midnight (seeking residual warmth). We don't
+      // model the nurse-carry intermediate explicitly; the visible
+      // outcome — eggs slowly drifting up and down with the diurnal
+      // cycle — is the part the user wants to see. Each egg gets
+      // nudged at most one cell per broodMigrateInterval ticks
+      // toward a target-depth that swings linearly with daylight.
+      if (colony.stateTicks[i]! % species.broodMigrateInterval === 0) {
+        const ex = colony.posX[i]! | 0;
+        const eyNow = colony.posY[i]! | 0;
+        if (ex >= 0 && ex < world.width) {
+          const surf = world.naturalSurface[ex]!;
+          const day = daylight(world.tick);
+          const targetDepth =
+            species.broodMinDepth +
+            (species.broodMaxDepth - species.broodMinDepth) * day;
+          const targetY = surf + Math.round(targetDepth);
+          let dy = 0;
+          if (eyNow < targetY) dy = 1;
+          else if (eyNow > targetY) dy = -1;
+          if (dy !== 0) {
+            const newY = eyNow + dy;
+            if (
+              newY >= 0 && newY < world.height &&
+              world.cells[world.index(ex, newY)] === CELL_AIR
+            ) {
+              colony.posY[i] = colony.posY[i]! + dy;
+            }
+          }
+        }
+      }
       if (colony.stateTicks[i]! >= species.eggMatureTicks) {
         colony.setState(i, STATE_WANDER);
         colony.energy[i] = species.maxEnergy;
