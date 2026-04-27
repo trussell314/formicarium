@@ -8,8 +8,8 @@
 // Renderer reads sim state. Never writes. (CLAUDE.md invariant.)
 
 import {
-  Colony, STATE_CARRY, STATE_DEAD, STATE_EGG, STATE_NECRO_CARRY,
-  STATE_QUEEN,
+  Colony, STATE_CARRY, STATE_DEAD, STATE_EGG, STATE_LARVA,
+  STATE_NECRO_CARRY, STATE_QUEEN,
 } from '../sim/colony';
 import type { ParticleSystem } from '../sim/particles';
 import { CELL_AIR, CELL_SOIL, World } from '../sim/world';
@@ -365,6 +365,26 @@ export class Renderer {
         this.ctx.fillStyle = 'rgba(245, 230, 200, 0.85)';
         this.ctx.beginPath();
         this.ctx.ellipse(ex, ey, radius * 0.4, radius * 0.55, 0, 0, Math.PI * 2);
+        this.ctx.fill();
+        continue;
+      }
+
+      // Larva — soft-white grub, larger than an egg and slightly
+      // elongated. Energy-dependent saturation: hungry larvae fade
+      // toward dim grey, well-fed larvae read bright. The queen's
+      // chamber will read as a cluster of these once the colony
+      // gets going (real Pogonomyrmex broodpiles are visible to
+      // the naked eye through the chamber wall in lab arenas).
+      if (state === STATE_LARVA) {
+        const lx = ox + colony.posX[i]! * scale;
+        const ly = oy + colony.posY[i]! * scale;
+        const e = Math.max(0.2, Math.min(1, colony.energy[i]!));
+        const r = (240 * e + 100 * (1 - e)) | 0;
+        const g = (235 * e + 100 * (1 - e)) | 0;
+        const b = (220 * e + 100 * (1 - e)) | 0;
+        this.ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        this.ctx.beginPath();
+        this.ctx.ellipse(lx, ly, radius * 0.65, radius * 0.4, 0, 0, Math.PI * 2);
         this.ctx.fill();
         continue;
       }

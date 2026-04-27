@@ -188,7 +188,7 @@ describe('brood: egg laying', () => {
 });
 
 describe('brood: egg maturation', () => {
-  it('egg becomes a STATE_WANDER worker after eggMatureTicks', () => {
+  it('egg becomes a STATE_WANDER worker after egg + larva maturation', () => {
     const rng = new RNG(8);
     const w = makeWorld();
     const colony = new Colony(50);
@@ -196,7 +196,9 @@ describe('brood: egg maturation', () => {
     const fast: AntSpecies = {
       ...HARVESTER,
       eggLayInterval: 50,
-      eggMatureTicks: 100, // mature fast for test
+      eggMatureTicks: 100,    // egg → larva
+      larvaMatureTicks: 100,  // larva → adult
+      larvaMetabolism: 0,     // no starvation in this test
     };
     const { dig, build } = fields(w);
     let laidEggIdx = -1;
@@ -211,8 +213,8 @@ describe('brood: egg maturation', () => {
       if (laidEggIdx >= 0) break;
     }
     expect(laidEggIdx).toBeGreaterThan(0);
-    // Run long enough for that egg to mature.
-    for (let t = 0; t < 200; t++) {
+    // Run long enough for that egg to pass through both stages.
+    for (let t = 0; t < 400; t++) {
       step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, fast);
       if (colony.state[laidEggIdx] === STATE_WANDER) break;
     }
@@ -335,7 +337,7 @@ describe('brood: senescence (worker lifespan)', () => {
 });
 
 describe('brood: lifecycle counters', () => {
-  it('world.totalBorn increments on each egg → worker maturation', () => {
+  it('world.totalBorn increments on each egg → larva → worker maturation', () => {
     const rng = new RNG(13);
     const w = makeWorld();
     const colony = new Colony(50);
@@ -344,6 +346,8 @@ describe('brood: lifecycle counters', () => {
       ...HARVESTER,
       eggLayInterval: 30,
       eggMatureTicks: 60,
+      larvaMatureTicks: 60,
+      larvaMetabolism: 0, // never starve in this test
     };
     const { dig, build } = fields(w);
     expect(w.totalBorn).toBe(0);
@@ -369,7 +373,7 @@ describe('brood: lifecycle counters', () => {
     expect(w.totalDied).toBe(5);
   });
 
-  it('alive_adults = start + born − died invariant (eggs excluded)', () => {
+  it('alive_adults = start + born − died invariant (brood excluded)', () => {
     const rng = new RNG(15);
     const w = makeWorld();
     const colony = new Colony(50);
@@ -383,17 +387,19 @@ describe('brood: lifecycle counters', () => {
     const fast: AntSpecies = {
       ...HARVESTER,
       eggLayInterval: 50,
-      eggMatureTicks: 100,
+      eggMatureTicks: 50,
+      larvaMatureTicks: 50,
+      larvaMetabolism: 0,
     };
     for (let t = 0; t < 1000; t++) {
       step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, fast);
     }
     // alive_adults = workers (STATE_WANDER..CARRY_FOOD) + queen.
-    // Excludes STATE_EGG (not yet hatched) and STATE_DEAD.
+    // Excludes brood (STATE_EGG, STATE_LARVA) and STATE_DEAD.
     let aliveAdults = 0;
     for (let i = 0; i < colony.count; i++) {
       const s = colony.state[i];
-      if (s === STATE_DEAD || s === 7 /* STATE_EGG */) continue;
+      if (s === STATE_DEAD || s === 7 /* STATE_EGG */ || s === 9 /* STATE_LARVA */) continue;
       aliveAdults++;
     }
     expect(aliveAdults).toBe(start + w.totalBorn - w.totalDied);

@@ -51,8 +51,17 @@ export const STATE_EGG = 7;
  *  surface to drift away from the entrance, then drops the body
  *  on intact ground — the visible midden is what remains. */
 export const STATE_NECRO_CARRY = 8;
+/** Larva. Stationary stage between EGG and adult worker, with two
+ *  distinguishing properties: (1) larvae are fed by workers via
+ *  trophallaxis (their `energy` drains; they die if neglected),
+ *  and (2) they're visually a soft white grub rather than a small
+ *  cream egg. Hölldobler & Wilson (1990) Ch. 9: real holometabolous
+ *  brood progresses egg → larva → pupa → adult; we collapse pupa
+ *  into the late-larva stage so there's only one transition to
+ *  manage between hatching and the worker debut. */
+export const STATE_LARVA = 9;
 
-export type AntState = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export type AntState = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 export class Colony {
   count = 0;

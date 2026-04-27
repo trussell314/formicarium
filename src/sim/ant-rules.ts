@@ -39,8 +39,8 @@
 
 import {
   Colony, STATE_CARRY, STATE_CARRY_FOOD, STATE_DEAD, STATE_EGG,
-  STATE_FORAGE, STATE_NECRO_CARRY, STATE_QUEEN, STATE_REST,
-  STATE_WANDER, type AntState,
+  STATE_FORAGE, STATE_LARVA, STATE_NECRO_CARRY, STATE_QUEEN,
+  STATE_REST, STATE_WANDER, type AntState,
 } from './colony';
 import type { ParticleSystem } from './particles';
 import { Pheromone } from './pheromone';
@@ -359,11 +359,14 @@ export function step(
             // Skip eggs entirely — they can't collide or trophallax.
             if (stI === STATE_EGG || stJ === STATE_EGG) continue;
             // Collision count only between mobile workers; queens
-            // are stationary attractors so a hungry worker pressed
-            // against the queen for trophallaxis shouldn't trigger
-            // her into REST (and the queen herself doesn't have
-            // a REST state).
-            if (stI !== STATE_QUEEN && stJ !== STATE_QUEEN) {
+            // and larvae are stationary brood-pile entities, so a
+            // worker pressed against them shouldn't trigger her
+            // into REST (workers crowd the brood pile by design,
+            // not by congestion). Larvae and queens have no REST
+            // state of their own.
+            const stationaryI = stI === STATE_QUEEN || stI === STATE_LARVA;
+            const stationaryJ = stJ === STATE_QUEEN || stJ === STATE_LARVA;
+            if (!stationaryI && !stationaryJ) {
               colony.collisionCount[i]! += 1;
               colony.collisionCount[j]! += 1;
             }
@@ -389,6 +392,7 @@ export function step(
               const donorOk =
                 donorState !== STATE_DEAD &&
                 donorState !== STATE_EGG &&
+                donorState !== STATE_LARVA &&
                 donorState !== STATE_QUEEN &&
                 donorE > species.trophallaxisDonorThreshold;
               const recipOk =
@@ -464,6 +468,71 @@ export function step(
         }
       }
       if (colony.stateTicks[i]! >= species.eggMatureTicks) {
+        // Hatch into LARVA — same position, but now needs feeding.
+        // Spawn at half-energy: a freshly-hatched larva still has
+        // some yolk reserves but will starve if not fed.
+        colony.setState(i, STATE_LARVA);
+        colony.energy[i] = species.maxEnergy * 0.5;
+      }
+      continue;
+    }
+
+    // LARVA tick. The middle stage of brood: stationary like the
+    // egg, but with two new dynamics — its energy drains every
+    // tick (faster than an adult worker; growing tissue is
+    // expensive) and it accepts trophallactic feeding from any
+    // passing worker (handled in the collision/trophallaxis pass
+    // above; LARVA is a valid recipient state). Same brood-
+    // thermoregulation drift as eggs. After larvaMatureTicks of
+    // STATE_LARVA the larva emerges as a fully-functioning worker.
+    if (stateNow === STATE_LARVA) {
+      colony.prevX[i] = colony.posX[i]!;
+      colony.prevY[i] = colony.posY[i]!;
+      colony.stateTicks[i]!++;
+      // Same depth-tracking drift as eggs.
+      if (colony.stateTicks[i]! % species.broodMigrateInterval === 0) {
+        const ex = colony.posX[i]! | 0;
+        const eyNow = colony.posY[i]! | 0;
+        if (ex >= 0 && ex < world.width) {
+          const surf = world.naturalSurface[ex]!;
+          const day = daylight(world.tick);
+          const targetDepth =
+            species.broodMinDepth +
+            (species.broodMaxDepth - species.broodMinDepth) * day;
+          const targetY = surf + Math.round(targetDepth);
+          let dy = 0;
+          if (eyNow < targetY) dy = 1;
+          else if (eyNow > targetY) dy = -1;
+          if (dy !== 0) {
+            const newY = eyNow + dy;
+            if (
+              newY >= 0 && newY < world.height &&
+              world.cells[world.index(ex, newY)] === CELL_AIR
+            ) {
+              colony.posY[i] = colony.posY[i]! + dy;
+            }
+          }
+        }
+      }
+      // Larval metabolism. Drain energy; on zero, the larva dies
+      // and becomes a corpse cell at its position (just like a
+      // starving adult). Workers may then haul the body to the
+      // midden via the necrophoresis pathway.
+      colony.energy[i]! -= species.larvaMetabolism;
+      if (colony.energy[i]! <= 0) {
+        colony.energy[i] = 0;
+        colony.setState(i, STATE_DEAD);
+        world.totalDied++;
+        const wW = world.width;
+        const lx = colony.posX[i]! | 0;
+        const ly = colony.posY[i]! | 0;
+        if (lx >= 0 && ly >= 0 && lx < wW && ly < world.height) {
+          world.corpse[ly * wW + lx] = 1;
+        }
+        continue;
+      }
+      // Maturation: enough fed-and-growing time → adult worker.
+      if (colony.stateTicks[i]! >= species.larvaMatureTicks) {
         colony.setState(i, STATE_WANDER);
         colony.energy[i] = species.maxEnergy;
         colony.heading[i] = rng.range(0, Math.PI * 2);
@@ -1417,7 +1486,7 @@ export function step(
   // properly.
   for (let i = 0; i < colony.count; i++) {
     const sG = colony.state[i];
-    if (sG === STATE_DEAD || sG === STATE_QUEEN || sG === STATE_EGG) continue;
+    if (sG === STATE_DEAD || sG === STATE_QUEEN || sG === STATE_EGG || sG === STATE_LARVA) continue;
     const sx = colony.posX[i]! | 0;
     const sy = colony.posY[i]! | 0;
     const settled = settle(world, sx, sy);

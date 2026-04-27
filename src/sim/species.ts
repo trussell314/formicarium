@@ -91,8 +91,22 @@ export interface AntSpecies {
   readonly eggLayInterval: number;
   /** Ticks for an egg to mature into a worker. Compresses the real
    *  egg → larva → pupa → adult ~3-4 week cycle into observation
-   *  time. Hölldobler & Wilson (1990) Ch. 9 on caste development. */
+   *  time. Hölldobler & Wilson (1990) Ch. 9 on caste development.
+   *  This is the EGG-only duration; total brood time is
+   *  eggMatureTicks + larvaMatureTicks. */
   readonly eggMatureTicks: number;
+  /** Ticks a larva spends being fed before becoming a mature
+   *  worker. Larvae need trophallactic feeding from workers; if
+   *  their energy runs out they die (Hölldobler & Wilson 1990
+   *  Ch. 9). The larval period is ~2× the egg period in real
+   *  Pogonomyrmex. */
+  readonly larvaMatureTicks: number;
+  /** Per-tick basal-metabolism drain for a larva. Higher than
+   *  worker metabolism because larvae are growing tissue rapidly
+   *  rather than maintaining mature soma. With no feeding, a
+   *  full-energy larva starves before it can mature; trophallaxis
+   *  from passing workers keeps the brood pile alive. */
+  readonly larvaMetabolism: number;
   /** Hard cap on total colony size. Stops the queen from laying when
    *  reached so the SoA arrays don't blow past their capacity at
    *  long horizons. Real Pogonomyrmex barbatus mature colonies hold
@@ -306,9 +320,21 @@ export const HARVESTER: AntSpecies = {
   // mid-founding rate: 1 egg every 2.4 hours biological = 72000 ticks.
   // Compress to 5000 ticks (~10 min) for observable colony growth.
   eggLayInterval: 5000,
-  // Real egg → adult: ~4 weeks (~28M ticks). Compress to 50,000 ticks
-  // (~100 min biological) for observability.
-  eggMatureTicks: 50000,
+  // Real egg → larva: ~1 week. We compress to 15,000 ticks (~30
+  // min biological) so the user sees the egg→larva transition
+  // within a typical session window.
+  eggMatureTicks: 15000,
+  // Real larva → adult: ~3 weeks. Compress to 35,000 ticks
+  // (~70 min biological); total brood time = 50,000 ticks, same
+  // as the pre-larva-stage value so colony-growth tests don't
+  // regress.
+  larvaMatureTicks: 35000,
+  // Worker metabolism is 6.7e-7. Larvae burn ~15× faster (growing
+  // animals); with maxEnergy 1.0 a full-fed larva starves in
+  // ~100,000 ticks (~3 hr biological), well past larvaMatureTicks
+  // so a larva that gets even occasional trophallaxis matures.
+  // Neglected larvae starve.
+  larvaMetabolism: 1e-5,
   // Pogonomyrmex barbatus mature colonies hold 5,000-10,000 workers
   // (Tschinkel 1998). We cap lower to fit performance/render budget.
   maxColonySize: 1000,
