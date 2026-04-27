@@ -6,7 +6,7 @@
 //   ?width=N      world width (cells)
 //   ?height=N     world height (cells)
 
-import { Colony, STATE_DEAD, STATE_EGG, STATE_QUEEN } from './sim/colony';
+import { Colony, STATE_DEAD, STATE_EGG, STATE_LARVA, STATE_QUEEN } from './sim/colony';
 import { DEFAULT_PARAMS, step } from './sim/ant-rules';
 import { ParticleSystem } from './sim/particles';
 import { Pheromone } from './sim/pheromone';
@@ -473,11 +473,13 @@ function main(): void {
       for (let i = 0; i < world.food.length; i++) if (world.food[i]! > 0) foodCount++;
       let dead = 0;
       let eggs = 0;
+      let larvae = 0;
       let queens = 0;
       for (let i = 0; i < colony.count; i++) {
         const s = colony.state[i];
         if (s === STATE_DEAD) dead++;
         else if (s === STATE_EGG) eggs++;
+        else if (s === STATE_LARVA) larvae++;
         else if (s === STATE_QUEEN) queens++;
       }
       const alive = colony.count - dead;
@@ -537,7 +539,7 @@ function main(): void {
         `formicarium · ${HARVESTER.commonName} · seed 0x${settings.seed.toString(16)}` +
         `  ·  ${world.width}×${world.height}` +
         `  ·  ants ${alive} (start ${start}, +${world.totalBorn} born, −${world.totalDied} died)` +
-        `  ·  Q ${queens} eggs ${eggs}` +
+        `  ·  Q ${queens} eggs ${eggs} larvae ${larvae}` +
         `  ·  t=${world.tick.toLocaleString()} (${bioTime}, ${phaseLabel})` +
         `  ·  dug ${dugTotal}  grains ${grains}  food ${foodCount}` +
         `  ·  nest ${nestVol} (depth ${maxDepth})` +
