@@ -416,12 +416,26 @@ function main(): void {
           if (d > maxDepth) maxDepth = d;
         }
       }
+      // Convert ticks to biological time. Calibration anchor is
+      // 1 tick ≈ 120 ms biological (walkSpeed × cellSize matches
+      // Pogonomyrmex forager 30 mm/sec — see species.ts comment).
+      // Format as days/hours/minutes for readable session duration.
+      const bioSecs = world.tick * 0.12;
+      const bioDays = Math.floor(bioSecs / 86400);
+      const bioHours = Math.floor((bioSecs / 3600) % 24);
+      const bioMins = Math.floor((bioSecs / 60) % 60);
+      const bioSecsR = Math.floor(bioSecs % 60);
+      const bioTime = bioDays > 0
+        ? `${bioDays}d ${bioHours}h ${bioMins}m`
+        : bioHours > 0
+          ? `${bioHours}h ${bioMins}m ${bioSecsR}s`
+          : `${bioMins}m ${bioSecsR}s`;
       hud.textContent =
         `formicarium · ${HARVESTER.commonName} · seed 0x${settings.seed.toString(16)}` +
         `  ·  ${world.width}×${world.height}` +
         `  ·  ants ${alive} (start ${start}, +${world.totalBorn} born, −${world.totalDied} died)` +
         `  ·  Q ${queens} eggs ${eggs}` +
-        `  ·  t=${world.tick.toLocaleString()}` +
+        `  ·  t=${world.tick.toLocaleString()} (${bioTime})` +
         `  ·  dug ${dugTotal}  grains ${grains}  food ${foodCount}` +
         `  ·  nest ${nestVol} (depth ${maxDepth})` +
         `  ·  speed ${stepsPerFrame}×${paused ? '  ·  PAUSED' : ''}` +
