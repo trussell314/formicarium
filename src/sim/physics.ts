@@ -140,11 +140,26 @@ export function settle(world: World, ix: number, iy: number): number {
 export function settleGrain(world: World, x: number, y: number, rng: RNG): { x: number; y: number } {
   const w = world.width;
   const h = world.height;
+  // The natural-surface row acts as a one-way barrier. Real soil
+  // has cohesion (clay binding, root mat, micro-organic glue) and
+  // ants reinforce mound material into a structural cap. Once the
+  // entrance shaft is dug, loose above-ground spoil shouldn't
+  // cascade through the natural-surface horizon into the nest.
+  // Implementation: a grain currently above the natural surface
+  // for its column refuses to move into a row at or below that
+  // column's surface — even if the destination cell is AIR.
+  const wouldCrossSurface = (cx: number, fromY: number, toY: number): boolean => {
+    const surf = world.naturalSurface[cx]!;
+    return fromY < surf && toY >= surf;
+  };
   while (true) {
     if (y + 1 >= h) break;
     const srcIdx = y * w + x;
     const belowIdx = (y + 1) * w + x;
-    if (world.cells[belowIdx] === CELL_AIR) {
+    if (
+      world.cells[belowIdx] === CELL_AIR &&
+      !wouldCrossSurface(x, y, y + 1)
+    ) {
       const moves = world.grainMoves[srcIdx]!;
       world.cells[srcIdx] = CELL_AIR;
       world.grainMoves[srcIdx] = 0;
@@ -158,9 +173,11 @@ export function settleGrain(world: World, x: number, y: number, rng: RNG): { x: 
     // makes the pile shape converge to angle-of-repose without an
     // explicit rule.
     const dl = x > 0 && world.cells[(y + 1) * w + x - 1] === CELL_AIR
-      && world.cells[y * w + x - 1] === CELL_AIR;
+      && world.cells[y * w + x - 1] === CELL_AIR
+      && !wouldCrossSurface(x - 1, y, y + 1);
     const dr = x < w - 1 && world.cells[(y + 1) * w + x + 1] === CELL_AIR
-      && world.cells[y * w + x + 1] === CELL_AIR;
+      && world.cells[y * w + x + 1] === CELL_AIR
+      && !wouldCrossSurface(x + 1, y, y + 1);
     if (!dl && !dr) break;
     let goLeft: boolean;
     if (dl && dr) goLeft = rng.next() < 0.5;

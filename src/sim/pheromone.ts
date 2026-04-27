@@ -103,12 +103,24 @@ export class Pheromone {
    * pointing UP the gradient (so an ant heading toward this vector
    * climbs the concentration). At the grid edge the missing
    * neighbour is treated as zero.
+   *
+   * Fast path: most calls happen at interior cells where all four
+   * neighbours are in-bounds. Skipping the four bounds-checked
+   * sample() calls there saves ~16 branches per gradient — and
+   * gradient is the hottest pheromone API since every WANDER ant
+   * samples 5+ fields per tick.
    */
   gradient(x: number, y: number): { dx: number; dy: number } {
-    const xL = this.sample(x - 1, y);
-    const xR = this.sample(x + 1, y);
-    const yU = this.sample(x, y - 1);
-    const yD = this.sample(x, y + 1);
-    return { dx: xR - xL, dy: yD - yU };
+    const w = this.width;
+    if (x > 0 && y > 0 && x < w - 1 && y < this.height - 1) {
+      const i = y * w + x;
+      const cur = this.current;
+      return { dx: cur[i + 1]! - cur[i - 1]!, dy: cur[i + w]! - cur[i - w]! };
+    }
+    // Edge fallback — at least one neighbour out of bounds.
+    return {
+      dx: this.sample(x + 1, y) - this.sample(x - 1, y),
+      dy: this.sample(x, y + 1) - this.sample(x, y - 1),
+    };
   }
 }

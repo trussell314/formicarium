@@ -417,6 +417,13 @@ export function step(
   // markers settles in a single sweep rather than needing N sweeps.
   // The sweep is also cheap because both fields are mostly zero —
   // branch prediction skips the empty cells.
+  //
+  // The natural-surface row acts as a one-way barrier from above.
+  // Real soil has cohesion + ants reinforce the mound's contact
+  // with the substrate, so above-ground bodies/seeds shouldn't
+  // cascade through the surface horizon into the dug nest below.
+  // Above-surface markers refuse to descend into a row at or below
+  // their column's natural surface.
   if (world.tick % 30 === 0) {
     const wW = world.width;
     const wH = world.height;
@@ -426,6 +433,8 @@ export function step(
       for (let x = 0; x < wW; x++) {
         const ridx = row + x;
         const bidx = below + x;
+        const crossesSurface = y < world.naturalSurface[x]! && (y + 1) >= world.naturalSurface[x]!;
+        if (crossesSurface) continue;
         // Corpses fall through AIR cells with no existing occupant.
         if (world.corpse[ridx]! > 0) {
           if (
