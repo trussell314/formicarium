@@ -8,6 +8,15 @@ export class RNG {
     this.state = seed >>> 0 || 0xdeadbeef;
   }
 
+  /** Current internal state (uint32). For save/restore. */
+  getState(): number {
+    return this.state;
+  }
+  /** Restore from a previously-saved state value. */
+  setState(s: number): void {
+    this.state = s >>> 0;
+  }
+
   next(): number {
     this.state = (this.state + 0x6d2b79f5) >>> 0;
     let t = this.state;

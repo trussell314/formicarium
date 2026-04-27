@@ -10,6 +10,10 @@ import { Colony, STATE_DEAD, STATE_EGG, STATE_QUEEN } from './sim/colony';
 import { DEFAULT_PARAMS, step } from './sim/ant-rules';
 import { ParticleSystem } from './sim/particles';
 import { Pheromone } from './sim/pheromone';
+import {
+  captureSnapshot, clearSavedSnapshot, readSavedBlob,
+  restoreSnapshot, saveToLocalStorage,
+} from './sim/persist';
 import { RNG } from './sim/rng';
 import { HARVESTER } from './sim/species';
 import { World } from './sim/world';
@@ -181,6 +185,22 @@ function build(s: Settings) {
     if (colony.state[i] !== 0 /* STATE_WANDER */) continue;
     colony.age[i] = (rng.next() * HARVESTER.matureAge * 1.5) | 0;
   }
+  // Try restoring a saved snapshot now that fresh world+colony+
+  // pheromone+rng instances exist. restoreSnapshot validates that
+  // the save matches the current settings (seed/width/height/
+  // capacity); on mismatch we keep the freshly-built scenario.
+  const saved = readSavedBlob();
+  if (saved) {
+    const ok = restoreSnapshot(
+      saved,
+      { seed: s.seed, width: s.width, height: s.height },
+      world, colony, digField, buildField, rng,
+    );
+    if (ok) {
+      // eslint-disable-next-line no-console
+      console.log(`[formicarium] restored from save at tick ${world.tick.toLocaleString()}`);
+    }
+  }
   return { rng, world, colony, digField, buildField };
 }
 
@@ -322,7 +342,18 @@ function main(): void {
     },
     phero: () => { renderer.showPheromones = !renderer.showPheromones; },
     reseed: () => {
+      // Manual reseed clears the saved snapshot — otherwise the next
+      // build() call on the new seed would still try to restore from
+      // the stale (different-seed) blob, fail the seed check, and
+      // silently fall through to a fresh sim. Clearing here keeps the
+      // intent ("user wants a new run") and the behaviour ("nothing
+      // restores from disk") aligned.
+      clearSavedSnapshot();
       const s2 = { ...settings, seed: (settings.seed * 16807 + 1) >>> 0 };
+      // Update settings.seed in place so the auto-save loop captures
+      // snapshots under the new seed (and the next page-load restore
+      // matches the new seed too).
+      settings.seed = s2.seed;
       const built = build(s2);
       rng = built.rng;
       world = built.world;
@@ -354,6 +385,39 @@ function main(): void {
       if (act && actions[act]) actions[act]!();
     });
   }
+
+  // Periodic snapshot to localStorage so a tab refresh / OS restart
+  // resumes near where it left off rather than starting a brand new
+  // colony. 30 sec wall is well under the typical browser tab lifetime
+  // and short enough that a crashed tab loses at most ~30 s of work,
+  // but long enough that the JSON encode + base64 cost (~10 ms at
+  // default world size) doesn't show up in a frame budget. The save
+  // is best-effort: a quota error or missing localStorage just no-
+  // ops, and we never block the sim on the I/O.
+  const AUTO_SAVE_MS = 30_000;
+  const autoSaveTimer = window.setInterval(() => {
+    const blob = captureSnapshot(
+      world, colony, digField, buildField, rng,
+      { seed: settings.seed, width: settings.width, height: settings.height },
+    );
+    if (blob !== null) saveToLocalStorage(blob);
+  }, AUTO_SAVE_MS);
+  // Also flush on tab close/visibility change — losing the last 30 s
+  // of activity to a closed-laptop is jarring when the cost of saving
+  // is negligible. visibilitychange fires reliably on tab background;
+  // beforeunload is a belt-and-braces extra hook.
+  const flushSnapshot = () => {
+    const blob = captureSnapshot(
+      world, colony, digField, buildField, rng,
+      { seed: settings.seed, width: settings.width, height: settings.height },
+    );
+    if (blob !== null) saveToLocalStorage(blob);
+  };
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushSnapshot();
+  });
+  window.addEventListener('beforeunload', flushSnapshot);
+  void autoSaveTimer;
 
   let last = performance.now();
   let alpha = 0;
