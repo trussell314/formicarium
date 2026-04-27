@@ -168,6 +168,7 @@ export class Renderer {
       build: { current: Float32Array };
       trail?: { current: Float32Array };
       alarm?: { current: Float32Array };
+      queen?: { current: Float32Array };
     },
     daylight = 1,
   ): void {
@@ -293,7 +294,12 @@ export class Renderer {
       const build = pheromones.build.current;
       const trail = pheromones.trail?.current;
       const alarm = pheromones.alarm?.current;
+      const queen = pheromones.queen?.current;
       const CAP = 0.5;
+      // Queen pheromone equilibrates around ~10 at the queen's cell
+      // (deposit 0.10/tick × half-life ~7000 ticks); pick a cap
+      // that lets the gradient fade visibly within ~30 cells of her.
+      const QUEEN_CAP = 4;
       for (let i = 0; i < dig.length; i++) {
         const dv = Math.min(1, dig[i]! / CAP);
         const bv = Math.min(1, build[i]! / CAP);
@@ -301,17 +307,21 @@ export class Renderer {
         // Alarm uses a smaller cap because per-deposit amounts are
         // small (~0.05) compared to dig/build (~1.0).
         const av = alarm ? Math.min(1, alarm[i]! / 0.15) : 0;
-        if (dv < 0.01 && bv < 0.01 && tv < 0.01 && av < 0.01) continue;
+        const qv = queen ? Math.min(1, queen[i]! / QUEEN_CAP) : 0;
+        if (dv < 0.01 && bv < 0.01 && tv < 0.01 && av < 0.01 && qv < 0.01) continue;
         const o = i * 4;
-        // Cyan = dig, magenta = build, yellow = trail, red = alarm.
-        // Red is the loudest channel and composes last so an alarm
-        // at a buried entrance reads through everything else.
+        // Cyan = dig, magenta = build, yellow = trail, red = alarm,
+        // indigo = queen. Red composes last so an alarm at a buried
+        // entrance reads through everything else; queen blends in
+        // before alarm because its long-lived gradient is the
+        // background environment, not an emergency signal.
         const ar = data[o]!;
         const ag = data[o + 1]!;
         const ab = data[o + 2]!;
         const aDig = dv * 0.55;
         const aBuild = bv * 0.55;
         const aTrail = tv * 0.65;
+        const aQueen = qv * 0.55;
         const aAlarm = av * 0.75;
         let nr = ar * (1 - aDig) + 0  * aDig;
         let ng = ag * (1 - aDig) + 220 * aDig;
@@ -322,6 +332,9 @@ export class Renderer {
         nr = nr * (1 - aTrail) + 240 * aTrail;
         ng = ng * (1 - aTrail) + 220 * aTrail;
         nb = nb * (1 - aTrail) + 60  * aTrail;
+        nr = nr * (1 - aQueen) + 110 * aQueen;
+        ng = ng * (1 - aQueen) + 70  * aQueen;
+        nb = nb * (1 - aQueen) + 200 * aQueen;
         nr = nr * (1 - aAlarm) + 255 * aAlarm;
         ng = ng * (1 - aAlarm) + 30  * aAlarm;
         nb = nb * (1 - aAlarm) + 30  * aAlarm;

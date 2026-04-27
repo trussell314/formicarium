@@ -110,6 +110,14 @@ function build(s: Settings) {
   // have a destination they can't reach. Read by WANDER ants for
   // gradient-following AND by the Sudd dig gate as a bypass.
   const alarmField = new Pheromone(world.width, world.height, 0.50, 0.985);
+  // Queen pheromone. Slow diffuse + very long half-life — non-
+  // volatile cuticular signal that defines "this is the broodpile".
+  // Emitted by the queen at her cell each tick; followed by young
+  // (nurse-caste) WANDER workers. With this in place, attendant
+  // workers reliably congregate near the queen, supplying the
+  // trophallactic bouts that keep her energy above the lay
+  // threshold even in long-running sessions.
+  const queenField = new Pheromone(world.width, world.height, 0.10, 0.9999);
 
   // Capacity = species cap, so brood production has slots to fill.
   const colony = new Colony(HARVESTER.maxColonySize);
@@ -216,19 +224,19 @@ function build(s: Settings) {
     const ok = restoreSnapshot(
       saved,
       { seed: s.seed, width: s.width, height: s.height },
-      world, colony, digField, buildField, trailField, alarmField, rng,
+      world, colony, digField, buildField, trailField, alarmField, queenField, rng,
     );
     if (ok) {
       // eslint-disable-next-line no-console
       console.log(`[formicarium] restored from save at tick ${world.tick.toLocaleString()}`);
     }
   }
-  return { rng, world, colony, digField, buildField, trailField, alarmField };
+  return { rng, world, colony, digField, buildField, trailField, alarmField, queenField };
 }
 
 function main(): void {
   const settings = readSettings();
-  let { rng, world, colony, digField, buildField, trailField, alarmField } = build(settings);
+  let { rng, world, colony, digField, buildField, trailField, alarmField, queenField } = build(settings);
 
   const canvas = document.getElementById('screen') as HTMLCanvasElement;
   const hud = document.getElementById('hud') as HTMLDivElement;
@@ -384,6 +392,7 @@ function main(): void {
       buildField = built.buildField;
       trailField = built.trailField;
       alarmField = built.alarmField;
+      queenField = built.queenField;
       renderer.setWorld(world);
     },
   };
@@ -421,7 +430,7 @@ function main(): void {
   const AUTO_SAVE_MS = 30_000;
   const autoSaveTimer = window.setInterval(() => {
     const blob = captureSnapshot(
-      world, colony, digField, buildField, trailField, alarmField, rng,
+      world, colony, digField, buildField, trailField, alarmField, queenField, rng,
       { seed: settings.seed, width: settings.width, height: settings.height },
     );
     if (blob !== null) saveToLocalStorage(blob);
@@ -432,7 +441,7 @@ function main(): void {
   // beforeunload is a belt-and-braces extra hook.
   const flushSnapshot = () => {
     const blob = captureSnapshot(
-      world, colony, digField, buildField, trailField, alarmField, rng,
+      world, colony, digField, buildField, trailField, alarmField, queenField, rng,
       { seed: settings.seed, width: settings.width, height: settings.height },
     );
     if (blob !== null) saveToLocalStorage(blob);
@@ -453,7 +462,7 @@ function main(): void {
 
     if (!paused) {
       for (let i = 0; i < stepsPerFrame; i++) {
-        step(world, colony, digField, buildField, rng, DEFAULT_PARAMS, particles, HARVESTER, trailField, alarmField);
+        step(world, colony, digField, buildField, rng, DEFAULT_PARAMS, particles, HARVESTER, trailField, alarmField, queenField);
       }
       // No fixed-timestep accumulator yet — render alpha=1 (no
       // interpolation) is fine while sub-stepping multiple sim ticks
@@ -462,7 +471,7 @@ function main(): void {
     }
 
     const day = daylight(world.tick);
-    renderer.render(colony, alpha, particles, { dig: digField, build: buildField, trail: trailField, alarm: alarmField }, day);
+    renderer.render(colony, alpha, particles, { dig: digField, build: buildField, trail: trailField, alarm: alarmField, queen: queenField }, day);
 
     if (now - lastHud > 250) {
       lastHud = now;

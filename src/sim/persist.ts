@@ -24,8 +24,9 @@ const SAVE_KEY = 'formicarium:save';
 // than restored into mismatched buffer layouts. v2 added sprout +
 // sproutTick; v3 added the foraging trail pheromone; v4 added the
 // alarm pheromone; v5 added the population-driven food rate
-// (foodCap, clumpAccum); v6 added per-ant stuckTicks.
-const SAVE_VERSION = 6;
+// (foodCap, clumpAccum); v6 added per-ant stuckTicks; v7 added the
+// queen pheromone.
+const SAVE_VERSION = 7;
 
 // Chunked btoa to avoid argument-list length limits on very large arrays.
 function bytesToB64(view: ArrayBufferView): string {
@@ -45,8 +46,8 @@ function b64ToBytes(s: string): Uint8Array {
   return out;
 }
 
-interface SaveStateV6 {
-  v: 6;
+interface SaveStateV7 {
+  v: 7;
   foodCap: number;
   clumpAccum: number;
   // Settings — needed to validate that a save matches the requested run.
@@ -100,6 +101,7 @@ interface SaveStateV6 {
   buildCurrent: string;
   trailCurrent: string;
   alarmCurrent: string;
+  queenCurrent: string;
 }
 
 export interface SaveSettings {
@@ -117,9 +119,10 @@ export interface SaveSettings {
 export function captureSnapshot(
   world: World, colony: Colony,
   digField: Pheromone, buildField: Pheromone, trailField: Pheromone,
-  alarmField: Pheromone, rng: RNG, settings: SaveSettings,
+  alarmField: Pheromone, queenField: Pheromone,
+  rng: RNG, settings: SaveSettings,
 ): string | null {
-  const state: SaveStateV6 = {
+  const state: SaveStateV7 = {
     v: SAVE_VERSION,
     seed: settings.seed,
     width: settings.width,
@@ -167,6 +170,7 @@ export function captureSnapshot(
     buildCurrent: bytesToB64(buildField.current),
     trailCurrent: bytesToB64(trailField.current),
     alarmCurrent: bytesToB64(alarmField.current),
+    queenCurrent: bytesToB64(queenField.current),
   };
   return JSON.stringify(state);
 }
@@ -220,11 +224,12 @@ export function restoreSnapshot(
   blob: string, settings: SaveSettings,
   world: World, colony: Colony,
   digField: Pheromone, buildField: Pheromone, trailField: Pheromone,
-  alarmField: Pheromone, rng: RNG,
+  alarmField: Pheromone, queenField: Pheromone,
+  rng: RNG,
 ): boolean {
   let raw: unknown;
   try { raw = JSON.parse(blob); } catch { return false; }
-  const s = raw as Partial<SaveStateV6>;
+  const s = raw as Partial<SaveStateV7>;
   if (
     !s ||
     s.v !== SAVE_VERSION ||
@@ -284,6 +289,7 @@ export function restoreSnapshot(
     copyBytes(s.buildCurrent!, buildField.current);
     copyBytes(s.trailCurrent!, trailField.current);
     copyBytes(s.alarmCurrent!, alarmField.current);
+    copyBytes(s.queenCurrent!, queenField.current);
   } catch {
     return false;
   }

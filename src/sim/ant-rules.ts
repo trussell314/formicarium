@@ -213,6 +213,7 @@ export function step(
   species: AntSpecies = HARVESTER,
   trailField?: Pheromone,
   alarmField?: Pheromone,
+  queenField?: Pheromone,
 ): void {
   world.tick++;
 
@@ -338,6 +339,7 @@ export function step(
   buildField.step();
   if (trailField) trailField.step();
   if (alarmField) alarmField.step();
+  if (queenField) queenField.step();
   if (particles) particles.step();
 
   // Seed germination + sprout decay sweep. Tschinkel (1999): some
@@ -673,6 +675,23 @@ export function step(
     if (stateNow === STATE_QUEEN) {
       colony.prevX[i] = colony.posX[i]!;
       colony.prevY[i] = colony.posY[i]!;
+      // Queen pheromone emission. Real ants emit non-volatile cuticular
+      // hydrocarbons — Hölldobler & Wilson 1990 Ch. 7 list "queen
+      // recognition substances" as one of the dozen-plus chemical
+      // classes social insects use for caste signalling. Modelled
+      // here as a slow-diffuse, very-low-evaporation field that
+      // young workers (nurse caste, ageFrac < 0.5) bias their
+      // heading along. Output is the visible broodpile crowd
+      // around the queen — and reliable trophallaxis-driven feeding
+      // of the queen herself (see the nurse-bias block in WANDER
+      // stigmergy below).
+      if (queenField) {
+        const qx = colony.posX[i]! | 0;
+        const qy = colony.posY[i]! | 0;
+        if (qx >= 0 && qy >= 0 && qx < world.width && qy < world.height) {
+          queenField.deposit(qx, qy, 0.10);
+        }
+      }
       colony.energy[i]! -= species.metabolism * 0.05;
       if (colony.energy[i]! <= 0) {
         // Queen death → colony doom. We mark her STATE_DEAD just
@@ -1337,6 +1356,29 @@ export function step(
       if (gMag > 1e-6) {
         const want = Math.atan2(grad.dy, grad.dx);
         h += wrapAngle(want - h) * colony.stigmergy[i]!;
+      }
+    }
+
+    // Nurse pull toward the queen pheromone gradient. Layered on top
+    // of the routine stigmergy bias rather than overriding it: a
+    // young WANDER worker who's also responding to a dig front still
+    // gets some queen-ward bias, just not as strongly as a nurse
+    // sitting in the broodpile. Older workers (forager caste, ageFrac
+    // ≥ 0.5) ignore the field entirely — they have other jobs.
+    // Result is the broodpile crowd that real Pogonomyrmex queens
+    // are surrounded by, and reliable trophallaxis-driven queen
+    // feeding without needing explicit attendant orientation code.
+    if (
+      stateIn === STATE_WANDER && queenField &&
+      ageFrac < 0.5
+    ) {
+      const qGrad = queenField.gradient(ix, iy);
+      const qMag = Math.hypot(qGrad.dx, qGrad.dy);
+      if (qMag > 1e-6) {
+        const want = Math.atan2(qGrad.dy, qGrad.dx);
+        // Linear ramp: full strength at ageFrac=0, zero at 0.5.
+        const nurseWeight = 1 - ageFrac * 2;
+        h += wrapAngle(want - h) * colony.stigmergy[i]! * 0.6 * nurseWeight;
       }
     }
 
