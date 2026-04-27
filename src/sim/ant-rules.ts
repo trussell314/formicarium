@@ -212,6 +212,7 @@ export function step(
   particles?: ParticleSystem,
   species: AntSpecies = HARVESTER,
   trailField?: Pheromone,
+  alarmField?: Pheromone,
 ): void {
   world.tick++;
 
@@ -252,6 +253,7 @@ export function step(
   digField.step();
   buildField.step();
   if (trailField) trailField.step();
+  if (alarmField) alarmField.step();
   if (particles) particles.step();
 
   // Seed germination + sprout decay sweep. Tschinkel (1999): some
@@ -912,18 +914,34 @@ export function step(
       colony.heading[i] = h;
       let nx = colony.posX[i]!;
       let ny = colony.posY[i]!;
+      let cfHitSoil = false;
       for (let s = 0; s < subSteps; s++) {
         const dx = Math.cos(h) * stepLen;
         const dy = Math.sin(h) * stepLen;
         const r = tryStep(world, nx, ny, dx, dy);
         nx = r.x; ny = r.y;
         if (r.hitSoil) {
+          cfHitSoil = true;
           h = wrapAngle(h + Math.PI * (0.5 + rng.next() * 0.5));
           colony.heading[i] = h;
         }
       }
       colony.posX[i] = nx;
       colony.posY[i] = ny;
+      // Stranded-forager alarm. A CARRY_FOOD ant that hits soil
+      // above the natural surface is being denied entry to the nest
+      // (e.g. the entrance is buried by a grain cascade). Each bump
+      // emits a small alarm puff at the ant's cell; sustained
+      // bumping accumulates a real signal that diffuses through the
+      // soil and pulls underground workers up to dig her in.
+      // Hölldobler & Wilson (1990) Ch. 7 on alarm/recruitment.
+      if (cfHitSoil && alarmField) {
+        const ax2 = nx | 0;
+        const ay2 = ny | 0;
+        if (ay2 < world.naturalSurface[ax2]!) {
+          alarmField.deposit(ax2, ay2, 0.05);
+        }
+      }
       // Recruitment trail. CARRY_FOOD ants returning from a food
       // source lay a small amount of trail pheromone at every
       // step. This is the classical Bonabeau et al. 1998 mechanism
@@ -1107,13 +1125,35 @@ export function step(
     // (2) Stigmergy — bias toward the gradient of the field for our
     // current state. WANDER follows dig pheromone (recruit to active
     // dig sites); CARRY follows build pheromone (recruit to existing
-    // mounds for deposit).
+    // mounds for deposit). Alarm pheromone, when present and
+    // strong enough, OVERRIDES the routine field for WANDER ants —
+    // a buried-entrance distress signal beats the normal dig
+    // recruitment and pulls workers to the obstruction.
     const field = stateIn === STATE_WANDER ? digField : buildField;
-    const grad = field.gradient(ix, iy);
-    const gMag = Math.hypot(grad.dx, grad.dy);
-    if (gMag > 1e-6) {
-      const want = Math.atan2(grad.dy, grad.dx);
-      h += wrapAngle(want - h) * colony.stigmergy[i]!;
+    let routedByAlarm = false;
+    if (stateIn === STATE_WANDER && alarmField) {
+      const aLocal = alarmField.sample(ix, iy);
+      const aGrad = alarmField.gradient(ix, iy);
+      const aMag = Math.hypot(aGrad.dx, aGrad.dy);
+      // Threshold tuned so casual chamber-wall bumps (which deposit
+      // small-and-decay-fast amounts) don't divert the colony, but
+      // a sustained distress source builds enough local concentration
+      // to override.
+      if (aLocal > 0.08 && aMag > 1e-5) {
+        const want = Math.atan2(aGrad.dy, aGrad.dx);
+        // Stronger weight than routine stigmergy: alarm response is
+        // urgent (Hölldobler & Wilson 1990 Ch. 7).
+        h += wrapAngle(want - h) * Math.min(1, colony.stigmergy[i]! * 1.8);
+        routedByAlarm = true;
+      }
+    }
+    if (!routedByAlarm) {
+      const grad = field.gradient(ix, iy);
+      const gMag = Math.hypot(grad.dx, grad.dy);
+      if (gMag > 1e-6) {
+        const want = Math.atan2(grad.dy, grad.dx);
+        h += wrapAngle(want - h) * colony.stigmergy[i]!;
+      }
     }
 
     // (4) Geotaxis. Three flavours:
@@ -1164,6 +1204,20 @@ export function step(
     }
     colony.posX[i] = nx;
     colony.posY[i] = ny;
+    // Trapped-worker alarm. A CARRY ant that hits soil while still
+    // below the natural surface is being denied access to the
+    // mound (e.g. a tunnel or shaft has caved in around her).
+    // Same emission as the CARRY_FOOD case above but on the
+    // underground side; the alarm diffuses upward through soil and
+    // pulls surface ants down to dig her out. WANDER bumps don't
+    // emit — those are just exploration.
+    if (hitSoil && alarmField && stateIn === STATE_CARRY) {
+      const ax2 = nx | 0;
+      const ay2 = ny | 0;
+      if (ay2 >= world.naturalSurface[ax2]!) {
+        alarmField.deposit(ax2, ay2, 0.05);
+      }
+    }
 
     const ax = nx | 0;
     const ay = ny | 0;
@@ -1210,7 +1264,18 @@ export function step(
       if (ax < wW - 1 && world.cells[ay * wW + (ax + 1)] === CELL_SOIL) neighbourSoil++;
       if (ay > 0 && world.cells[(ay - 1) * wW + ax] === CELL_SOIL) neighbourSoil++;
       if (ay < world.height - 1 && world.cells[(ay + 1) * wW + ax] === CELL_SOIL) neighbourSoil++;
-      if (neighbourSoil < 2) {
+      // Alarm bypass. The Sudd gate exists to stop surface ants
+      // gnawing at flat ground, but a buried entrance signals
+      // distress (CARRY/CARRY_FOOD ants bouncing into it deposit
+      // alarm pheromone above the obstruction). When an ant is
+      // standing in a strong local alarm field, drop the gate so
+      // outside-in dig response can actually fire. Without this,
+      // surface ants near a buried entrance bounce until they
+      // starve. Threshold matches the WANDER follow trigger so the
+      // ant that gets routed to alarm is also the one that can dig.
+      const alarmHere = alarmField ? alarmField.sample(ax, ay) : 0;
+      const alarmBypass = alarmHere > 0.08;
+      if (neighbourSoil < 2 && !alarmBypass) {
         // Not enclosed — skip dig (and the Khuong roll). Grain
         // pickup is still allowed below; that's a different
         // behaviour and works fine on open ground.
@@ -1269,7 +1334,13 @@ export function step(
         const vAir = airAbove + airBelow;
         const lAir = airLeft + airRight;
         const dirBonus = vAir > lAir ? 1.5 : (lAir > vAir ? 0.3 : 1.0);
-        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus * dirBonus * digMult) {
+        // Alarm boost. Strong local alarm pheromone signals "dig
+        // here, fast" — multiplies the dig roll by up to 3× when
+        // saturated. This is what produces the visible mass
+        // response: a buried entrance accumulates alarm, surface
+        // ants pile in and excavate through.
+        const alarmBoost = 1 + Math.min(2, alarmHere * 8);
+        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus * dirBonus * digMult * alarmBoost) {
           if (digCell(world, target.x, target.y, rng)) {
             // Track dig direction relative to the digger's cell, so
             // the diag can surface a vertical-vs-lateral histogram.

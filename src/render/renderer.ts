@@ -167,6 +167,7 @@ export class Renderer {
       dig: { current: Float32Array };
       build: { current: Float32Array };
       trail?: { current: Float32Array };
+      alarm?: { current: Float32Array };
     },
     daylight = 1,
   ): void {
@@ -291,24 +292,27 @@ export class Renderer {
       const dig = pheromones.dig.current;
       const build = pheromones.build.current;
       const trail = pheromones.trail?.current;
+      const alarm = pheromones.alarm?.current;
       const CAP = 0.5;
       for (let i = 0; i < dig.length; i++) {
         const dv = Math.min(1, dig[i]! / CAP);
         const bv = Math.min(1, build[i]! / CAP);
         const tv = trail ? Math.min(1, trail[i]! / CAP) : 0;
-        if (dv < 0.01 && bv < 0.01 && tv < 0.01) continue;
+        // Alarm uses a smaller cap because per-deposit amounts are
+        // small (~0.05) compared to dig/build (~1.0).
+        const av = alarm ? Math.min(1, alarm[i]! / 0.15) : 0;
+        if (dv < 0.01 && bv < 0.01 && tv < 0.01 && av < 0.01) continue;
         const o = i * 4;
-        // Cyan = dig, magenta = build, yellow = foraging trail.
-        // Yellow is a third primary that doesn't conflict with the
-        // brown/green terrain palette OR the existing two pheromone
-        // colors, so a trail leading to a green seed reads as a
-        // distinct visual layer.
+        // Cyan = dig, magenta = build, yellow = trail, red = alarm.
+        // Red is the loudest channel and composes last so an alarm
+        // at a buried entrance reads through everything else.
         const ar = data[o]!;
         const ag = data[o + 1]!;
         const ab = data[o + 2]!;
         const aDig = dv * 0.55;
         const aBuild = bv * 0.55;
-        const aTrail = tv * 0.65;  // slightly more opaque so trails pop on the sky
+        const aTrail = tv * 0.65;
+        const aAlarm = av * 0.75;
         let nr = ar * (1 - aDig) + 0  * aDig;
         let ng = ag * (1 - aDig) + 220 * aDig;
         let nb = ab * (1 - aDig) + 220 * aDig;
@@ -318,6 +322,9 @@ export class Renderer {
         nr = nr * (1 - aTrail) + 240 * aTrail;
         ng = ng * (1 - aTrail) + 220 * aTrail;
         nb = nb * (1 - aTrail) + 60  * aTrail;
+        nr = nr * (1 - aAlarm) + 255 * aAlarm;
+        ng = ng * (1 - aAlarm) + 30  * aAlarm;
+        nb = nb * (1 - aAlarm) + 30  * aAlarm;
         data[o]     = nr | 0;
         data[o + 1] = ng | 0;
         data[o + 2] = nb | 0;

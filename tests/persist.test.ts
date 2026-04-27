@@ -33,12 +33,13 @@ function makeSim(seed: number) {
   const dig = new Pheromone(world.width, world.height, 0.12, 0.99);
   const build = new Pheromone(world.width, world.height, 0.10, 0.997);
   const trail = new Pheromone(world.width, world.height, 0.40, 0.999);
-  return { rng, world, colony, dig, build, trail };
+  const alarm = new Pheromone(world.width, world.height, 0.50, 0.985);
+  return { rng, world, colony, dig, build, trail, alarm };
 }
 
 function tickN(s: ReturnType<typeof makeSim>, n: number): void {
   for (let i = 0; i < n; i++) {
-    step(s.world, s.colony, s.dig, s.build, s.rng, DEFAULT_PARAMS, undefined, undefined, s.trail);
+    step(s.world, s.colony, s.dig, s.build, s.rng, DEFAULT_PARAMS, undefined, undefined, s.trail, s.alarm);
   }
 }
 
@@ -56,7 +57,7 @@ describe('persist', () => {
     tickN(a, 500); // produce a non-trivial state to encode
 
     const blob = captureSnapshot(
-      a.world, a.colony, a.dig, a.build, a.trail, a.rng,
+      a.world, a.colony, a.dig, a.build, a.trail, a.alarm, a.rng,
       { seed: 42, width: a.world.width, height: a.world.height },
     );
     expect(blob).not.toBeNull();
@@ -71,7 +72,7 @@ describe('persist', () => {
       // sim's seed — the caller (main.ts) passes the seed it built
       // the world with, which is the same one the snapshot recorded.
       { seed: 42, width: b.world.width, height: b.world.height },
-      b.world, b.colony, b.dig, b.build, b.trail, b.rng,
+      b.world, b.colony, b.dig, b.build, b.trail, b.alarm, b.rng,
     );
     expect(ok).toBe(true);
 
@@ -111,7 +112,7 @@ describe('persist', () => {
     tickN(a, 300);
 
     const blob = captureSnapshot(
-      a.world, a.colony, a.dig, a.build, a.trail, a.rng,
+      a.world, a.colony, a.dig, a.build, a.trail, a.alarm, a.rng,
       { seed: 7, width: a.world.width, height: a.world.height },
     );
     expect(blob).not.toBeNull();
@@ -120,7 +121,7 @@ describe('persist', () => {
     const ok = restoreSnapshot(
       blob!,
       { seed: 7, width: b.world.width, height: b.world.height },
-      b.world, b.colony, b.dig, b.build, b.trail, b.rng,
+      b.world, b.colony, b.dig, b.build, b.trail, b.alarm, b.rng,
     );
     expect(ok).toBe(true);
 
@@ -140,7 +141,7 @@ describe('persist', () => {
     const a = makeSim(1);
     tickN(a, 50);
     const blob = captureSnapshot(
-      a.world, a.colony, a.dig, a.build, a.trail, a.rng,
+      a.world, a.colony, a.dig, a.build, a.trail, a.alarm, a.rng,
       { seed: 1, width: a.world.width, height: a.world.height },
     );
     expect(blob).not.toBeNull();
@@ -149,14 +150,14 @@ describe('persist', () => {
     // Wrong seed → reject (different scenario was requested)
     expect(restoreSnapshot(
       blob!, { seed: 2, width: b.world.width, height: b.world.height },
-      b.world, b.colony, b.dig, b.build, b.trail, b.rng,
+      b.world, b.colony, b.dig, b.build, b.trail, b.alarm, b.rng,
     )).toBe(false);
     // Wrong dimensions would mean wrongly-sized buffers; we don't
     // build a mismatching world here because the dimensions argument
     // is checked against the saved state directly.
     expect(restoreSnapshot(
       blob!, { seed: 1, width: b.world.width + 1, height: b.world.height },
-      b.world, b.colony, b.dig, b.build, b.trail, b.rng,
+      b.world, b.colony, b.dig, b.build, b.trail, b.alarm, b.rng,
     )).toBe(false);
   });
 
@@ -164,11 +165,11 @@ describe('persist', () => {
     const b = makeSim(1);
     expect(restoreSnapshot(
       'not a json blob', { seed: 1, width: b.world.width, height: b.world.height },
-      b.world, b.colony, b.dig, b.build, b.trail, b.rng,
+      b.world, b.colony, b.dig, b.build, b.trail, b.alarm, b.rng,
     )).toBe(false);
     expect(restoreSnapshot(
       '{"v": 9999}', { seed: 1, width: b.world.width, height: b.world.height },
-      b.world, b.colony, b.dig, b.build, b.trail, b.rng,
+      b.world, b.colony, b.dig, b.build, b.trail, b.alarm, b.rng,
     )).toBe(false);
   });
 });
