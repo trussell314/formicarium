@@ -136,6 +136,25 @@ export interface AntSpecies {
    *  the daylight curve in world.ts. False would mean a nocturnal
    *  species (e.g. some Camponotus); we don't ship one yet. */
   readonly diurnal: boolean;
+
+  // ── Necrophoresis ───────────────────────────────────────────────
+
+  /** Per-tick probability that a WANDER ant standing on or adjacent
+   *  to a corpse cell picks the body up and switches to
+   *  STATE_NECRO_CARRY. Wilson, Durlach & Roth (1958) showed the
+   *  behaviour is contact-triggered by oleic acid on dead nestmates;
+   *  not every passing worker reacts (lots of variation between
+   *  species). We pick a value that produces visible cleanup of the
+   *  corpse pool over a few biological hours without instantly
+   *  emptying the nest. Set to 0 for species that don't midden
+   *  (army ants, fungus growers handle waste differently). */
+  readonly necrophoresisProb: number;
+  /** Minimum ticks an ant must spend hauling a corpse before
+   *  dropping it. The combination of stateTicks gate + above-surface
+   *  drop logic produces middens 50-100 cells from the nest entrance.
+   *  Below this many ticks the drop logic refuses, so corpses don't
+   *  pile up at the doorstep. */
+  readonly necroHaulMinTicks: number;
 }
 
 /**
@@ -237,4 +256,17 @@ export const HARVESTER: AntSpecies = {
   // stay underground from sunset to dawn; surface activity restarts
   // when ground temperature crosses ~25°C in the morning.
   diurnal: true,
+  // Wilson, Durlach & Roth 1958. P. barbatus is documented as a
+  // necrophoretic species; the per-tick pickup probability isn't
+  // measured directly but Hart & Ratnieks (2002) found that ~30% of
+  // workers passing a corpse responded within a minute of contact.
+  // Per-tick (120 ms biological) gives ~30% / 500 ticks ≈ 6e-4. We
+  // pick 1e-3 to make cleanup visible at observation scales without
+  // making it overwhelm dig/forage activity.
+  necrophoresisProb: 1e-3,
+  // Hauling lasts long enough to walk the body off the entrance.
+  // 500 ticks × 1.2 cells/tick = ~600 cells max travel — far more
+  // than the ant will actually walk above-surface, so the gate is
+  // really about "got out of the chamber" plus a short surface walk.
+  necroHaulMinTicks: 500,
 };

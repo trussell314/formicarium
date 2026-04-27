@@ -43,8 +43,16 @@ export const STATE_QUEEN = 6;
  *  egg → larva → pupa → adult over weeks; we collapse those stages
  *  into a single maturity counter. */
 export const STATE_EGG = 7;
+/** Hauling a nestmate corpse to a midden ("refuse pile"). Wilson,
+ *  Durlach & Roth (1958, "Chemical releaser of necrophoric behavior
+ *  in ants"): workers respond to oleic acid on dead bodies by
+ *  picking them up and dropping them outside the nest. The state
+ *  drives the ant up out of the chamber, randomwalks on the
+ *  surface to drift away from the entrance, then drops the body
+ *  on intact ground — the visible midden is what remains. */
+export const STATE_NECRO_CARRY = 8;
 
-export type AntState = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type AntState = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 export class Colony {
   count = 0;

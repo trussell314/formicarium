@@ -39,7 +39,8 @@
 
 import {
   Colony, STATE_CARRY, STATE_CARRY_FOOD, STATE_DEAD, STATE_EGG,
-  STATE_FORAGE, STATE_QUEEN, STATE_REST, STATE_WANDER, type AntState,
+  STATE_FORAGE, STATE_NECRO_CARRY, STATE_QUEEN, STATE_REST,
+  STATE_WANDER, type AntState,
 } from './colony';
 import type { ParticleSystem } from './particles';
 import { Pheromone } from './pheromone';
@@ -700,6 +701,97 @@ export function step(
         colony.heading[i] = rng.range(0, Math.PI * 2);
       }
       continue;
+    }
+
+    // NECRO_CARRY tick. Hauling a corpse out of the nest. Below-
+    // surface: negative geotaxis (head UP) to exit the chamber.
+    // Above-surface: random walk on the surface to drift away from
+    // the nest entrance. Drop the body once we're (a) above the
+    // natural surface, (b) on intact ground, and (c) past the
+    // species.necroHaulMinTicks gate so the drop spot is some
+    // distance from the door.
+    //   Wilson, E. O., Durlach, N. I. & Roth, L. M. (1958). Chemical
+    //   releaser of necrophoric behavior in ants. Psyche 65: 108–114.
+    //   Hart, A. G. & Ratnieks, F. L. W. (2002). Waste management in
+    //   the leaf-cutting ant Atta colombica. Behav Ecol. 13: 224–231.
+    if (stateIn === STATE_NECRO_CARRY) {
+      colony.stateTicks[i]!++;
+      h += rng.gauss() * colony.turnNoise[i]!;
+      // Below or at surface: hard upward bias toward exit. Above
+      // surface: pure random walk (drift the body away from the
+      // entrance). Mirror of the FORAGE outbound geometry.
+      if (iy >= world.naturalSurface[ix]!) {
+        h += wrapAngle(-Math.PI / 2 - h) * geotaxis;
+      }
+      h = wrapAngle(h);
+      colony.heading[i] = h;
+      let nx = colony.posX[i]!;
+      let ny = colony.posY[i]!;
+      for (let s = 0; s < subSteps; s++) {
+        const dx = Math.cos(h) * stepLen;
+        const dy = Math.sin(h) * stepLen;
+        const r = tryStep(world, nx, ny, dx, dy);
+        nx = r.x; ny = r.y;
+        if (r.hitSoil) {
+          h = wrapAngle(h + Math.PI * (0.5 + rng.next() * 0.5));
+          colony.heading[i] = h;
+        }
+      }
+      colony.posX[i] = nx;
+      colony.posY[i] = ny;
+      const dxIdx = nx | 0;
+      const dyIdx = ny | 0;
+      if (
+        dxIdx >= 0 && dyIdx >= 0 && dxIdx < world.width && dyIdx < world.height
+      ) {
+        const dIdx = dyIdx * world.width + dxIdx;
+        const aboveSurface = dyIdx < world.naturalSurface[dxIdx]!;
+        const groundIsIntact =
+          world.cells[world.index(dxIdx, world.naturalSurface[dxIdx]!)] !== CELL_AIR;
+        const cellIsAir = world.cells[dIdx] === CELL_AIR;
+        const noCorpseHere = world.corpse[dIdx]! === 0;
+        if (
+          aboveSurface && groundIsIntact && cellIsAir && noCorpseHere &&
+          colony.stateTicks[i]! >= species.necroHaulMinTicks &&
+          // Probabilistic drop while on the surface so the deposit
+          // point isn't always the first valid air cell. Distributes
+          // bodies across a few cells of midden rather than
+          // stacking them all at one column.
+          rng.next() < 0.05
+        ) {
+          world.corpse[dIdx] = 1;
+          colony.setState(i, STATE_WANDER);
+          colony.heading[i] = Math.PI / 2 + rng.range(-0.3, 0.3);
+        }
+      }
+      continue;
+    }
+
+    // Necrophoresis pickup. WANDER ants on (or cardinally adjacent
+    // to) a corpse cell roll species.necrophoresisProb. On success,
+    // the corpse marker is cleared from world and the ant becomes
+    // STATE_NECRO_CARRY — the haul logic in its own block above
+    // handles the trip out of the nest. Wilson et al. (1958) showed
+    // the response is contact-triggered, not gradient-followed.
+    if (stateIn === STATE_WANDER && species.necrophoresisProb > 0) {
+      const wW = world.width;
+      // Cell-or-cardinal-adjacent — mirror of the food-pickup
+      // adjacency logic. Pure cell-only is too narrow; agents at
+      // continuous positions sub-cell-cross before sampling.
+      let cIdx = -1;
+      const here = iy * wW + ix;
+      if (ix >= 0 && iy >= 0 && ix < wW && iy < world.height && world.corpse[here]! > 0) cIdx = here;
+      else if (ix > 0 && world.corpse[here - 1]! > 0) cIdx = here - 1;
+      else if (ix < wW - 1 && world.corpse[here + 1]! > 0) cIdx = here + 1;
+      else if (iy > 0 && world.corpse[here - wW]! > 0) cIdx = here - wW;
+      else if (iy < world.height - 1 && world.corpse[here + wW]! > 0) cIdx = here + wW;
+      if (cIdx >= 0 && rng.next() < species.necrophoresisProb) {
+        world.corpse[cIdx] = 0;
+        colony.setState(i, STATE_NECRO_CARRY);
+        // Head upward to start the trip out of the nest.
+        colony.heading[i] = -Math.PI / 2 + rng.range(-0.3, 0.3);
+        continue;
+      }
     }
 
     // WANDER ants underground roll the foraging-trip transition.

@@ -8,7 +8,8 @@
 // Renderer reads sim state. Never writes. (CLAUDE.md invariant.)
 
 import {
-  Colony, STATE_CARRY, STATE_DEAD, STATE_EGG, STATE_QUEEN,
+  Colony, STATE_CARRY, STATE_DEAD, STATE_EGG, STATE_NECRO_CARRY,
+  STATE_QUEEN,
 } from '../sim/colony';
 import type { ParticleSystem } from '../sim/particles';
 import { CELL_AIR, CELL_SOIL, World } from '../sim/world';
@@ -380,6 +381,7 @@ export class Renderer {
       const px = ox + x * scale;
       const py = oy + y * scale;
       const carry = state === STATE_CARRY;
+      const necro = state === STATE_NECRO_CARRY;
       // Contact shadow: a small dim ellipse a fraction below the ant
       // anchors them to the substrate. Without it ants read as
       // floating overlay sprites instead of agents on the ground.
@@ -429,6 +431,19 @@ export class Renderer {
         this.ctx.fillStyle = GRAIN_COLOR_CSS;
         this.ctx.beginPath();
         this.ctx.arc(px, py - radius * 0.6, radius * 0.55, 0, Math.PI * 2);
+        this.ctx.fill();
+      } else if (necro) {
+        // Hauled corpse — same dim purplish-grey as the world.corpse
+        // overlay so the viewer reads "ant carrying a body" rather
+        // than "ant carrying a different cargo type". Drawn slightly
+        // larger than a grain because it's a whole nestmate.
+        this.ctx.fillStyle = 'rgb(90, 70, 92)';
+        this.ctx.beginPath();
+        this.ctx.ellipse(
+          px, py - radius * 0.7,
+          radius * 0.85, radius * 0.55,
+          colony.heading[i]!, 0, Math.PI * 2,
+        );
         this.ctx.fill();
       }
     }
