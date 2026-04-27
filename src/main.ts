@@ -548,7 +548,14 @@ function main(): void {
     }
 
     const day = daylight(world.tick);
-    renderer.render(colony, alpha, particles, { dig: digField, build: buildField, trail: trailField, alarm: alarmField, queen: queenField }, day);
+    renderer.render(
+      colony, alpha, particles,
+      {
+        dig: digField, build: buildField, trail: trailField, alarm: alarmField, queen: queenField,
+        brood: broodField, necro: necroField, noEntry: noEntryField, granary: granaryField, trunk: trunkField,
+      },
+      day,
+    );
 
     if (now - lastHud > 250) {
       lastHud = now;

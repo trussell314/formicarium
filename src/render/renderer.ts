@@ -169,6 +169,11 @@ export class Renderer {
       trail?: { current: Float32Array };
       alarm?: { current: Float32Array };
       queen?: { current: Float32Array };
+      brood?: { current: Float32Array };
+      necro?: { current: Float32Array };
+      noEntry?: { current: Float32Array };
+      granary?: { current: Float32Array };
+      trunk?: { current: Float32Array };
     },
     daylight = 1,
   ): void {
@@ -295,52 +300,72 @@ export class Renderer {
       const trail = pheromones.trail?.current;
       const alarm = pheromones.alarm?.current;
       const queen = pheromones.queen?.current;
-      const CAP = 0.5;
-      // Queen pheromone equilibrates around ~10 at the queen's cell
-      // (deposit 0.10/tick × half-life ~7000 ticks); pick a cap
-      // that lets the gradient fade visibly within ~30 cells of her.
-      const QUEEN_CAP = 4;
+      const brood = pheromones.brood?.current;
+      const necro = pheromones.necro?.current;
+      const noEntry = pheromones.noEntry?.current;
+      const granary = pheromones.granary?.current;
+      const trunk = pheromones.trunk?.current;
+      // Per-field cap values picked so cells at peak concentration
+      // saturate to ~1.0 contribution. Calibrated from the deposit
+      // rate × retention half-life of each field.
+      //   dig/build: 0.5 (deposit 1.0 on rare events)
+      //   trail:     0.5 (volatile, decays fast)
+      //   alarm:     0.15 (small per-deposit amounts)
+      //   queen:     4.0 (continuous emission, long half-life)
+      //   brood:     1.5 (continuous emission per larva)
+      //   necro:     0.8 (continuous emission per corpse)
+      //   no-entry:  2.0 (slow accumulation by unproductive WANDER)
+      //   granary:   4.0 (rare strong deposits, long half-life)
+      //   trunk:     5.0 (cumulative over many foraging trips)
+      // We composite ADDITIVELY rather than alpha-stacking — each
+      // layer pushes the cell color toward its target by
+      // (target - current) * intensity * weight. This produces
+      // order-independent blending and lets weak signals from many
+      // fields combine without later layers wiping out earlier ones.
+      const W = 0.55;
       for (let i = 0; i < dig.length; i++) {
-        const dv = Math.min(1, dig[i]! / CAP);
-        const bv = Math.min(1, build[i]! / CAP);
-        const tv = trail ? Math.min(1, trail[i]! / CAP) : 0;
-        // Alarm uses a smaller cap because per-deposit amounts are
-        // small (~0.05) compared to dig/build (~1.0).
+        const dv = Math.min(1, dig[i]! / 0.5);
+        const bv = Math.min(1, build[i]! / 0.5);
+        const tv = trail ? Math.min(1, trail[i]! / 0.5) : 0;
         const av = alarm ? Math.min(1, alarm[i]! / 0.15) : 0;
-        const qv = queen ? Math.min(1, queen[i]! / QUEEN_CAP) : 0;
-        if (dv < 0.01 && bv < 0.01 && tv < 0.01 && av < 0.01 && qv < 0.01) continue;
+        const qv = queen ? Math.min(1, queen[i]! / 4) : 0;
+        const brv = brood ? Math.min(1, brood[i]! / 1.5) : 0;
+        const nv = necro ? Math.min(1, necro[i]! / 0.8) : 0;
+        const xv = noEntry ? Math.min(1, noEntry[i]! / 2) : 0;
+        const gv = granary ? Math.min(1, granary[i]! / 4) : 0;
+        const tkv = trunk ? Math.min(1, trunk[i]! / 5) : 0;
+        if (
+          dv < 0.01 && bv < 0.01 && tv < 0.01 && av < 0.01 && qv < 0.01 &&
+          brv < 0.01 && nv < 0.01 && xv < 0.01 && gv < 0.01 && tkv < 0.01
+        ) continue;
         const o = i * 4;
-        // Cyan = dig, magenta = build, yellow = trail, red = alarm,
-        // indigo = queen. Red composes last so an alarm at a buried
-        // entrance reads through everything else; queen blends in
-        // before alarm because its long-lived gradient is the
-        // background environment, not an emergency signal.
-        const ar = data[o]!;
-        const ag = data[o + 1]!;
-        const ab = data[o + 2]!;
-        const aDig = dv * 0.55;
-        const aBuild = bv * 0.55;
-        const aTrail = tv * 0.65;
-        const aQueen = qv * 0.55;
-        const aAlarm = av * 0.75;
-        let nr = ar * (1 - aDig) + 0  * aDig;
-        let ng = ag * (1 - aDig) + 220 * aDig;
-        let nb = ab * (1 - aDig) + 220 * aDig;
-        nr = nr * (1 - aBuild) + 220 * aBuild;
-        ng = ng * (1 - aBuild) + 0   * aBuild;
-        nb = nb * (1 - aBuild) + 220 * aBuild;
-        nr = nr * (1 - aTrail) + 240 * aTrail;
-        ng = ng * (1 - aTrail) + 220 * aTrail;
-        nb = nb * (1 - aTrail) + 60  * aTrail;
-        nr = nr * (1 - aQueen) + 110 * aQueen;
-        ng = ng * (1 - aQueen) + 70  * aQueen;
-        nb = nb * (1 - aQueen) + 200 * aQueen;
-        nr = nr * (1 - aAlarm) + 255 * aAlarm;
-        ng = ng * (1 - aAlarm) + 30  * aAlarm;
-        nb = nb * (1 - aAlarm) + 30  * aAlarm;
-        data[o]     = nr | 0;
-        data[o + 1] = ng | 0;
-        data[o + 2] = nb | 0;
+        let r = data[o]!;
+        let g = data[o + 1]!;
+        let b = data[o + 2]!;
+        // Color targets:
+        //   dig       cyan        (  0, 220, 220)
+        //   build     magenta     (220,   0, 220)
+        //   trail     yellow      (240, 220,  60)
+        //   alarm     bright red  (255,  30,  30)
+        //   queen     indigo      (110,  70, 200)
+        //   brood     pale pink   (255, 180, 180)
+        //   necro     olive       (140, 130,  50)
+        //   no-entry  cool grey   (140, 150, 170)
+        //   granary   warm orange (255, 160,  60)
+        //   trunk     deep gold   (200, 170,  30)
+        r += (0   - r) * dv  * W; g += (220 - g) * dv  * W; b += (220 - b) * dv  * W;
+        r += (220 - r) * bv  * W; g += (0   - g) * bv  * W; b += (220 - b) * bv  * W;
+        r += (240 - r) * tv  * W; g += (220 - g) * tv  * W; b += (60  - b) * tv  * W;
+        r += (255 - r) * av  * 0.75; g += (30  - g) * av  * 0.75; b += (30  - b) * av  * 0.75;
+        r += (110 - r) * qv  * W; g += (70  - g) * qv  * W; b += (200 - b) * qv  * W;
+        r += (255 - r) * brv * W; g += (180 - g) * brv * W; b += (180 - b) * brv * W;
+        r += (140 - r) * nv  * W; g += (130 - g) * nv  * W; b += (50  - b) * nv  * W;
+        r += (140 - r) * xv  * W; g += (150 - g) * xv  * W; b += (170 - b) * xv  * W;
+        r += (255 - r) * gv  * W; g += (160 - g) * gv  * W; b += (60  - b) * gv  * W;
+        r += (200 - r) * tkv * W; g += (170 - g) * tkv * W; b += (30  - b) * tkv * W;
+        data[o]     = r < 0 ? 0 : r > 255 ? 255 : r | 0;
+        data[o + 1] = g < 0 ? 0 : g > 255 ? 255 : g | 0;
+        data[o + 2] = b < 0 ? 0 : b > 255 ? 255 : b | 0;
       }
     }
     this.offCtx.putImageData(this.imageData, 0, 0);
