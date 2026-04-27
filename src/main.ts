@@ -50,7 +50,7 @@ function readSettings(): Settings {
     // W·H so the pheromone field update is ~half the work too.
     width: Math.max(40, num('width', 280) | 0),
     height: Math.max(30, num('height', 140) | 0),
-    ants: Math.max(1, num('ants', 50) | 0),
+    ants: Math.max(0, num('ants', 50) | 0),
     simStepsPerFrame: Math.max(1, num('speed', 8) | 0),
   };
 }
@@ -63,8 +63,11 @@ function build(s: Settings) {
   // saturates that rate at `foodCap` workers' worth of demand.
   // 10× the starting-ant URL parameter gives the colony substantial
   // growth headroom while preventing runaway food drops at maxed-out
-  // colony sizes.
-  world.foodCap = s.ants * 10;
+  // colony sizes. Floor at 50 so a queen-only (?ants=0) founding
+  // colony still gets meaningful food rain once her first nanitics
+  // start foraging — without the floor the cap is 0 and no clump
+  // ever fires.
+  world.foodCap = Math.max(50, s.ants * 10);
   const surfaceRow = Math.floor(s.height * 0.30);
   const halfW = Math.max(6, Math.floor(s.width * 0.06));
   const depth = Math.max(4, Math.floor(s.height * 0.05));
@@ -118,6 +121,33 @@ function build(s: Settings) {
   // trophallactic bouts that keep her energy above the lay
   // threshold even in long-running sessions.
   const queenField = new Pheromone(world.width, world.height, 0.10, 0.9999);
+  // Brood pheromone (Cassill 2002; Slipinski et al. 2006). Larvae
+  // emit a hunger-call signal distinct from queen pheromone. Since
+  // brood thermoregulation drifts larvae away from the queen, a
+  // separate field ensures nurses still find the broodpile.
+  // Faster decay than queen so the gradient tracks the larvae as
+  // they migrate with daylight.
+  const broodField = new Pheromone(world.width, world.height, 0.20, 0.999);
+  // Necromone (Wilson, Durlach & Roth 1958). Oleic-acid analog
+  // emitted continuously by corpse cells. Necrophoresis-eligible
+  // workers bias toward the gradient as pickup recruitment.
+  const necroField = new Pheromone(world.width, world.height, 0.30, 0.99);
+  // No-entry pheromone (Robinson, Jackson, Holcombe & Ratnieks
+  // 2005). Workers who've been wandering unproductively deposit a
+  // "skip me" mark; other WANDER ants bias AWAY from the gradient.
+  // Slow diffuse + medium retention so dead-end markers persist
+  // through the area without instantly bleeding everywhere.
+  const noEntryField = new Pheromone(world.width, world.height, 0.05, 0.9995);
+  // Granary marker (Tschinkel 2004). CARRY_FOOD deposits set this
+  // field; descending CARRY_FOOD ants bias toward established
+  // granaries so seed caches consolidate at consistent depths
+  // rather than scattering by RNG.
+  const granaryField = new Pheromone(world.width, world.height, 0.10, 0.9999);
+  // Trunk trail. Persistent long-half-life version of the foraging
+  // trail. Built up over many trips to the same food patch; lets
+  // foragers re-find a stable resource even after the volatile
+  // trailField has decayed between expeditions.
+  const trunkField = new Pheromone(world.width, world.height, 0.20, 0.99995);
 
   // Capacity = species cap, so brood production has slots to fill.
   const colony = new Colony(HARVESTER.maxColonySize);
@@ -224,19 +254,26 @@ function build(s: Settings) {
     const ok = restoreSnapshot(
       saved,
       { seed: s.seed, width: s.width, height: s.height },
-      world, colony, digField, buildField, trailField, alarmField, queenField, rng,
+      world, colony, digField, buildField, trailField, alarmField, queenField,
+      broodField, necroField, noEntryField, granaryField, trunkField, rng,
     );
     if (ok) {
       // eslint-disable-next-line no-console
       console.log(`[formicarium] restored from save at tick ${world.tick.toLocaleString()}`);
     }
   }
-  return { rng, world, colony, digField, buildField, trailField, alarmField, queenField };
+  return {
+    rng, world, colony, digField, buildField, trailField, alarmField, queenField,
+    broodField, necroField, noEntryField, granaryField, trunkField,
+  };
 }
 
 function main(): void {
   const settings = readSettings();
-  let { rng, world, colony, digField, buildField, trailField, alarmField, queenField } = build(settings);
+  let {
+    rng, world, colony, digField, buildField, trailField, alarmField, queenField,
+    broodField, necroField, noEntryField, granaryField, trunkField,
+  } = build(settings);
 
   const canvas = document.getElementById('screen') as HTMLCanvasElement;
   const hud = document.getElementById('hud') as HTMLDivElement;
@@ -343,16 +380,27 @@ function main(): void {
   canvas.addEventListener('pointercancel', onPointerEnd);
 
   let paused = false;
-  let stepsPerFrame = settings.simStepsPerFrame;
+  // Speed is a multiplier on realtime: 1× means one tick of bio
+  // time per 120 ms wall, 2× means two ticks per 120 ms, etc. Range
+  // [0.125, 1024]. The frame loop uses a wall-time accumulator so
+  // visual ant motion looks correct at any multiplier — at 1× a
+  // forager covers 30 mm/sec on screen exactly as in real biology.
+  let speedMul = settings.simStepsPerFrame; // ?speed=N URL param maps to multiplier
   let lastHud = 0;
+  // Cached "any live ants?" check, refreshed each HUD update so we
+  // don't scan the colony every render frame. When the colony goes
+  // fully extinct (queen + all workers + all brood dead), the sim
+  // pauses — there's nothing left to step. The user can reseed (`r`
+  // key) for a fresh colony.
+  let extinct = false;
 
   // Action map — single source of truth for keyboard AND on-screen
   // controls. Mobile users have no keyboard, so the button cluster
   // in index.html dispatches via the same names.
   const actions: Record<string, () => void> = {
     pause: () => { paused = !paused; },
-    faster: () => { stepsPerFrame = Math.min(1024, stepsPerFrame * 2); },
-    slower: () => { stepsPerFrame = Math.max(1, stepsPerFrame >> 1); },
+    faster: () => { speedMul = Math.min(1024, speedMul * 2); },
+    slower: () => { speedMul = Math.max(0.125, speedMul / 2); },
     help: () => {
       help.classList.toggle('hidden');
       if (helpHideTimer !== undefined) {
@@ -393,7 +441,14 @@ function main(): void {
       trailField = built.trailField;
       alarmField = built.alarmField;
       queenField = built.queenField;
+      broodField = built.broodField;
+      necroField = built.necroField;
+      noEntryField = built.noEntryField;
+      granaryField = built.granaryField;
+      trunkField = built.trunkField;
       renderer.setWorld(world);
+      // Clear extinction flag — fresh colony, sim runs again.
+      extinct = false;
     },
   };
 
@@ -430,7 +485,8 @@ function main(): void {
   const AUTO_SAVE_MS = 30_000;
   const autoSaveTimer = window.setInterval(() => {
     const blob = captureSnapshot(
-      world, colony, digField, buildField, trailField, alarmField, queenField, rng,
+      world, colony, digField, buildField, trailField, alarmField, queenField,
+      broodField, necroField, noEntryField, granaryField, trunkField, rng,
       { seed: settings.seed, width: settings.width, height: settings.height },
     );
     if (blob !== null) saveToLocalStorage(blob);
@@ -441,7 +497,8 @@ function main(): void {
   // beforeunload is a belt-and-braces extra hook.
   const flushSnapshot = () => {
     const blob = captureSnapshot(
-      world, colony, digField, buildField, trailField, alarmField, queenField, rng,
+      world, colony, digField, buildField, trailField, alarmField, queenField,
+      broodField, necroField, noEntryField, granaryField, trunkField, rng,
       { seed: settings.seed, width: settings.width, height: settings.height },
     );
     if (blob !== null) saveToLocalStorage(blob);
@@ -454,19 +511,39 @@ function main(): void {
 
   let last = performance.now();
   let alpha = 0;
+  // Wall-time accumulator. 1 sim tick = 120 ms of biological time
+  // (the calibration anchor — see species.ts comments). At
+  // speedMul=1 we want exactly that wall:bio mapping, so each ms
+  // of wall time advances the accumulator by 1 ms (then we step
+  // every time it crosses 120 ms). Higher speedMul scales accum
+  // proportionally: at 8× we step 8 times per 120 ms wall.
+  const TICK_MS = 120;
+  let bioAccum = 0;
+  // Hard cap on ticks-per-frame to prevent spiral-of-death after a
+  // tab-backgrounded long pause. 4096 ticks per frame at 30 fps is
+  // ~120k ticks/sec → ~14 sec biological per sec wall, plenty.
+  const MAX_TICKS_PER_FRAME = 4096;
   const frame = () => {
     requestAnimationFrame(frame);
     const now = performance.now();
     const dt = Math.min(100, now - last);
     last = now;
 
-    if (!paused) {
-      for (let i = 0; i < stepsPerFrame; i++) {
-        step(world, colony, digField, buildField, rng, DEFAULT_PARAMS, particles, HARVESTER, trailField, alarmField, queenField);
+    if (!paused && !extinct) {
+      bioAccum += dt * speedMul;
+      let budget = MAX_TICKS_PER_FRAME;
+      while (bioAccum >= TICK_MS && budget > 0) {
+        step(
+          world, colony, digField, buildField, rng, DEFAULT_PARAMS, particles, HARVESTER,
+          trailField, alarmField, queenField,
+          broodField, necroField, noEntryField, granaryField, trunkField,
+        );
+        bioAccum -= TICK_MS;
+        budget--;
       }
-      // No fixed-timestep accumulator yet — render alpha=1 (no
-      // interpolation) is fine while sub-stepping multiple sim ticks
-      // per frame, since the visible motion comes from the sim itself.
+      // If we hit the per-frame cap, drop residual accumulator so
+      // we don't spiral on the next frame.
+      if (budget === 0) bioAccum = 0;
       alpha = 1;
     }
 
@@ -491,6 +568,12 @@ function main(): void {
         else if (s === STATE_QUEEN) queens++;
       }
       const alive = colony.count - dead;
+      // Extinction detection. If alive == 0 (no queen, no workers,
+      // no brood — anything that consumes resources or could
+      // re-establish), pause the sim. Brood-only states wouldn't
+      // recover either since brood needs trophallaxis from
+      // workers, so we treat full death as terminal.
+      if (alive === 0 && !extinct) extinct = true;
       // start = the founder colony at t=0 (queen + initial workers
       // requested via ?ants). After that, born tracks egg→worker
       // hatches and died tracks every transition into STATE_DEAD,
@@ -551,7 +634,7 @@ function main(): void {
         `  ·  t=${world.tick.toLocaleString()} (${bioTime}, ${phaseLabel})` +
         `  ·  dug ${dugTotal}  grains ${grains}  food ${foodCount}` +
         `  ·  nest ${nestVol} (depth ${maxDepth})` +
-        `  ·  speed ${stepsPerFrame}×${paused ? '  ·  PAUSED' : ''}` +
+        `  ·  speed ${speedMul >= 1 ? speedMul.toFixed(0) : speedMul.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}×${paused ? '  ·  PAUSED' : ''}${extinct ? '  ·  EXTINCT — press r to reseed' : ''}` +
         `  ·  ${(1000 / Math.max(1, dt)).toFixed(0)} fps`;
     }
   };

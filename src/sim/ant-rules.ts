@@ -214,6 +214,11 @@ export function step(
   trailField?: Pheromone,
   alarmField?: Pheromone,
   queenField?: Pheromone,
+  broodField?: Pheromone,
+  necroField?: Pheromone,
+  noEntryField?: Pheromone,
+  granaryField?: Pheromone,
+  trunkField?: Pheromone,
 ): void {
   world.tick++;
 
@@ -340,7 +345,34 @@ export function step(
   if (trailField) trailField.step();
   if (alarmField) alarmField.step();
   if (queenField) queenField.step();
+  if (broodField) broodField.step();
+  if (necroField) necroField.step();
+  if (noEntryField) noEntryField.step();
+  if (granaryField) granaryField.step();
+  if (trunkField) trunkField.step();
   if (particles) particles.step();
+
+  // Necromone emission. Corpse cells evaporate oleic acid (Wilson,
+  // Durlach & Roth 1958). Sparse — most cells have no corpse. We
+  // sweep the world.corpse field every 10 ticks to amortise cost
+  // and use an accumulated-amount-per-corpse model that produces
+  // roughly steady-state concentrations around middens.
+  if (necroField && world.tick % 10 === 0) {
+    const wW = world.width;
+    const wH = world.height;
+    for (let y = 0; y < wH; y++) {
+      const row = y * wW;
+      for (let x = 0; x < wW; x++) {
+        if (world.corpse[row + x]! > 0) {
+          // 0.5 every 10 ticks ≈ 0.05/tick, balancing the 0.99
+          // retention to give an equilibrium concentration of ~5
+          // at corpse cells. Necrophoresis followers respond at
+          // gradient threshold ~0.1.
+          necroField.deposit(x, y, 0.5);
+        }
+      }
+    }
+  }
 
   // Seed germination + sprout decay sweep. Tschinkel (1999): some
   // stored seeds in granaries occasionally sprout instead of being
@@ -510,7 +542,14 @@ export function step(
                 donorState !== STATE_DEAD &&
                 donorState !== STATE_EGG &&
                 donorState !== STATE_LARVA &&
-                donorState !== STATE_QUEEN &&
+                // Queens normally aren't trophallaxis donors — they
+                // don't have a crop full of forager-collected food.
+                // EXCEPTION: claustral founding (Hölldobler & Wilson
+                // 1990 Ch. 5) — pre-eclosion of the first nanitics,
+                // queens nourish the first brood from wing-muscle
+                // reserves and trophallactic exchange. Allow queen
+                // donation when the recipient is a larva.
+                (donorState !== STATE_QUEEN || recipState === STATE_LARVA) &&
                 donorE > species.trophallaxisDonorThreshold;
               const recipOk =
                 recipState !== STATE_DEAD &&
@@ -606,6 +645,20 @@ export function step(
       colony.prevX[i] = colony.posX[i]!;
       colony.prevY[i] = colony.posY[i]!;
       colony.stateTicks[i]!++;
+      // Brood pheromone emission. Cassill (2002), Slipinski et al.
+      // (2006): larvae emit a hunger-call pheromone distinct from
+      // queen pheromone; nurses respond to it directly. Since
+      // larvae thermoregulate to deeper rows during the day, the
+      // brood signal travels with them — workers attending the
+      // queen alone might miss the migrating larvae, so a separate
+      // field is needed.
+      if (broodField) {
+        const lx = colony.posX[i]! | 0;
+        const ly = colony.posY[i]! | 0;
+        if (lx >= 0 && ly >= 0 && lx < world.width && ly < world.height) {
+          broodField.deposit(lx, ly, 0.05);
+        }
+      }
       // Same depth-tracking drift as eggs.
       if (colony.stateTicks[i]! % species.broodMigrateInterval === 0) {
         const ex = colony.posX[i]! | 0;
@@ -979,14 +1032,30 @@ export function step(
         // ant only commits to a trail with measurable concentration.
         if (iy >= world.naturalSurface[ix]!) {
           h += wrapAngle(-Math.PI / 2 - h) * geotaxis;
-        } else if (trailField) {
-          const grad = trailField.gradient(ix, iy);
-          const gMag = Math.hypot(grad.dx, grad.dy);
-          if (gMag > 1e-5) {
-            const want = Math.atan2(grad.dy, grad.dx);
-            const local = trailField.sample(ix, iy);
-            const strength = Math.min(1, local / 0.05) * colony.stigmergy[i]!;
-            h += wrapAngle(want - h) * strength;
+        } else {
+          if (trailField) {
+            const grad = trailField.gradient(ix, iy);
+            const gMag = Math.hypot(grad.dx, grad.dy);
+            if (gMag > 1e-5) {
+              const want = Math.atan2(grad.dy, grad.dx);
+              const local = trailField.sample(ix, iy);
+              const strength = Math.min(1, local / 0.05) * colony.stigmergy[i]!;
+              h += wrapAngle(want - h) * strength;
+            }
+          }
+          // Trunk-trail bias. Layered atop the volatile trail
+          // pheromone — even when the volatile trail has decayed,
+          // the long-half-life trunk continues to point foragers
+          // at known-good patches. Lower weight than trailField
+          // since the trunk reflects historical paths, not the
+          // current expedition.
+          if (trunkField) {
+            const tGrad = trunkField.gradient(ix, iy);
+            const tMag = Math.hypot(tGrad.dx, tGrad.dy);
+            if (tMag > 1e-5) {
+              const want = Math.atan2(tGrad.dy, tGrad.dx);
+              h += wrapAngle(want - h) * colony.stigmergy[i]! * 0.3;
+            }
           }
         }
         h = wrapAngle(h);
@@ -1030,6 +1099,12 @@ export function step(
             const fy = (fIdx / world.width) | 0;
             const fxx = fIdx - fy * world.width;
             trailField.deposit(fxx, fy, 1.0);
+            // Trunk-trail: long-half-life persistent path. Each
+            // pickup contributes a small amount; over many trips
+            // the cumulative concentration on a stable food
+            // patch's path saturates and reads as a "highway"
+            // even after the volatile foraging trail has decayed.
+            if (trunkField) trunkField.deposit(fxx, fy, 0.10);
           }
           world.food[fIdx] = 0;
           world.foodMoves[fIdx] = 0;
@@ -1052,6 +1127,18 @@ export function step(
       h += rng.gauss() * colony.turnNoise[i]!;
       // Below or above surface, bias DOWN (positive geotaxis).
       h += wrapAngle(Math.PI / 2 - h) * geotaxis;
+      // Granary attraction. Once the ant is below the surface,
+      // bias toward the granary-marker gradient — established
+      // granaries pull subsequent deposits toward them, producing
+      // the consistent-depth seed caches Tschinkel observed.
+      if (granaryField && iy >= world.naturalSurface[ix]!) {
+        const gGrad = granaryField.gradient(ix, iy);
+        const gMag = Math.hypot(gGrad.dx, gGrad.dy);
+        if (gMag > 1e-5) {
+          const want = Math.atan2(gGrad.dy, gGrad.dx);
+          h += wrapAngle(want - h) * colony.stigmergy[i]! * 0.4;
+        }
+      }
       h = wrapAngle(h);
       colony.heading[i] = h;
       let nx = colony.posX[i]!;
@@ -1145,6 +1232,12 @@ export function step(
         const ty = ny | 0;
         if (ty < world.naturalSurface[tx]!) {
           trailField.deposit(tx, ty, 0.10);
+          // Persistent trunk-trail accumulates with every
+          // returning forager along this path. Smaller per-step
+          // than the volatile trail (0.02 vs 0.10) but with much
+          // longer retention so a frequented route consolidates
+          // into a stable highway over many trips.
+          if (trunkField) trunkField.deposit(tx, ty, 0.02);
         }
       }
       // Deposit if we're in a below-surface AIR cell with no food
@@ -1159,6 +1252,13 @@ export function step(
       ) {
         world.food[dIdx] = 1;
         world.foodMoves[dIdx] = Math.min(255, colony.carryMoves[i]! + 1);
+        // Granary marker. Tschinkel (2004) observed P. badius
+        // granaries form at consistent depths via positive
+        // feedback — CARRY_FOOD ants prefer to deposit where
+        // deposits already happened. Strong stamp at the deposit
+        // cell builds the gradient that biases the next CARRY_FOOD
+        // ant toward this column.
+        if (granaryField) granaryField.deposit(dxIdx, dyIdx, 1.0);
         colony.carryMoves[i] = 0;
         colony.setState(i, STATE_WANDER);
         colony.heading[i] = rng.range(0, Math.PI * 2);
@@ -1243,6 +1343,24 @@ export function step(
         }
       }
       continue;
+    }
+
+    // No-entry deposit. Robinson, Jackson, Holcombe & Ratnieks
+    // 2005: Pharaoh-ant workers who explored a branch without
+    // success leave a "skip me" mark. We use stateTicks as the
+    // proxy for "unproductive duration" — a WANDER ant resets her
+    // timer on entering CARRY/REST/etc, so high stateTicks means
+    // "I've been wandering this region without doing anything for
+    // a long time". 5000 ticks = 10 min biological. Other workers'
+    // WANDER stigmergy biases AWAY from the gradient (handled in
+    // the stigmergy block above), so dead ends gradually clear of
+    // traffic.
+    if (
+      stateIn === STATE_WANDER && noEntryField &&
+      colony.stateTicks[i]! > 5000 &&
+      ix >= 0 && iy >= 0 && ix < world.width && iy < world.height
+    ) {
+      noEntryField.deposit(ix, iy, 0.005);
     }
 
     // Sprout removal. WANDER ants standing on or cardinally
@@ -1379,6 +1497,59 @@ export function step(
         // Linear ramp: full strength at ageFrac=0, zero at 0.5.
         const nurseWeight = 1 - ageFrac * 2;
         h += wrapAngle(want - h) * colony.stigmergy[i]! * 0.6 * nurseWeight;
+      }
+    }
+    // Brood pheromone — same nurse-only pull as the queen field. A
+    // nurse sandwiched between the queen (above) and the migrated
+    // brood pile (deeper at noon) gets a vector sum of the two; the
+    // result is attendant traffic toward whichever signal is
+    // strongest locally. Ensures larvae receive trophallaxis even
+    // when their thermoregulation has carried them far from the
+    // queen's chamber.
+    if (
+      stateIn === STATE_WANDER && broodField &&
+      ageFrac < 0.5
+    ) {
+      const bGrad = broodField.gradient(ix, iy);
+      const bMag = Math.hypot(bGrad.dx, bGrad.dy);
+      if (bMag > 1e-6) {
+        const want = Math.atan2(bGrad.dy, bGrad.dx);
+        const nurseWeight = 1 - ageFrac * 2;
+        h += wrapAngle(want - h) * colony.stigmergy[i]! * 0.6 * nurseWeight;
+      }
+    }
+    // Necromone — Wilson, Durlach & Roth 1958. Bias necrophoresis-
+    // capable WANDER ants up the gradient toward corpse cells, so
+    // bodies get found and hauled even when the nest is a tangle
+    // of chambers and a worker would otherwise wander past one
+    // three cells away without ever stepping on it. The contact-
+    // adjacent pickup logic still does the actual recruitment to
+    // STATE_NECRO_CARRY; this is just the steering that brings the
+    // ant within contact range.
+    if (
+      stateIn === STATE_WANDER && necroField &&
+      species.necrophoresisProb > 0
+    ) {
+      const nGrad = necroField.gradient(ix, iy);
+      const nMag = Math.hypot(nGrad.dx, nGrad.dy);
+      if (nMag > 1e-5) {
+        const want = Math.atan2(nGrad.dy, nGrad.dx);
+        h += wrapAngle(want - h) * colony.stigmergy[i]! * 0.4;
+      }
+    }
+    // No-entry pheromone — Robinson, Jackson, Holcombe & Ratnieks
+    // 2005 (Pharaoh ants). Workers who repeatedly explored a
+    // tunnel branch without finding anything left a "skip me" mark
+    // at the choice point. Other workers' WANDER stigmergy is
+    // biased AWAY from the gradient (downhill rather than uphill),
+    // so they preferentially explore unmarked territory.
+    if (stateIn === STATE_WANDER && noEntryField) {
+      const eGrad = noEntryField.gradient(ix, iy);
+      const eMag = Math.hypot(eGrad.dx, eGrad.dy);
+      if (eMag > 1e-5) {
+        // Negative sign: away from the marked area.
+        const want = Math.atan2(-eGrad.dy, -eGrad.dx);
+        h += wrapAngle(want - h) * colony.stigmergy[i]! * 0.5;
       }
     }
 

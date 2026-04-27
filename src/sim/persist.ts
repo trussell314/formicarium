@@ -25,8 +25,9 @@ const SAVE_KEY = 'formicarium:save';
 // sproutTick; v3 added the foraging trail pheromone; v4 added the
 // alarm pheromone; v5 added the population-driven food rate
 // (foodCap, clumpAccum); v6 added per-ant stuckTicks; v7 added the
-// queen pheromone.
-const SAVE_VERSION = 7;
+// queen pheromone; v8 added brood, necromone, no-entry, granary,
+// and trunk-trail pheromones.
+const SAVE_VERSION = 8;
 
 // Chunked btoa to avoid argument-list length limits on very large arrays.
 function bytesToB64(view: ArrayBufferView): string {
@@ -46,8 +47,8 @@ function b64ToBytes(s: string): Uint8Array {
   return out;
 }
 
-interface SaveStateV7 {
-  v: 7;
+interface SaveStateV8 {
+  v: 8;
   foodCap: number;
   clumpAccum: number;
   // Settings — needed to validate that a save matches the requested run.
@@ -102,6 +103,11 @@ interface SaveStateV7 {
   trailCurrent: string;
   alarmCurrent: string;
   queenCurrent: string;
+  broodCurrent: string;
+  necroCurrent: string;
+  noEntryCurrent: string;
+  granaryCurrent: string;
+  trunkCurrent: string;
 }
 
 export interface SaveSettings {
@@ -120,9 +126,11 @@ export function captureSnapshot(
   world: World, colony: Colony,
   digField: Pheromone, buildField: Pheromone, trailField: Pheromone,
   alarmField: Pheromone, queenField: Pheromone,
+  broodField: Pheromone, necroField: Pheromone, noEntryField: Pheromone,
+  granaryField: Pheromone, trunkField: Pheromone,
   rng: RNG, settings: SaveSettings,
 ): string | null {
-  const state: SaveStateV7 = {
+  const state: SaveStateV8 = {
     v: SAVE_VERSION,
     seed: settings.seed,
     width: settings.width,
@@ -171,6 +179,11 @@ export function captureSnapshot(
     trailCurrent: bytesToB64(trailField.current),
     alarmCurrent: bytesToB64(alarmField.current),
     queenCurrent: bytesToB64(queenField.current),
+    broodCurrent: bytesToB64(broodField.current),
+    necroCurrent: bytesToB64(necroField.current),
+    noEntryCurrent: bytesToB64(noEntryField.current),
+    granaryCurrent: bytesToB64(granaryField.current),
+    trunkCurrent: bytesToB64(trunkField.current),
   };
   return JSON.stringify(state);
 }
@@ -225,11 +238,13 @@ export function restoreSnapshot(
   world: World, colony: Colony,
   digField: Pheromone, buildField: Pheromone, trailField: Pheromone,
   alarmField: Pheromone, queenField: Pheromone,
+  broodField: Pheromone, necroField: Pheromone, noEntryField: Pheromone,
+  granaryField: Pheromone, trunkField: Pheromone,
   rng: RNG,
 ): boolean {
   let raw: unknown;
   try { raw = JSON.parse(blob); } catch { return false; }
-  const s = raw as Partial<SaveStateV7>;
+  const s = raw as Partial<SaveStateV8>;
   if (
     !s ||
     s.v !== SAVE_VERSION ||
@@ -290,6 +305,11 @@ export function restoreSnapshot(
     copyBytes(s.trailCurrent!, trailField.current);
     copyBytes(s.alarmCurrent!, alarmField.current);
     copyBytes(s.queenCurrent!, queenField.current);
+    copyBytes(s.broodCurrent!, broodField.current);
+    copyBytes(s.necroCurrent!, necroField.current);
+    copyBytes(s.noEntryCurrent!, noEntryField.current);
+    copyBytes(s.granaryCurrent!, granaryField.current);
+    copyBytes(s.trunkCurrent!, trunkField.current);
   } catch {
     return false;
   }
