@@ -2566,8 +2566,21 @@ export function step(
         const aboveAir = py > 0 && world.cells[(py - 1) * wW4 + px] === CELL_AIR;
         const belowAir = py < world.height - 1 && world.cells[(py + 1) * wW4 + px] === CELL_AIR;
         const isVerticalShaft = leftNonAir && rightNonAir && (aboveAir || belowAir);
+        // Queen/brood sanctum exclusion. Same threshold as the
+        // Khuong path. The Khuong route already protects sanctum
+        // cells, but the deadlock fallback didn't — so a carrier
+        // overdue for 500+ ticks who happens to be in the queen's
+        // chamber would dump grain right next to her, gradually
+        // burying the brood pile. queenField and broodField are
+        // both permeable so the exclusion zone reaches a couple
+        // cells out from the actual chamber boundary, matching
+        // active-attendance density without locking carriers out
+        // of the rest of the gallery.
+        const queenHere = queenField ? queenField.sample(px, py) : 0;
+        const broodHere = broodField ? broodField.sample(px, py) : 0;
+        const inSanctum = queenHere > 0.3 || broodHere > 0.3;
         const overdue = colony.stateTicks[i]!;
-        if (!isVerticalShaft && overdue >= 500) {
+        if (!isVerticalShaft && !inSanctum && overdue >= 500) {
           const ramp = Math.min(1, (overdue - 500) / 1500);
           pDeposit = ramp * 0.5;
           depositedViaDeadlock = true;
