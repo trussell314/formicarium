@@ -52,13 +52,25 @@ export class Pheromone {
   /** WASM kernel handle when this instance is using the SIMD path,
    *  null otherwise. step() consults this to pick a backend. */
   private wasmHandle: WasmFieldHandle | null;
+  /** When true, the field diffuses through SOIL/GRAIN cells the same
+   *  as through AIR — modelling persistent caste-recognition signals
+   *  (cuticular hydrocarbons, vibrations, CO2 plumes) that real ants
+   *  detect through substrate. Volatile fields (dig/build/trail/
+   *  alarm/necro) stay AIR-only. Permeable fields run on the JS
+   *  scalar path because the WASM kernel hardcodes the AIR-only
+   *  gating; at 1-2 permeable fields per world the cost is fine. */
+  private readonly permeable: boolean;
 
-  constructor(width: number, height: number, diffuse: number, evaporate: number) {
+  constructor(width: number, height: number, diffuse: number, evaporate: number, permeable = false) {
     this.width = width;
     this.height = height;
     this.diffuse = diffuse;
     this.evaporate = evaporate;
-    if (wasmRuntime !== null) {
+    this.permeable = permeable;
+    // Permeable fields skip the WASM allocator — the kernel can't
+    // express through-soil diffusion without recompilation, so we
+    // run them on the JS scalar path with cells effectively ignored.
+    if (wasmRuntime !== null && !permeable) {
       const handle = wasmRuntime.allocField(width, height);
       this.wasmHandle = handle;
       this.current = handle.current;
@@ -101,6 +113,10 @@ export class Pheromone {
       this.scratch = this.wasmHandle.scratch;
       return;
     }
+    // Permeable fields ignore the cells gate so they diffuse through
+    // SOIL/GRAIN as if the world were uniform — the JS scalar code
+    // already does no-op gating when cells is undefined.
+    if (this.permeable) cells = undefined;
     const w = this.width;
     const h = this.height;
     const src = this.current;

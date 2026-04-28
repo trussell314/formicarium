@@ -837,12 +837,17 @@ export class Renderer {
       //   default          → general worker / wander / carry-grain.
       const e = colony.energy[i]!;
       const tint = Math.max(0.6, Math.min(1, e * 1.1));
-      let baseR = 26, baseG = 15, baseB = 8;
-      if (state === STATE_REST) { baseR = 70; baseG = 38; baseB = 22; }
+      // Bodies darkened across the board so ants read clearly against
+      // the SOIL_TOP=(70,44,22) substrate. The previous REST tone of
+      // (70,38,22) was almost the dirt colour, making resting workers
+      // invisible. All values now sit at <50% of the dirt RGB so the
+      // silhouette pops at any zoom.
+      let baseR = 12, baseG = 7, baseB = 4;
+      if (state === STATE_REST) { baseR = 38; baseG = 22; baseB = 12; }
       else if (state === STATE_FORAGE || state === STATE_CARRY_FOOD) {
-        baseR = 14; baseG = 8; baseB = 5;
+        baseR = 4; baseG = 2; baseB = 1;
       } else if (state === STATE_NECRO_CARRY) {
-        baseR = 36; baseG = 30; baseB = 32;
+        baseR = 24; baseG = 18; baseB = 22;
       }
       const bodyR = (baseR * tint) | 0;
       const bodyG = (baseG * tint) | 0;

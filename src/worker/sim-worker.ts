@@ -94,8 +94,16 @@ function buildBundle(s: SaveSettings, restoreBlob: string | null): SimBundle {
   const buildField = new Pheromone(s.width, s.height, 0.40, 0.9995);
   const trailField = new Pheromone(s.width, s.height, 0.40, 0.999);
   const alarmField = new Pheromone(s.width, s.height, 0.50, 0.985);
-  const queenField = new Pheromone(s.width, s.height, 0.10, 0.999);
-  const broodField = new Pheromone(s.width, s.height, 0.20, 0.999);
+  // Queen + brood fields are PERMEABLE — they diffuse through soil
+  // as well as air. Real ants detect queen presence via cuticular
+  // hydrocarbons in chamber air AND via substrate-borne vibrations
+  // and CO2 plumes that carry through soil. Without through-soil
+  // diffusion a queen sealed off by a cave-in or fully-buried
+  // entrance becomes invisible to surface workers and the colony
+  // can't recover. Other fields (dig/build/trail/alarm/necro) are
+  // truly volatile and stay AIR-only.
+  const queenField = new Pheromone(s.width, s.height, 0.10, 0.999, true);
+  const broodField = new Pheromone(s.width, s.height, 0.20, 0.999, true);
   const necroField = new Pheromone(s.width, s.height, 0.30, 0.99);
   const noEntryField = new Pheromone(s.width, s.height, 0.05, 0.995);
   const granaryField = new Pheromone(s.width, s.height, 0.10, 0.999);
