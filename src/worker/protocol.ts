@@ -29,6 +29,7 @@ export type ToWorker =
   | { kind: 'reseed'; settings: SaveSettings }
   | { kind: 'requestSnapshot'; includePheromones: boolean }
   | { kind: 'captureForSave' }
+  | { kind: 'loadSave'; settings: SaveSettings; restoreBlob: string }
   | { kind: 'shutdown' };
 
 // ── Worker → main ────────────────────────────────────────────

@@ -120,6 +120,18 @@
         -webkit-tap-highlight-color: transparent;
       }
       #ctrls button:active { background: rgba(216, 200, 168, 0.25); }
+      /* Save/load confirmation flashes — green on success, red on no-op
+         (e.g., load with no save). 600 ms total: snap on, fade off. */
+      #ctrls button.flash-ok {
+        background: rgba(120, 200, 120, 0.45);
+        border-color: rgba(120, 200, 120, 0.85);
+        transition: background 400ms ease 200ms, border-color 400ms ease 200ms;
+      }
+      #ctrls button.flash-noop {
+        background: rgba(220, 90, 90, 0.45);
+        border-color: rgba(220, 90, 90, 0.85);
+        transition: background 400ms ease 200ms, border-color 400ms ease 200ms;
+      }
     </style>
   </head>
   <body>
@@ -131,6 +143,8 @@
       <button data-act="faster" title="faster (+)">+</button>
       <button data-act="zoomout" title="reset zoom (0)">⌖</button>
       <button data-act="phero" title="pheromone overlay (p)">𝜙</button>
+      <button data-act="save" title="save state (s)">💾</button>
+      <button data-act="load" title="load saved state (l)">↺</button>
       <button data-act="reseed" title="reseed (r)">↻</button>
       <button data-act="full" title="fullscreen (f)">⛶</button>
       <button data-act="help" title="help (?)">?</button>
@@ -145,6 +159,7 @@
       <div><kbd>0</kbd> reset zoom</div>
       <div><kbd>p</kbd> toggle pheromone overlay</div>
       <div><kbd>m</kbd> toggle mini-map</div>
+      <div><kbd>s</kbd> save state &nbsp; <kbd>l</kbd> load state</div>
       <div><kbd>?</kbd> hide / show this panel</div>
     </div>
     <script type="module" src="/src/main.ts"></script>

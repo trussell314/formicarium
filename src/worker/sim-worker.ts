@@ -366,12 +366,17 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       speedMul = msg.speedMul;
       break;
     case 'reseed':
-      clearSavedSnapshot();
+    case 'loadSave': {
+      // Both paths rebuild the bundle. reseed wipes the save and
+      // starts fresh; loadSave rehydrates from the supplied blob
+      // and PRESERVES the save (so reload after load doesn't lose
+      // the user's pinned state). A fresh WASM runtime gives us a
+      // clean slab allocator and avoids leaking the old fields'
+      // memory in the WASM heap.
+      const restoreBlob = msg.kind === 'loadSave' ? msg.restoreBlob : null;
+      if (msg.kind === 'reseed') clearSavedSnapshot();
       settings = msg.settings;
-      // Detach the previous Pheromone field handles before rebuilding —
-      // a fresh WASM runtime gives us a clean slab allocator and
-      // avoids leaking the old fields' memory in the WASM heap.
-      // Easiest way is to rebuild the runtime from scratch.
+      paused = false;
       wasmReady = (async () => {
         try {
           const rt = await initPheromoneWasm(async () => {
@@ -384,13 +389,14 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
         }
       })();
       wasmReady.then(() => {
-        bundle = buildBundle(msg.settings, null);
+        bundle = buildBundle(msg.settings, restoreBlob);
         extinct = false;
         bioAccum = 0;
         lastDriveMs = performance.now();
         send({ kind: 'ready' });
       });
       break;
+    }
     case 'requestSnapshot': {
       // Worker may still be booting (async WASM load + buildBundle).
       // The main-thread render loop fires requestSnapshot from rAF

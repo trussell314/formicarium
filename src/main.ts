@@ -174,6 +174,18 @@ function main(): void {
   let lastTickAtMs = performance.now();
   let lastTickValue = 0;
   let measuredTicksPerSec = 0;
+  // Manual save bookkeeping. Set when the user clicks Save or hits
+  // 's'; cleared by the savedBlob handler which then flashes the
+  // button so the user sees confirmation.
+  let manualSavePending = false;
+  const flashButton = (act: string, kind: 'ok' | 'noop'): void => {
+    const btn = document.querySelector<HTMLButtonElement>(`[data-act="${act}"]`);
+    if (!btn) return;
+    btn.classList.add(kind === 'ok' ? 'flash-ok' : 'flash-noop');
+    window.setTimeout(() => {
+      btn.classList.remove('flash-ok', 'flash-noop');
+    }, 600);
+  };
 
   worker.onmessage = (e: MessageEvent<FromWorker>) => {
     const msg = e.data;
@@ -205,6 +217,10 @@ function main(): void {
       }
       case 'savedBlob':
         if (msg.blob !== null) saveToLocalStorage(msg.blob);
+        if (manualSavePending) {
+          manualSavePending = false;
+          flashButton('save', msg.blob === null ? 'noop' : 'ok');
+        }
         break;
     }
   };
@@ -361,6 +377,30 @@ function main(): void {
       send({ kind: 'reseed', settings: { ...settings } });
       extinct = false;
     },
+    save: () => {
+      // Manual save: ask the worker for a fresh capture; the
+      // 'savedBlob' handler writes it to localStorage. We flag the
+      // request so the handler can flash the Save button green for
+      // a beat to confirm the write.
+      manualSavePending = true;
+      send({ kind: 'captureForSave' });
+    },
+    load: () => {
+      // Manual load: read whatever's in localStorage, hand it to
+      // the worker as a fresh init blob. The worker rebuilds its
+      // bundle and the existing 'ready' handshake produces the
+      // first snapshot of the restored state. If there's no save,
+      // do nothing — flash the button red briefly so the user
+      // notices.
+      const blob = readSavedBlob();
+      if (blob === null) {
+        flashButton('load', 'noop');
+        return;
+      }
+      send({ kind: 'loadSave', settings: { ...settings }, restoreBlob: blob });
+      extinct = false;
+      flashButton('load', 'ok');
+    },
   };
 
   window.addEventListener('keydown', (e) => {
@@ -372,6 +412,8 @@ function main(): void {
     else if (e.key === 'f') actions.full!();
     else if (e.key === 'p') actions.phero!();
     else if (e.key === 'm') actions.minimap!();
+    else if (e.key === 's') actions.save!();
+    else if (e.key === 'l') actions.load!();
     else if (e.key === 'r') actions.reseed!();
   });
 
