@@ -395,10 +395,12 @@ export const HARVESTER: AntSpecies = {
   // Penick & Tschinkel (2008) measured P. badius brood depth diel
   // movement: brood found 5-30 cm below surface, with deeper
   // positions at midday. At 3 mm/cell that's 17-100 cells. We use
-  // 4 cells (~12 mm, midnight) to 30 cells (~90 mm, noon) — slightly
-  // compressed so the migration is visible at the default 60 cm
-  // world height without brood pressing against the world floor.
-  broodMinDepth: 4,
+  // 12 cells (~36 mm, midnight) to 30 cells (~90 mm, noon) — the
+  // shallow end is bumped from the original 4 cells (which let
+  // eggs migrate within 12 mm of the surface, looking visually
+  // like they're floating just below the topsoil) to keep the
+  // broodpile clearly inside the deep nest at all times.
+  broodMinDepth: 12,
   broodMaxDepth: 30,
   // Eggs need ~26 cell-moves (broodMax - broodMin) over a half-day
   // window. With DAY_TICKS = 7200 (100× compressed), half-day =

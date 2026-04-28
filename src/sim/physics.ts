@@ -301,18 +301,22 @@ export function pickGrain(world: World, x: number, y: number, rng: RNG): number 
   const moves = world.grainMoves[idx]!;
   world.cells[idx] = CELL_AIR;
   world.grainMoves[idx] = 0;
-  // Re-settle the grain directly above (it lost its support). If
-  // the cascade slid the grain across columns, both columns need
-  // a mound refresh — otherwise the deposit search uses stale data.
-  let slideDest = -1;
-  if (y > 0) {
-    const aboveIdx = idx - world.width;
-    if (world.cells[aboveIdx] === CELL_GRAIN) {
-      const final = settleGrain(world, x, y - 1, rng);
-      if (final.x !== x) slideDest = final.x;
-    }
+  // Re-settle the entire grain stack above. The previous code
+  // cascaded only the cell directly above, so a 3+ tall stack
+  // would have its bottom lifted out and the upper cells left
+  // floating mid-air. Walk upward until the first non-GRAIN cell
+  // and call settleGrain on each contiguous grain along the way —
+  // each call cascades that grain to its new resting position
+  // (potentially sliding diagonally), and the next iteration's
+  // grain then falls through the freshly-vacated cell. Track all
+  // touched columns for the mound recompute.
+  const touched = new Set<number>([x]);
+  let above = y - 1;
+  while (above >= 0 && world.cells[above * world.width + x] === CELL_GRAIN) {
+    const final = settleGrain(world, x, above, rng);
+    if (final.x !== x) touched.add(final.x);
+    above--;
   }
-  recomputeMound(world, x);
-  if (slideDest >= 0) recomputeMound(world, slideDest);
+  for (const col of touched) recomputeMound(world, col);
   return moves;
 }
