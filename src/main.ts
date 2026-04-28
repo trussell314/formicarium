@@ -84,6 +84,9 @@ function main(): void {
     <div class="row"><span>resources</span><span class="v" id="h-res"></span></div>
     <div class="row"><span>time</span><span class="v" id="h-time"></span></div>
     <div class="row"><span>speed</span><span class="v" id="h-speed"></span></div>
+    <div class="row"><span>states</span><span class="v" id="h-states"></span></div>
+    <div class="row"><span>age</span><span class="v" id="h-age"></span></div>
+    <div class="row"><span>energy</span><span class="v" id="h-energy"></span></div>
     <div class="row dim"><span>render</span><span class="v" id="h-fps"></span></div>
     <div class="legend" id="h-legend">
       <div><span class="swatch" style="background:#00dcdc"></span>dig</div>
@@ -106,7 +109,28 @@ function main(): void {
     res: document.getElementById('h-res')!,
     time: document.getElementById('h-time')!,
     speed: document.getElementById('h-speed')!,
+    states: document.getElementById('h-states')!,
+    age: document.getElementById('h-age')!,
+    energy: document.getElementById('h-energy')!,
     fps: document.getElementById('h-fps')!,
+  };
+  // Unicode block-character bar chart from a small bucket array.
+  // Each bucket maps to one of 9 levels (space + 8 block heights).
+  // Caller passes the array and a max — useful when comparing across
+  // frames so the bar magnitudes are absolute, not relative.
+  const BLOCKS = ' ▁▂▃▄▅▆▇█';
+  const renderBars = (buckets: ArrayLike<number>): string => {
+    let max = 1;
+    for (let i = 0; i < buckets.length; i++) {
+      const v = buckets[i]!;
+      if (v > max) max = v;
+    }
+    let out = '';
+    for (let i = 0; i < buckets.length; i++) {
+      const t = buckets[i]! / max;
+      out += BLOCKS[Math.min(8, Math.max(0, Math.round(t * 8)))];
+    }
+    return out;
   };
   const hudMinBtn = document.getElementById('hud-min')!;
   hudMinBtn.addEventListener('click', () => {
@@ -433,6 +457,19 @@ function main(): void {
         `t=${snap.tick.toLocaleString()} · ${bioTime} · ${phaseLabel}`;
       const flag = paused ? ' · PAUSED' : extinct ? ' · EXTINCT — press r' : '';
       hudEls.speed.textContent = speedDisplay + flag;
+      // Worker breakdown — letter codes match the diag conventions.
+      // W=wander, C=carry-grain, R=rest, F=forage, Cf=carry-food,
+      // N=necro-carry. Skip zero-valued slots to keep the line dense.
+      const stateParts: string[] = [];
+      if (snap.hud.wander) stateParts.push(`W${snap.hud.wander}`);
+      if (snap.hud.carry) stateParts.push(`C${snap.hud.carry}`);
+      if (snap.hud.rest) stateParts.push(`R${snap.hud.rest}`);
+      if (snap.hud.forage) stateParts.push(`F${snap.hud.forage}`);
+      if (snap.hud.carryFood) stateParts.push(`Cf${snap.hud.carryFood}`);
+      if (snap.hud.necroCarry) stateParts.push(`N${snap.hud.necroCarry}`);
+      hudEls.states.textContent = stateParts.join(' ') || '—';
+      hudEls.age.textContent = `${renderBars(snap.hud.ageBuckets)} (young → old)`;
+      hudEls.energy.textContent = `${renderBars(snap.hud.energyBuckets)} (low → full)`;
       hudEls.fps.textContent = `${renderFps} fps`;
     }
   };

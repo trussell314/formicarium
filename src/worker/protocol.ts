@@ -83,6 +83,15 @@ export type RenderSnapshot = {
     eggs: number;
     larvae: number;
     queens: number;
+    // Per-state worker breakdown (W/C/R/F/CF/N — wander/carry/rest/
+    // forage/carry-food/necro-carry). Counts are over alive ants
+    // only; queen and brood states get their own fields above.
+    wander: number;
+    carry: number;
+    rest: number;
+    forage: number;
+    carryFood: number;
+    necroCarry: number;
     grains: number;
     foodCount: number;
     nestVol: number;
@@ -91,6 +100,11 @@ export type RenderSnapshot = {
     totalBorn: number;
     totalDied: number;
     soilCount: number;
+    // 8-bucket histograms over alive non-queen ants.
+    // ageBuckets bins age uniformly across [0, matureAge × 1.5];
+    // energyBuckets bins across [0, maxEnergy].
+    ageBuckets: Uint16Array;
+    energyBuckets: Uint16Array;
   };
   // Particles snapshot — small, copied verbatim. Renderer uses
   // these directly; null if the sim doesn't run particles.

@@ -186,15 +186,32 @@ function drive(now: number): void {
 
 function buildSnapshot(includePheromones: boolean): RenderSnapshot {
   if (!bundle) throw new Error('snapshot requested before init');
-  const { world, colony, particles } = bundle;
-  // Aggregated HUD counters.
+  const { world, colony, particles, species } = bundle;
+  // Aggregated HUD counters + 8-bucket histograms over alive
+  // non-queen ants for age and energy distribution charts.
   let alive = 0, dead = 0, eggs = 0, larvae = 0, queens = 0;
+  let wander = 0, carry = 0, rest = 0, forage = 0, carryFood = 0, necroCarry = 0;
+  const ageBuckets = new Uint16Array(8);
+  const energyBuckets = new Uint16Array(8);
+  const ageCap = species.matureAge * 1.5;
   for (let i = 0; i < colony.count; i++) {
     const s = colony.state[i];
-    if (s === STATE_DEAD) dead++;
-    else if (s === STATE_EGG) eggs++;
-    else if (s === STATE_LARVA) larvae++;
-    else if (s === STATE_QUEEN) queens++;
+    if (s === STATE_DEAD) { dead++; continue; }
+    if (s === STATE_EGG) { eggs++; continue; }
+    if (s === STATE_LARVA) { larvae++; continue; }
+    if (s === STATE_QUEEN) { queens++; continue; }
+    // Adult worker breakdown.
+    if (s === 0 /* WANDER */) wander++;
+    else if (s === 1 /* CARRY */) carry++;
+    else if (s === 2 /* REST */) rest++;
+    else if (s === 3 /* FORAGE */) forage++;
+    else if (s === 4 /* CARRY_FOOD */) carryFood++;
+    else if (s === 8 /* NECRO_CARRY */) necroCarry++;
+    // Histograms (alive workers only — eggs/larvae/queen excluded).
+    const ageBucket = Math.min(7, Math.floor((colony.age[i]! / ageCap) * 8));
+    ageBuckets[ageBucket]!++;
+    const energyBucket = Math.min(7, Math.max(0, Math.floor((colony.energy[i]! / species.maxEnergy) * 8)));
+    energyBuckets[energyBucket]!++;
   }
   alive = colony.count - dead;
   if (alive === 0 && !extinct) extinct = true;
@@ -261,11 +278,14 @@ function buildSnapshot(includePheromones: boolean): RenderSnapshot {
     } : null,
     hud: {
       alive, dead, eggs, larvae, queens,
+      wander, carry, rest, forage, carryFood, necroCarry,
       grains, foodCount, nestVol, maxDepth,
       foodCap: world.foodCap,
       totalBorn: world.totalBorn,
       totalDied: world.totalDied,
       soilCount,
+      ageBuckets,
+      energyBuckets,
     },
     particles: particles.highWater > 0 ? {
       posX: particles.posX.slice(0, particles.highWater),
