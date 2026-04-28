@@ -1824,11 +1824,34 @@ export function step(
     // `entombed` does, but throttled by a small multiplier (see
     // STRANDED_DIG_MULT below) so we get slow background drilling
     // rather than the surface turning into Swiss cheese.
+    //
+    // Crucially: if there's already an open shaft within a small
+    // radius, suppress stranded — the colony has access nearby
+    // and the existing dig-pheromone gradient (diffusing up through
+    // the shaft and laterally through the sky) should pull the
+    // ant there. Without this gate, every surface ant drills its
+    // own parallel shaft and the colony ends up with a dozen
+    // disconnected pits instead of one consolidated entrance.
     const surfHere = world.naturalSurface[ax]!;
-    const stranded =
+    let stranded =
       ay < surfHere
       && ay + 1 < world.height
       && world.cells[(ay + 1) * wW + ax] === CELL_SOIL;
+    if (stranded) {
+      const SHAFT_RANGE = 8;
+      const SHAFT_SCAN_DEPTH = 5;
+      const xMin = Math.max(0, ax - SHAFT_RANGE);
+      const xMax = Math.min(world.width - 1, ax + SHAFT_RANGE);
+      let foundShaft = false;
+      for (let xc = xMin; xc <= xMax && !foundShaft; xc++) {
+        const sf = world.naturalSurface[xc]!;
+        const yMax = Math.min(world.height - 1, sf + SHAFT_SCAN_DEPTH);
+        for (let yc = sf; yc <= yMax; yc++) {
+          if (world.cells[yc * wW + xc] === CELL_AIR) { foundShaft = true; break; }
+        }
+      }
+      if (foundShaft) stranded = false;
+    }
 
     // (3) Sudd contact-triggered digging. Per soil contact, P(dig) =
     // params.digProb. If the dig fires, ask the env to remove the
@@ -1996,6 +2019,20 @@ export function step(
             digField.deposit(target.x, target.y, digDeposit * 0.2);
             if (target.y + 1 < world.height) {
               digField.deposit(target.x, target.y + 1, digDeposit * 0.8);
+            }
+            // Stranded surface beacon. The deposits above are deep
+            // in the new shaft and barely reach surface ants by
+            // gradient diffusion — that's why a fresh stranded
+            // dig used to spawn parallel shafts. Drop a strong
+            // pulse of dig pheromone in the surface AIR cell where
+            // the ant stands so other surface ants laterally pulled
+            // toward this column instead of starting their own
+            // recovery shaft. Alarm too: alarmBypass triggers the
+            // dig roll for bystanders that arrive, so they actually
+            // help excavate rather than mill at the rim.
+            if (stranded && alarmField) {
+              digField.deposit(ax, ay, digDeposit * 2.0);
+              alarmField.deposit(ax, ay, 0.3);
             }
             colony.heading[i] = -Math.PI / 2 + rng.range(-0.3, 0.3);
             // Spawn a small puff of dust from the dig site so the
