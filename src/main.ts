@@ -8,6 +8,10 @@
 //   ?height=N     world height (cells)
 
 import {
+  STATE_CARRY, STATE_CARRY_FOOD, STATE_DEAD, STATE_EGG, STATE_FORAGE, STATE_LARVA,
+  STATE_NECRO_CARRY, STATE_QUEEN, STATE_REST, STATE_WANDER,
+} from './sim/colony';
+import {
   clearSavedSnapshot, readSavedBlob, saveToLocalStorage,
 } from './sim/persist';
 import { Renderer } from './render/renderer';
@@ -87,6 +91,7 @@ function main(): void {
     <div class="row"><span>states</span><span class="v" id="h-states"></span></div>
     <div class="row"><span>age</span><span class="v" id="h-age"></span></div>
     <div class="row"><span>energy</span><span class="v" id="h-energy"></span></div>
+    <div class="row sel hidden" id="h-sel-row"><span>selected</span><span class="v" id="h-sel"></span></div>
     <div class="row dim"><span>render</span><span class="v" id="h-fps"></span></div>
     <div class="legend" id="h-legend">
       <div><span class="swatch" style="background:#00dcdc"></span>dig</div>
@@ -112,6 +117,8 @@ function main(): void {
     states: document.getElementById('h-states')!,
     age: document.getElementById('h-age')!,
     energy: document.getElementById('h-energy')!,
+    sel: document.getElementById('h-sel')!,
+    selRow: document.getElementById('h-sel-row')!,
     fps: document.getElementById('h-fps')!,
   };
   // Unicode block-character bar chart from a small bucket array.
@@ -245,12 +252,20 @@ function main(): void {
     const factor = Math.exp(-e.deltaY * 0.0015);
     zoomAtPoint(renderer.zoom * factor, e.clientX, e.clientY);
   }, { passive: false });
+  // Click-to-inspect bookkeeping. Track the down-position and the
+  // travelled distance per pointer so pointerup can decide click vs
+  // drag; a click within the slop threshold runs pickAnt on the
+  // canvas → sim coordinates and selects an ant. The selected id
+  // is rendered in main's render call and shown in the HUD.
+  let pressX = 0, pressY = 0, pressMoved = 0;
+  let selectedAntId = -1;
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId);
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (activePointers.size === 1) {
       panLastX = e.clientX;
       panLastY = e.clientY;
+      pressX = e.clientX; pressY = e.clientY; pressMoved = 0;
     } else if (activePointers.size === 2) {
       const [a, b] = Array.from(activePointers.values());
       pinchStartDist = Math.hypot(a!.x - b!.x, a!.y - b!.y);
@@ -261,6 +276,9 @@ function main(): void {
   canvas.addEventListener('pointermove', (e) => {
     if (!activePointers.has(e.pointerId)) return;
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (activePointers.size === 1) {
+      pressMoved = Math.max(pressMoved, Math.hypot(e.clientX - pressX, e.clientY - pressY));
+    }
     if (activePointers.size === 1 && renderer.zoom > 1.001) {
       renderer.panX += e.clientX - panLastX;
       renderer.panY += e.clientY - panLastY;
@@ -277,11 +295,28 @@ function main(): void {
     }
   });
   const onPointerEnd = (e: PointerEvent) => {
+    // Click-vs-drag: a release with minimal travel from press is
+    // treated as a tap and runs ant pick. 6 px is roughly a finger
+    // tap on a touch screen and a deliberate click on a mouse.
+    const wasOnly = activePointers.size === 1;
     activePointers.delete(e.pointerId);
     if (activePointers.size < 2) pinchStartDist = 0;
     if (activePointers.size === 1) {
       const [p] = Array.from(activePointers.values());
       panLastX = p!.x; panLastY = p!.y;
+    }
+    if (wasOnly && pressMoved < 6 && latest) {
+      // pickAnt does the screen→world transform internally so we
+      // pass raw client coords. -1 means "missed" — clear selection.
+      const colony = {
+        count: latest.count,
+        posX: latest.posX, posY: latest.posY,
+        prevX: latest.prevX, prevY: latest.prevY,
+        heading: latest.heading,
+        state: latest.state,
+        energy: latest.energy,
+      };
+      selectedAntId = renderer.pickAnt(e.clientX, e.clientY, colony, 2.5);
     }
   };
   canvas.addEventListener('pointerup', onPointerEnd);
@@ -403,7 +438,16 @@ function main(): void {
         trunk: { current: snap.pheromones.trunk },
       };
       const particles = snap.particles ?? undefined;
-      renderer.render(colony, 1, particles, pheromones, snap.daylight);
+      // If the selection points at a slot that's now dead or out of
+      // range (count shrank after death), drop it so the ring vanishes
+      // and the HUD row hides on the next update.
+      if (selectedAntId >= 0 && (
+        selectedAntId >= snap.count
+        || snap.state[selectedAntId] === STATE_DEAD
+      )) {
+        selectedAntId = -1;
+      }
+      renderer.render(colony, 1, particles, pheromones, snap.daylight, selectedAntId);
     }
 
     if (latest && now - lastHud > 250) {
@@ -470,6 +514,35 @@ function main(): void {
       hudEls.states.textContent = stateParts.join(' ') || '—';
       hudEls.age.textContent = `${renderBars(snap.hud.ageBuckets)} (young → old)`;
       hudEls.energy.textContent = `${renderBars(snap.hud.energyBuckets)} (low → full)`;
+      // Selected-ant inspector. Hidden when no ant is selected; pins
+      // id, role, position, energy, heading. State is shown by code
+      // matching the diag glossary (W/C/R/F/Cf/N/Q/E/L) so the row
+      // stays compact at one line.
+      if (selectedAntId >= 0 && selectedAntId < snap.count) {
+        const id = selectedAntId;
+        const stateCode = (() => {
+          switch (snap.state[id]) {
+            case STATE_WANDER: return 'W';
+            case STATE_CARRY: return 'C';
+            case STATE_REST: return 'R';
+            case STATE_FORAGE: return 'F';
+            case STATE_CARRY_FOOD: return 'Cf';
+            case STATE_NECRO_CARRY: return 'N';
+            case STATE_QUEEN: return 'Q';
+            case STATE_EGG: return 'E';
+            case STATE_LARVA: return 'L';
+            default: return '?';
+          }
+        })();
+        const ex = snap.posX[id]!.toFixed(1);
+        const ey = snap.posY[id]!.toFixed(1);
+        const en = snap.energy[id]!.toFixed(2);
+        const hd = ((snap.heading[id]! * 180 / Math.PI) | 0);
+        hudEls.sel.textContent = `#${id} ${stateCode} (${ex},${ey}) e=${en} ${hd}°`;
+        hudEls.selRow.classList.remove('hidden');
+      } else {
+        hudEls.selRow.classList.add('hidden');
+      }
       hudEls.fps.textContent = `${renderFps} fps`;
     }
   };

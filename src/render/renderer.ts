@@ -249,6 +249,33 @@ export class Renderer {
     if (this.panY > maxPanY) this.panY = maxPanY;
   }
 
+  /**
+   * Pick the closest ant to a screen-pixel point. Returns -1 if no
+   * live ant is within `maxCells` of the click in world space. Used
+   * by main.ts to wire click-to-inspect: the user taps a worker, we
+   * look up the nearest one, the HUD pins its state. The hit radius
+   * is generous (default 2 cells) so the user doesn't have to land
+   * the cursor exactly on a 6 mm ant.
+   */
+  pickAnt(
+    screenX: number, screenY: number,
+    colony: RenderableColony,
+    maxCells = 2,
+  ): number {
+    const w = this.screenToWorld(screenX, screenY);
+    let bestIdx = -1;
+    let bestDist = maxCells * maxCells;
+    for (let i = 0; i < colony.count; i++) {
+      const s = colony.state[i]!;
+      if (s === STATE_DEAD) continue;
+      const dx = colony.posX[i]! - w.x;
+      const dy = colony.posY[i]! - w.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestDist) { bestDist = d2; bestIdx = i; }
+    }
+    return bestIdx;
+  }
+
   render(
     colony: RenderableColony, alpha: number, particles?: RenderableParticles,
     pheromones?: {
@@ -264,6 +291,7 @@ export class Renderer {
       trunk?: { current: Float32Array };
     },
     daylight = 1,
+    selectedId = -1,
   ): void {
     const w = this.world.width;
     const h = this.world.height;
@@ -796,6 +824,24 @@ export class Renderer {
         );
         this.ctx.fill();
       }
+    }
+
+    // Selection ring. Drawn after the ant overlay so it stays on top
+    // of the body silhouette. Pulses softly so the user's eye stays
+    // anchored to the picked ant even as it walks. Bail if the
+    // selection no longer maps to a live ant (count shrank, ant died).
+    if (selectedId >= 0 && selectedId < colony.count
+        && colony.state[selectedId]! !== STATE_DEAD) {
+      const sx = ox + (colony.prevX[selectedId]!
+        + (colony.posX[selectedId]! - colony.prevX[selectedId]!) * alpha) * scale;
+      const sy = oy + (colony.prevY[selectedId]!
+        + (colony.posY[selectedId]! - colony.prevY[selectedId]!) * alpha) * scale;
+      const pulse = 0.7 + 0.3 * Math.sin(this.world.tick * 0.18);
+      this.ctx.strokeStyle = `rgba(255, 220, 80, ${pulse.toFixed(3)})`;
+      this.ctx.lineWidth = Math.max(1.2, scale * 0.18);
+      this.ctx.beginPath();
+      this.ctx.arc(sx, sy, Math.max(4, scale * 1.8), 0, Math.PI * 2);
+      this.ctx.stroke();
     }
 
     // Dust particles. Drawn after ants so they render in front, with
