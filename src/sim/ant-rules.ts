@@ -2113,64 +2113,73 @@ export function step(
       if (foundShaft) stranded = false;
     }
 
-    // Sanctum-ceiling maintenance. Real Pogonomyrmex workers don't
-    // wait for soil to physically collapse — they actively keep
-    // galleries open by chipping at the chamber ceiling whenever
-    // there's a constriction toward the surface (Tschinkel 2004
-    // J. Insect Sci. 4:21; Gordon 2010 colony behaviour). The
-    // existing physics treats SOIL as rigid, so without an active
-    // behavioural rule the queen's chamber slowly seals off as
-    // workers occasionally drop spoil in adjacent cells over many
-    // hours.
+    // Sanctum partition maintenance. Real Pogonomyrmex workers
+    // actively keep galleries open by chipping at any 1-cell-thick
+    // soil partition that walls them off from the brood/queen
+    // chamber (Tschinkel 2004 J. Insect Sci. 4:21; Gordon 2010
+    // colony behaviour). The existing physics treats SOIL as rigid,
+    // so without an active behavioural rule the queen's chamber
+    // slowly seals off as workers occasionally drop spoil in
+    // adjacent cells over many hours.
     //
-    // Trigger: WANDER worker in a sanctum cell (queen or brood
-    // pheromone > 0.3), with SOIL directly above and AIR two
-    // rows above. The above-above-AIR check restricts digging
-    // to specifically the case where a 1-cell-thick partition
-    // separates this chamber from a shaft above — exactly the
-    // burial geometry. Without it the rule would let workers
-    // erode chambers indefinitely upward.
-    if (
-      stateIn === STATE_WANDER && ay > 1 && (queenField || broodField)
-    ) {
-      const queenHere = queenField ? queenField.sample(ax, ay) : 0;
-      const broodHere = broodField ? broodField.sample(ax, ay) : 0;
-      const inSanctum = queenHere > 0.3 || broodHere > 0.3;
-      if (inSanctum) {
-        const wW = world.width;
-        const aboveIdx = (ay - 1) * wW + ax;
-        const above2Idx = (ay - 2) * wW + ax;
-        const aboveIsSoil = world.cells[aboveIdx] === CELL_SOIL;
-        const above2IsAir = world.cells[above2Idx] === CELL_AIR;
-        if (aboveIsSoil && above2IsAir) {
-          // Maintenance dig at base rate (digProb), no recruitment
-          // pheromone — this is upkeep, not a front. No boost: real
-          // ceiling-maintenance is occasional, not constant. The
-          // worker walks through the chamber and rolls only when
-          // they happen to be at a 1-cell-thick partition; that
-          // gates the rate naturally.
+    // Trigger: WANDER worker, with a SOIL cell directly adjacent
+    // (cardinal) AND an AIR cell two-away in the same direction
+    // (= 1-cell-thick partition geometry), AND high queen/brood
+    // pheromone on the OTHER side of the partition (the AIR cell
+    // two-away). Queen and brood fields are permeable, so the
+    // signal carries through the partition; checking the far
+    // air cell's pheromone confirms the queen is on the other
+    // side, not just somewhere in the same chamber.
+    //
+    // Generalised over all 4 cardinals because the queen can be
+    // walled off above/below/either side — e.g. when the colony
+    // builds spoil pillars between adjacent chambers, or when a
+    // floor between the queen's chamber and one above pinches.
+    if (stateIn === STATE_WANDER && (queenField || broodField)) {
+      const wW = world.width;
+      const dirs: ReadonlyArray<readonly [number, number]> = [
+        [0, -1], [0, 1], [-1, 0], [1, 0],
+      ];
+      let didMaintenance = false;
+      for (const [dx, dy] of dirs) {
+        if (didMaintenance) break;
+        const sx = ax + dx;
+        const sy = ay + dy;
+        const ox2 = ax + dx * 2;
+        const oy2 = ay + dy * 2;
+        if (sx < 0 || sy < 0 || sx >= wW || sy >= world.height) continue;
+        if (ox2 < 0 || oy2 < 0 || ox2 >= wW || oy2 >= world.height) continue;
+        if (world.cells[sy * wW + sx] !== CELL_SOIL) continue;
+        if (world.cells[oy2 * wW + ox2] !== CELL_AIR) continue;
+        const farQ = queenField ? queenField.sample(ox2, oy2) : 0;
+        const farB = broodField ? broodField.sample(ox2, oy2) : 0;
+        // Higher threshold than the in-chamber sanctum check (0.3)
+        // because permeable diffusion makes EVERY nearby air cell
+        // carry some signal. 1.0 specifically targets "an attended
+        // chamber on the other side of this thin wall".
+        if (farQ > 1.0 || farB > 1.0) {
           if (rng.next() < colony.digProb[i]!) {
-            if (digCell(world, ax, ay - 1, rng)) {
+            if (digCell(world, sx, sy, rng)) {
               colony.setState(i, STATE_CARRY);
               colony.carryMoves[i] = 0;
-              // Reorient downward to head back into the chamber.
-              colony.heading[i] = Math.PI / 2 + rng.range(-0.3, 0.3);
+              colony.heading[i] = Math.atan2(dy, dx);
               if (particles) {
                 for (let k = 0; k < 2; k++) {
                   const a = rng.range(-Math.PI, 0);
                   const sp = rng.range(0.04, 0.14);
                   particles.spawn(
-                    ax + 0.5, (ay - 1) + 0.3,
+                    sx + 0.5, sy + 0.3,
                     Math.cos(a) * sp, Math.sin(a) * sp - 0.04,
                     24 + ((rng.next() * 12) | 0),
                   );
                 }
               }
-              continue;
+              didMaintenance = true;
             }
           }
         }
       }
+      if (didMaintenance) continue;
     }
 
     // (3) Sudd contact-triggered digging. Per soil contact, P(dig) =
