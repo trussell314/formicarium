@@ -99,11 +99,11 @@ export const DEFAULT_PARAMS: SimParams = {
   // Beshers & Fewell 2001: per-ant individual-threshold mean ~8
   // recent collisions before behavioural withdrawal.
   restThreshold: 8.0,
-  // Aina et al. 2023: collision-driven REST lasts on the order of
-  // minutes in real ants. 800 ticks ≈ 1.6 min biological — at the
-  // low end of the cited range; the higher 1500 left ants visibly
-  // stuck in clusters.
-  restDuration: 800,
+  // Aina et al. 2023: collision-driven REST lasts ~minutes in real
+  // ants. 1-2 min real → 100× compressed = 0.6-1.2 sec bio = 5-10
+  // ticks. We pick 8 ticks — short enough that REST clusters don't
+  // permanently lock up dense areas at the new compression rate.
+  restDuration: 8,
 };
 
 /** Distance below which two ants count as colliding. ≈ 1 body length
@@ -1442,13 +1442,14 @@ export function step(
     // proxy for "unproductive duration" — a WANDER ant resets her
     // timer on entering CARRY/REST/etc, so high stateTicks means
     // "I've been wandering this region without doing anything for
-    // a long time". 5000 ticks = 10 min biological. Other workers'
-    // WANDER stigmergy biases AWAY from the gradient (handled in
-    // the stigmergy block above), so dead ends gradually clear of
+    // a long time". 600 ticks ≈ 72 sec biological (100× compressed
+    // from the ~2 hr real-time threshold ants typically take to
+    // give up on a branch). Other workers' WANDER stigmergy biases
+    // AWAY from the gradient so dead ends gradually clear of
     // traffic.
     if (
       stateIn === STATE_WANDER && noEntryField &&
-      colony.stateTicks[i]! > 5000 &&
+      colony.stateTicks[i]! > 600 &&
       ix >= 0 && iy >= 0 && ix < world.width && iy < world.height
     ) {
       noEntryField.deposit(ix, iy, 0.005);

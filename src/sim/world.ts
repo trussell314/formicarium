@@ -10,10 +10,12 @@ export const CELL_GRAIN = 2;
 
 export type CellKind = 0 | 1 | 2;
 
-/** Ticks per biological day. 1 tick ≈ 120 ms (see species.ts), so
- *  720,000 ticks = 24 biological hours. The day/night cycle is a
- *  modulo of world.tick by this constant. */
-export const DAY_TICKS = 720_000;
+/** Ticks per biological day. 1 tick ≈ 120 ms (see species.ts);
+ *  under the 100× time-compression convention, an in-sim "day"
+ *  plays out at 100× real speed, so 1 day biological = 14.4 min
+ *  biological = 7,200 ticks. The day/night cycle is a modulo of
+ *  world.tick by this constant. */
+export const DAY_TICKS = 7200;
 
 /**
  * Daylight intensity in [0, 1] for a given tick. 0 at midnight,

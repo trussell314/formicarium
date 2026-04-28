@@ -269,29 +269,41 @@ export interface AntSpecies {
 // →   1 second biological  ≈ 8.3 ticks
 //     1 minute biological  ≈ 500 ticks
 //     1 hour biological    ≈ 30,000 ticks
-//     1 day biological     ≈ 720,000 ticks
+//     1 day biological     ≈ 720,000 ticks (real day; in-sim is 7,200)
 //     1 week biological    ≈ 5 million ticks
+//
+// ── 100× time-compression convention ────────────────────────────
+//
+// All biologically-anchored event durations are compressed 100× from
+// their real-world values. So a real-world process taking T_real
+// seconds plays out in T_real/100 seconds biological in the sim,
+// then converts to ticks via 1 tick = 120 ms biological.
+//
+// The exception is WALK SPEED — that's a 1× anchor because it's
+// also a spatial constraint (compressing it would teleport ants
+// across the world per tick). Pheromone half-lives are also kept
+// at their literature-calibrated values: their real range spans
+// four orders of magnitude (seconds to weeks) and a uniform 100×
+// compression would either make queen-recognition pheromone
+// disappear in seconds or alarm pheromone last for a tick. The
+// existing values are within order-of-magnitude of real biology.
 //
 // All cell-relative quantities (walkSpeed, COLLISION_RADIUS, pinhole
 // geometry, default world dims, scatter band, pheromone diffuse rate)
 // are sized so the physical-units description above remains correct.
-// Pheromone half-life and per-tick probabilities are time-relative
-// not space-relative, so they DON'T scale with cell size.
 
 export const HARVESTER: AntSpecies = {
   name: 'Pogonomyrmex barbatus',
   commonName: 'red harvester ant',
   reference: 'Gordon (1989, 2010); Tschinkel (1998, 2004)',
 
-  // ── Foraging cycle ────────────────────────────────────────────
-  // Real Pogonomyrmex foragers leave the nest several times per day;
-  // each trip lasts 10-30 minutes (Gordon 1991). Assuming 6 trips/day
-  // averaged over forager-eligible workers, mean inter-trip = 4 hr =
-  // 120k ticks → forageProb ~ 1 / (120000) per WANDER-eligible tick.
-  // Round to 2e-5; with forageDuration 5000 the steady-state forager
-  // fraction is ~9% of WANDER-eligible workers.
-  forageProb: 2e-5,
-  forageDuration: 5000,   // 10 min biological — middle of Gordon's range
+  // ── Foraging cycle (100× compressed) ──────────────────────────
+  // Real Pogonomyrmex foragers leave several times per day, mean
+  // inter-trip ~4 hr real → 144 sec bio compressed → 1200 ticks
+  // → forageProb = 1/1200 ≈ 8.3e-4. Trip lasts 10-30 min real,
+  // mid-range 20 min → 12 sec bio → 100 ticks.
+  forageProb: 8.3e-4,
+  forageDuration: 100,
 
   // ── Food / diet ───────────────────────────────────────────────
   granivorous: true,
@@ -312,15 +324,12 @@ export const HARVESTER: AntSpecies = {
   clumpSize: 10,
   clumpRadius: 5,
 
-  // ── Homeostasis / energy ──────────────────────────────────────
+  // ── Homeostasis / energy (100× compressed) ───────────────────
   maxEnergy: 1.0,
-  // Real Pogonomyrmex worker can survive ~3 weeks without food
-  // (Hölldobler & Wilson 1990 Ch. 13). 3 weeks = 15M ticks. We
-  // compress 10× for visibility — workers die in days of biological
-  // time without trophallaxis or foraging access. metabolism =
-  // 1 / 1.5M = 6.7e-7. (Original 2e-5 was 30× more aggressive,
-  // collapsing colonies in hours.)
-  metabolism: 6.7e-7,
+  // Real Pogonomyrmex worker survives ~3 weeks without food (H&W
+  // 1990 Ch. 13). 3 weeks real / 100 = 5.04 hr bio = 18,144 sec
+  // bio = 151,200 ticks. metabolism = 1 / 151,200 ≈ 6.6e-6.
+  metabolism: 6.6e-6,
   foodValue: 0.4,         // 1 seed restores ~40% — multiple seeds for full recovery
   hungerThreshold: 0.6,   // ants seek food below 60%
 
@@ -334,35 +343,33 @@ export const HARVESTER: AntSpecies = {
   // and got REST overload + starvation; brood replenishment now
   // covers the mortality so the stronger pull is sustainable.
   belowGeotaxis: 0.35,
-  // Real worker maturation (nurse → forager): ~3-4 weeks. Compress
-  // to ~1 hour biological for observation = 30000 ticks.
-  matureAge: 30000,
+  // Real worker maturation (nurse → forager) ~3 weeks real → 100×
+  // compressed = 5.04 hr bio = 151,200 ticks.
+  matureAge: 151200,
 
-  // ── Brood / population ────────────────────────────────────────
-  // A founding queen lays ~5-15 eggs/day (Tschinkel 1998; Hölldobler
-  // & Wilson 1990 Ch. 5). Mature colony queens lay 100s/day. Take a
-  // mid-founding rate: 1 egg every 2.4 hours biological = 72000 ticks.
-  // Compress to 5000 ticks (~10 min) for observable colony growth.
-  eggLayInterval: 5000,
-  // Real egg → larva: ~1 week. We compress to 15,000 ticks (~30
-  // min biological) so the user sees the egg→larva transition
-  // within a typical session window.
-  eggMatureTicks: 15000,
-  // Real larva → adult: ~3 weeks. Compress to 35,000 ticks
-  // (~70 min biological); total brood time = 50,000 ticks, same
-  // as the pre-larva-stage value so colony-growth tests don't
-  // regress.
-  larvaMatureTicks: 35000,
-  // Worker metabolism is 6.7e-7. Larvae burn ~15× faster (growing
-  // animals); with maxEnergy 1.0 a full-fed larva starves in
-  // ~100,000 ticks (~3 hr biological), well past larvaMatureTicks
-  // so a larva that gets even occasional trophallaxis matures.
-  // Neglected larvae starve.
-  larvaMetabolism: 1e-5,
+  // ── Brood / population (100× compressed) ──────────────────────
+  // Founding queen lays ~5-15 eggs/day (Tschinkel 1998). Take 6
+  // eggs/day → inter-egg ~4 hr real → 144 sec bio compressed →
+  // 1,200 ticks.
+  eggLayInterval: 1200,
+  // Real egg → larva: ~1 week → 100× compressed = 1.68 hr bio =
+  // 50,400 ticks.
+  eggMatureTicks: 50400,
+  // Real larva → adult: ~3 weeks → 100× compressed = 5.04 hr bio =
+  // 151,200 ticks. Total brood time = 201,600 ticks ≈ 6.7 hr bio.
+  larvaMatureTicks: 151200,
+  // Larvae burn ~15× faster than adult workers (growing tissue).
+  // 100× compressed: 6.6e-6 × 15 ≈ 1.0e-4. A neglected larva at
+  // 50% energy lasts ~5,000 ticks before starving; a fed one
+  // matures in 151k.
+  larvaMetabolism: 1.0e-4,
   // Pogonomyrmex barbatus mature colonies hold 5,000-10,000 workers
   // (Tschinkel 1998). We cap lower to fit performance/render budget.
   maxColonySize: 1000,
-  workerLifespan: 1_000_000,
+  // Real worker lifespan ~1 year → 100× compressed = 3.65 days bio
+  // = 2,628,000 ticks. At default speedMul=1 that's ~3.65 days
+  // wall; at speedMul=8 it's ~11 hr wall.
+  workerLifespan: 2628000,
   // 333 cells × 3 mm = 1 m, where Tschinkel measured bulk density
   // levelling off in P. badius soil profiles.
   compactionDepth: 333,
@@ -378,12 +385,13 @@ export const HARVESTER: AntSpecies = {
   // Per-tick (120 ms biological) gives ~30% / 500 ticks ≈ 6e-4. We
   // pick 1e-3 to make cleanup visible at observation scales without
   // making it overwhelm dig/forage activity.
-  necrophoresisProb: 1e-3,
-  // Hauling lasts long enough to walk the body off the entrance.
-  // 500 ticks × 1.2 cells/tick = ~600 cells max travel — far more
-  // than the ant will actually walk above-surface, so the gate is
-  // really about "got out of the chamber" plus a short surface walk.
-  necroHaulMinTicks: 500,
+  // Hart & Ratnieks (2002): ~30% of workers respond within ~1 min
+  // contact in real time. 100× compressed: 0.6 sec bio = 5 ticks
+  // → per-tick prob ≈ 0.06.
+  necrophoresisProb: 0.06,
+  // Real haul typically 1-2 min on the surface. 100× compressed:
+  // ~10 ticks (= ~1.2 sec bio).
+  necroHaulMinTicks: 10,
   // Penick & Tschinkel (2008) measured P. badius brood depth diel
   // movement: brood found 5-30 cm below surface, with deeper
   // positions at midday. At 3 mm/cell that's 17-100 cells. We use
@@ -392,11 +400,11 @@ export const HARVESTER: AntSpecies = {
   // world height without brood pressing against the world floor.
   broodMinDepth: 4,
   broodMaxDepth: 30,
-  // 600 ticks ≈ 72 sec biological at 1 tick = 120 ms. Eggs drift up
-  // to 60 cells over a 12-hour daytime, which matches the ~30-cell
-  // total swing between min and max depth (≥ enough motion to track
-  // the target without overshooting).
-  broodMigrateInterval: 600,
+  // Eggs need ~26 cell-moves (broodMax - broodMin) over a half-day
+  // window. With DAY_TICKS = 7200 (100× compressed), half-day =
+  // 3600 ticks, so interval = 3600/26 ≈ 138 ticks per migrate step.
+  // Round to 140.
+  broodMigrateInterval: 140,
   // Cassill & Tschinkel (1999) measured per-bout trophallactic
   // transfers of 0.5-5% of the donor's crop in S. invicta. We use
   // 0.005 = 0.5% of maxEnergy per tick of contact, which sums over
@@ -418,10 +426,10 @@ export const HARVESTER: AntSpecies = {
   // sweeps every 1000 ticks, gives ~5e-6/tick per seed — a few
   // sprouts per biological day in a busy granary.
   sproutProb: 5e-3,
-  // 24 biological hours = 720,000 ticks; we pick 5,000 so a sprout
-  // lives ~10 minutes biological before drying up. Long enough to
-  // be visible across many frames, short enough that the granary
-  // doesn't accumulate dead sprouts indefinitely.
-  sproutLifetimeTicks: 5000,
-  germinationSweepInterval: 1000,
+  // Real sprouts last ~1-2 days before drying up in a granary.
+  // 100× compressed: ~14-29 min bio = 7,200-14,400 ticks. Use 10k.
+  sproutLifetimeTicks: 10000,
+  // Sweep at half-day cadence — sprouts live ~10k ticks so the
+  // sweep catches their decay window twice over the lifecycle.
+  germinationSweepInterval: 3600,
 };

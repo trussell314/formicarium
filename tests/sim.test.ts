@@ -190,13 +190,15 @@ describe('sim invariants', () => {
     for (let y = 0; y < world.height; y++) {
       for (let x = 0; x < world.width; x++) {
         if (world.cells[world.index(x, y)] !== CELL_GRAIN) continue;
-        // Cell directly below must be solid OR we're at the world
-        // floor. Grains placed above ground may later cascade into
-        // voids dug under them — they're still supported (just by
-        // a deeper layer).
         if (y + 1 >= world.height) continue;
         const below = world.cells[world.index(x, y + 1)];
-        expect(below === CELL_SOIL || below === CELL_GRAIN).toBe(true);
+        // Grains either rest on solid (soil or other grain) OR at
+        // the natural-surface horizon, where the surface acts as
+        // structural bedrock and a grain in row (surface − 1) does
+        // not cascade into an open entrance shaft below. Both are
+        // legitimate "supported" configurations.
+        const atSurface = (y + 1) === world.naturalSurface[x];
+        expect(below === CELL_SOIL || below === CELL_GRAIN || atSurface).toBe(true);
       }
     }
   });

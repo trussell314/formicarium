@@ -217,8 +217,8 @@ describe('foraging cycle', () => {
     // Run at noon so the diurnal forage gate doesn't immediately
     // recall the ant — without this, the FORAGE→CARRY_FOOD pickup
     // never gets a chance because the night-recall fires first.
-    // 360,000 ticks = solar noon (DAY_TICKS / 2 from world.ts).
-    w.tick = 360_000;
+    // 3600 ticks = solar noon (DAY_TICKS = 7200 in world.ts).
+    w.tick = 3600;
     // Ant on surface at (10, 7) with a seed adjacent at (11, 7).
     w.food[w.index(11, 7)] = 1;
     const colony = new Colony(1);

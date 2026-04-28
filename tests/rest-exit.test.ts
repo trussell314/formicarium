@@ -78,7 +78,7 @@ describe('REST exit transition', () => {
     // into FORAGE on the rest-exit tick.
     const rng = new RNG(2);
     const w = flatWorld();
-    w.tick = 360_000; // noon — daylight=1 so the diurnal gate doesn't suppress forage
+    w.tick = 3600; // noon — daylight=1 so the diurnal gate doesn't suppress forage (DAY_TICKS = 7200)
     const colony = new Colony(1);
     colony.spawn(20.5, 15.5, 0, rng, {
       digProb: 0, pickProb: 0, stigmergy: 0, turnNoise: 0, restThreshold: 100,

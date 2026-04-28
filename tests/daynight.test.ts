@@ -30,7 +30,9 @@ describe('daylight curve', () => {
   });
   it('peaks once per cycle and is non-negative everywhere', () => {
     let peak = 0;
-    for (let t = 0; t < DAY_TICKS; t += 1000) {
+    // Scan in 100-tick steps so we hit at least 70 samples per
+    // cycle even with the compressed DAY_TICKS = 7200.
+    for (let t = 0; t < DAY_TICKS; t += 100) {
       const d = daylight(t);
       expect(d).toBeGreaterThanOrEqual(0);
       if (d > peak) peak = d;
