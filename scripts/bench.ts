@@ -16,14 +16,42 @@
 //
 // Output: a tab-separated summary plus per-tick percentiles.
 
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
 import {
   Colony, STATE_QUEEN,
 } from '../src/sim/colony';
 import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
-import { Pheromone } from '../src/sim/pheromone';
+import { Pheromone, attachPheromoneWasm } from '../src/sim/pheromone';
+import { initPheromoneWasm } from '../src/sim/pheromone-wasm';
 import { RNG } from '../src/sim/rng';
 import { HARVESTER } from '../src/sim/species';
 import { CELL_AIR, World } from '../src/sim/world';
+
+// Optionally enable the WASM-SIMD kernel for the bench (matches
+// what the worker uses in production). Set USE_WASM=0 to keep the
+// JS path for A/B comparison.
+const USE_WASM = process.env.USE_WASM !== '0';
+if (USE_WASM) {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const wasmPath = resolve(here, '../src/wasm/pheromone.wasm');
+  const bytes = readFileSync(wasmPath);
+  const rt = await initPheromoneWasm(async () => bytes.buffer.slice(
+    bytes.byteOffset, bytes.byteOffset + bytes.byteLength,
+  ));
+  if (rt) {
+    // Cells must be uploaded once before allocField is called by the
+    // Pheromone constructor.
+    const w = Number(process.env.WIDTH || 480);
+    const h = Number(process.env.HEIGHT || 270);
+    rt.uploadCells(new Uint8Array(w * h));
+    attachPheromoneWasm(rt);
+    console.error('bench: WASM-SIMD pheromone kernel attached');
+  } else {
+    console.error('bench: WASM init failed; running JS path');
+  }
+}
 
 const TICKS = Number(process.env.TICKS || 5000);
 const WARMUP = Number(process.env.WARMUP || 1000);
