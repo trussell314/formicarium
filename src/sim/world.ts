@@ -130,6 +130,17 @@ export class World {
    *  refreshes is fine — the throttle is soft, not exact. */
   foodCountCached = 0;
   foodCountTick = -1;
+  /** Cached count of columns whose natural-surface row (or one of
+   *  the four cells immediately below it) is AIR — i.e. there's
+   *  some open access to below-ground at this column. Refreshed
+   *  every ~100 ticks by the ant-rules step. Used to gate the
+   *  stranded-drill recovery rule: surface workers only drill
+   *  fresh shafts when the WHOLE entrance system is sealed,
+   *  preventing the cosmetic "random pits all over the surface"
+   *  behaviour seen at the start of a run when the founding
+   *  pinhole was the only shaft. */
+  openShaftCount = 0;
+  openShaftTick = -1;
 
   constructor(width: number, height: number) {
     this.width = width;

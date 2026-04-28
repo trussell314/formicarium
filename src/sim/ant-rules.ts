@@ -122,6 +122,14 @@ export const DEFAULT_PARAMS: SimParams = {
 /** Distance below which two ants count as colliding. ≈ 1 body length
  *  (6 mm at our 3 mm/cell scale = 2 cells). Scales with cell size:
  *  COLLISION_RADIUS × cellMM = 6 mm constant. */
+/** Cardinal-direction unit offsets for the sanctum-maintenance
+ *  partition scan. Hoisted to module scope so the per-ant loop
+ *  doesn't re-allocate the array every tick (4 arrays × 50 ants
+ *  × 250+ ticks/sec = 50K+ allocations/sec at speed, enough to
+ *  visibly spike GC). */
+const SANCTUM_DIRS: ReadonlyArray<readonly [number, number]> = [
+  [0, -1], [0, 1], [-1, 0], [1, 0],
+];
 const COLLISION_RADIUS = 2.0;
 /** Multiplicative decay applied to collisionCount each tick. ~50-tick
  *  half-life — collisions are recent indicators, not lifetime tally. */
@@ -234,6 +242,25 @@ export function step(
   trunkField?: Pheromone,
 ): void {
   world.tick++;
+  // Open-shaft count refresh. O(W × 5) once every ~100 ticks.
+  // Each column counts as "open" if any of the natural-surface
+  // row or the four cells immediately below it is AIR — i.e. the
+  // colony has at least a partial way in here. Cached so the
+  // stranded-drill recovery rule can be a single integer compare
+  // per surface ant per tick instead of a 16-column scan.
+  if (world.tick - world.openShaftTick >= 100 || world.openShaftTick < 0) {
+    let openCount = 0;
+    const wW = world.width;
+    for (let xc = 0; xc < wW; xc++) {
+      const sf = world.naturalSurface[xc]!;
+      const yMax = Math.min(world.height - 1, sf + 4);
+      for (let yc = sf; yc <= yMax; yc++) {
+        if (world.cells[yc * wW + xc] === CELL_AIR) { openCount++; break; }
+      }
+    }
+    world.openShaftCount = openCount;
+    world.openShaftTick = world.tick;
+  }
 
   // Diurnal/nocturnal foraging gate. Gordon (1991) tracked P. barbatus
   // forager activity by time of day and found it crashes to zero at
@@ -2097,21 +2124,14 @@ export function step(
       ay < surfHere
       && ay + 1 < world.height
       && world.cells[(ay + 1) * wW + ax] === CELL_SOIL;
-    if (stranded) {
-      const SHAFT_RANGE = 16;
-      const SHAFT_SCAN_DEPTH = 5;
-      const xMin = Math.max(0, ax - SHAFT_RANGE);
-      const xMax = Math.min(world.width - 1, ax + SHAFT_RANGE);
-      let foundShaft = false;
-      for (let xc = xMin; xc <= xMax && !foundShaft; xc++) {
-        const sf = world.naturalSurface[xc]!;
-        const yMax = Math.min(world.height - 1, sf + SHAFT_SCAN_DEPTH);
-        for (let yc = sf; yc <= yMax; yc++) {
-          if (world.cells[yc * wW + xc] === CELL_AIR) { foundShaft = true; break; }
-        }
-      }
-      if (foundShaft) stranded = false;
-    }
+    // Suppress stranded-drill if ANY open shaft exists anywhere in
+    // the world. Workers walking on the surface should find the
+    // existing entrance via random walk + dig-pheromone gradient,
+    // not drill fresh pits in unrelated columns. Only when the
+    // entire surface is sealed (no AIR within the top 5 rows of
+    // any column) does the recovery drill fire. Cached at world
+    // level — see openShaftCount refresh below.
+    if (stranded && world.openShaftCount > 0) stranded = false;
 
     // Sanctum partition maintenance. Real Pogonomyrmex workers
     // actively keep galleries open by chipping at any 1-cell-thick
@@ -2136,12 +2156,18 @@ export function step(
     // builds spoil pillars between adjacent chambers, or when a
     // floor between the queen's chamber and one above pinches.
     if (stateIn === STATE_WANDER && (queenField || broodField)) {
+      // Early bail: a worker far from the queen has no chance of
+      // finding the partition signal in any cardinal direction.
+      // Skip the 4-direction probe unless the worker's OWN cell
+      // already shows nearby sanctum pheromone via permeable
+      // diffusion. Cuts the per-tick cost from 4 probes × 50 ants
+      // to roughly 4 probes × the few ants actually near the queen.
+      const ownQ = queenField ? queenField.sample(ax, ay) : 0;
+      const ownB = broodField ? broodField.sample(ax, ay) : 0;
+      if (ownQ < 0.3 && ownB < 0.3) continue;
       const wW = world.width;
-      const dirs: ReadonlyArray<readonly [number, number]> = [
-        [0, -1], [0, 1], [-1, 0], [1, 0],
-      ];
       let didMaintenance = false;
-      for (const [dx, dy] of dirs) {
+      for (const [dx, dy] of SANCTUM_DIRS) {
         if (didMaintenance) break;
         const sx = ax + dx;
         const sy = ay + dy;
