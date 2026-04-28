@@ -354,6 +354,7 @@ function main(): void {
       }
     },
     phero: () => { renderer.showPheromones = !renderer.showPheromones; },
+    minimap: () => { renderer.showMinimap = !renderer.showMinimap; },
     reseed: () => {
       clearSavedSnapshot();
       settings.seed = (settings.seed * 16807 + 1) >>> 0;
@@ -370,6 +371,7 @@ function main(): void {
     else if (e.key === '0') actions.zoomout!();
     else if (e.key === 'f') actions.full!();
     else if (e.key === 'p') actions.phero!();
+    else if (e.key === 'm') actions.minimap!();
     else if (e.key === 'r') actions.reseed!();
   });
 

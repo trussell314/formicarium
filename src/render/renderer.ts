@@ -185,6 +185,10 @@ export class Renderer {
    *  translucent unused colours so they don't conflict with the
    *  brown/green/tan terrain palette: cyan = dig, magenta = build. */
   showPheromones = false;
+  /** Toggleable mini-map in the bottom-right corner. On by default
+   *  — at zoom 1 it's small enough to ignore, and at higher zooms
+   *  the viewport indicator gives the user a "you are here" cue. */
+  showMinimap = true;
 
   /** User zoom factor (1.0 = fit-to-screen). Mutated by main's pinch /
    *  wheel handlers. */
@@ -900,6 +904,77 @@ export class Renderer {
     grad.addColorStop(1, 'rgba(0, 0, 0, 0.55)');
     this.ctx.fillStyle = grad;
     this.ctx.fillRect(ox, oy, ow, oh);
+
+    // Mini-map. Bottom-right inset showing the full world at low
+    // resolution with the current viewport rectangle outlined when
+    // the user is zoomed in. Always drawn — at zoom 1 it shows the
+    // whole world (so the rectangle covers the entire mini-map),
+    // at higher zooms it serves as a "you are here" overlay.
+    // Drawn on top of the vignette so it stays legible when the
+    // user is zoomed deep into a corner of the world.
+    if (this.showMinimap) {
+      const mmAspect = w / h;
+      const mmW = Math.min(220, cw * 0.22);
+      const mmH = mmW / mmAspect;
+      const mmX = cw - mmW - 12;
+      const mmY = ch - mmH - 12;
+      // Slight backdrop for legibility on bright daytime renders.
+      this.ctx.fillStyle = 'rgba(10, 6, 6, 0.55)';
+      this.ctx.fillRect(mmX - 4, mmY - 4, mmW + 8, mmH + 8);
+      // Source the same offscreen buffer the world is drawn from —
+      // it already has terrain + pheromone overlay composited, so
+      // the mini-map matches the main view's content. Smoothing on
+      // for a clean reduction (aliasing reads as "noise" at this size).
+      this.ctx.imageSmoothingEnabled = true;
+      this.ctx.drawImage(this.off, 0, 0, w * this.SUB, h * this.SUB, mmX, mmY, mmW, mmH);
+      this.ctx.imageSmoothingEnabled = false;
+      // Border.
+      this.ctx.strokeStyle = 'rgba(216, 200, 168, 0.55)';
+      this.ctx.lineWidth = 1;
+      this.ctx.strokeRect(mmX + 0.5, mmY + 0.5, mmW - 1, mmH - 1);
+      // Viewport indicator. Map the visible world rectangle (after
+      // pan/zoom) into mini-map space and outline it. At zoom=1 the
+      // rectangle is the whole mini-map; at higher zooms it shrinks
+      // and tracks the user's pan.
+      const viewLeft = -ox / scale;
+      const viewTop = -oy / scale;
+      const viewRight = (cw - ox) / scale;
+      const viewBottom = (ch - oy) / scale;
+      const vL = Math.max(0, Math.min(w, viewLeft));
+      const vT = Math.max(0, Math.min(h, viewTop));
+      const vR = Math.max(0, Math.min(w, viewRight));
+      const vB = Math.max(0, Math.min(h, viewBottom));
+      const vx = mmX + (vL / w) * mmW;
+      const vy = mmY + (vT / h) * mmH;
+      const vw = ((vR - vL) / w) * mmW;
+      const vh = ((vB - vT) / h) * mmH;
+      if (this.zoom > 1.001) {
+        this.ctx.strokeStyle = 'rgba(255, 220, 80, 0.95)';
+        this.ctx.lineWidth = 1.5;
+        this.ctx.strokeRect(vx, vy, vw, vh);
+      }
+      // Live ant dots. One pixel per ant — at default 280×140 with
+      // 50–500 ants the dot density reads as a nest cluster + a few
+      // surface foragers without hitting overdraw. Skip eggs and
+      // larvae (they cluster at the queen and make the mini-map
+      // unreadable); they're already implied by the queen marker.
+      const sxScale = mmW / w;
+      const syScale = mmH / h;
+      for (let i = 0; i < colony.count; i++) {
+        const s = colony.state[i]!;
+        if (s === STATE_DEAD || s === STATE_EGG || s === STATE_LARVA) continue;
+        let dotR = 90, dotG = 70, dotB = 50;
+        if (s === STATE_QUEEN) { dotR = 220; dotG = 180; dotB = 255; }
+        else if (s === STATE_FORAGE || s === STATE_CARRY_FOOD) {
+          dotR = 240; dotG = 220; dotB = 80;
+        } else if (s === STATE_CARRY) { dotR = 200; dotG = 160; dotB = 100; }
+        this.ctx.fillStyle = `rgb(${dotR}, ${dotG}, ${dotB})`;
+        const dxm = mmX + colony.posX[i]! * sxScale;
+        const dym = mmY + colony.posY[i]! * syScale;
+        const r = s === STATE_QUEEN ? 1.8 : 1.2;
+        this.ctx.fillRect(dxm - r, dym - r, r * 2, r * 2);
+      }
+    }
   }
 }
 
