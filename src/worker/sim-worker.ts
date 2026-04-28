@@ -14,7 +14,7 @@
 import { Colony, STATE_DEAD, STATE_EGG, STATE_LARVA, STATE_QUEEN } from '../sim/colony';
 import { DEFAULT_PARAMS, step } from '../sim/ant-rules';
 import { ParticleSystem } from '../sim/particles';
-import { Pheromone, attachPheromoneWasm } from '../sim/pheromone';
+import { Pheromone, attachPheromoneWasm, uploadPheromoneCells } from '../sim/pheromone';
 import { initPheromoneWasm } from '../sim/pheromone-wasm';
 import {
   captureSnapshot, clearSavedSnapshot, restoreSnapshot,
@@ -72,6 +72,14 @@ function buildBundle(s: SaveSettings, restoreBlob: string | null): SimBundle {
   const halfW = Math.max(6, Math.floor(s.width * 0.06));
   const depth = Math.max(4, Math.floor(s.height * 0.05));
   world.generate(rng, surfaceRow, halfW, depth);
+
+  // Initialise the WASM kernel's cells layout BEFORE constructing
+  // any Pheromone instances. allocField() throws if uploadCells
+  // hasn't run, because the bump pointer for field allocations
+  // depends on cells.length. Done here (after world.generate, before
+  // any new Pheromone) so the JS path is unaffected — uploadCells
+  // is a no-op when no WASM runtime is attached.
+  uploadPheromoneCells(world.cells);
 
   // Pheromone half-lives, compressed 10× from the original
   // calibration to compensate for the 100× time compression of
@@ -384,6 +392,13 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       });
       break;
     case 'requestSnapshot': {
+      // Worker may still be booting (async WASM load + buildBundle).
+      // The main-thread render loop fires requestSnapshot from rAF
+      // independently of the 'ready' handshake, so we defensively
+      // skip when bundle isn't ready yet — main will retry on the
+      // next frame, and the deferred snapshotPending state will
+      // unstick when 'ready' triggers a fresh request.
+      if (!bundle) break;
       drive(performance.now());
       const snap = buildSnapshot(msg.includePheromones);
       send({ kind: 'snapshot', snap });
