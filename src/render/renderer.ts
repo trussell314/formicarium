@@ -589,9 +589,44 @@ export class Renderer {
           }
         }
       }
-      this.ctx.fillStyle = '#1a0f08';
+      // Three-segment ant body: abdomen (rear, largest), thorax
+      // (middle, narrower), head (front, small). Real ants have
+      // exactly this morphology; the previous single-ellipse form
+      // read as a featureless oval at low zoom. The segments are
+      // laid out along the heading direction with small gaps so
+      // the petiole between them is visible.
+      const heading = colony.heading[i]!;
+      const cosH = Math.cos(heading);
+      const sinH = Math.sin(heading);
+      // Caste tint by energy as a simple proxy for "well-fed
+      // forager" vs "depleted nurse". Less saturated bodies for
+      // hungry ants. Base body colour is dark earth-brown.
+      const e = colony.energy[i]!;
+      const tint = Math.max(0.55, Math.min(1, e * 1.1));
+      const bodyR = (26 * tint) | 0;
+      const bodyG = (15 * tint) | 0;
+      const bodyB = (8  * tint) | 0;
+      this.ctx.fillStyle = `rgb(${bodyR},${bodyG},${bodyB})`;
+      // Abdomen — pointing backward from centre.
       this.ctx.beginPath();
-      this.ctx.ellipse(px, py, radius * 1.4, radius, colony.heading[i]!, 0, Math.PI * 2);
+      this.ctx.ellipse(
+        px - cosH * radius * 0.7, py - sinH * radius * 0.7,
+        radius * 0.85, radius * 0.62, heading, 0, Math.PI * 2,
+      );
+      this.ctx.fill();
+      // Thorax — slightly forward of centre, narrower.
+      this.ctx.beginPath();
+      this.ctx.ellipse(
+        px + cosH * radius * 0.10, py + sinH * radius * 0.10,
+        radius * 0.42, radius * 0.40, heading, 0, Math.PI * 2,
+      );
+      this.ctx.fill();
+      // Head — at the front, near-circular.
+      this.ctx.beginPath();
+      this.ctx.arc(
+        px + cosH * radius * 0.85, py + sinH * radius * 0.85,
+        radius * 0.45, 0, Math.PI * 2,
+      );
       this.ctx.fill();
       if (carry) {
         this.ctx.fillStyle = GRAIN_COLOR_CSS;
