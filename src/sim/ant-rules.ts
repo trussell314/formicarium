@@ -2113,6 +2113,66 @@ export function step(
       if (foundShaft) stranded = false;
     }
 
+    // Sanctum-ceiling maintenance. Real Pogonomyrmex workers don't
+    // wait for soil to physically collapse — they actively keep
+    // galleries open by chipping at the chamber ceiling whenever
+    // there's a constriction toward the surface (Tschinkel 2004
+    // J. Insect Sci. 4:21; Gordon 2010 colony behaviour). The
+    // existing physics treats SOIL as rigid, so without an active
+    // behavioural rule the queen's chamber slowly seals off as
+    // workers occasionally drop spoil in adjacent cells over many
+    // hours.
+    //
+    // Trigger: WANDER worker in a sanctum cell (queen or brood
+    // pheromone > 0.3), with SOIL directly above and AIR two
+    // rows above. The above-above-AIR check restricts digging
+    // to specifically the case where a 1-cell-thick partition
+    // separates this chamber from a shaft above — exactly the
+    // burial geometry. Without it the rule would let workers
+    // erode chambers indefinitely upward.
+    if (
+      stateIn === STATE_WANDER && ay > 1 && (queenField || broodField)
+    ) {
+      const queenHere = queenField ? queenField.sample(ax, ay) : 0;
+      const broodHere = broodField ? broodField.sample(ax, ay) : 0;
+      const inSanctum = queenHere > 0.3 || broodHere > 0.3;
+      if (inSanctum) {
+        const wW = world.width;
+        const aboveIdx = (ay - 1) * wW + ax;
+        const above2Idx = (ay - 2) * wW + ax;
+        const aboveIsSoil = world.cells[aboveIdx] === CELL_SOIL;
+        const above2IsAir = world.cells[above2Idx] === CELL_AIR;
+        if (aboveIsSoil && above2IsAir) {
+          // Maintenance dig at base rate (digProb), no recruitment
+          // pheromone — this is upkeep, not a front. No boost: real
+          // ceiling-maintenance is occasional, not constant. The
+          // worker walks through the chamber and rolls only when
+          // they happen to be at a 1-cell-thick partition; that
+          // gates the rate naturally.
+          if (rng.next() < colony.digProb[i]!) {
+            if (digCell(world, ax, ay - 1, rng)) {
+              colony.setState(i, STATE_CARRY);
+              colony.carryMoves[i] = 0;
+              // Reorient downward to head back into the chamber.
+              colony.heading[i] = Math.PI / 2 + rng.range(-0.3, 0.3);
+              if (particles) {
+                for (let k = 0; k < 2; k++) {
+                  const a = rng.range(-Math.PI, 0);
+                  const sp = rng.range(0.04, 0.14);
+                  particles.spawn(
+                    ax + 0.5, (ay - 1) + 0.3,
+                    Math.cos(a) * sp, Math.sin(a) * sp - 0.04,
+                    24 + ((rng.next() * 12) | 0),
+                  );
+                }
+              }
+              continue;
+            }
+          }
+        }
+      }
+    }
+
     // (3) Sudd contact-triggered digging. Per soil contact, P(dig) =
     // params.digProb. If the dig fires, ask the env to remove the
     // soil cell; the env handles any granular cascade. Drop dig
