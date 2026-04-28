@@ -300,7 +300,30 @@ export function step(
       }
     }
     const capDemand = world.foodCap * species.metabolism;
-    const targetEnergyPerTick = Math.min(demand * 1.10, capDemand);
+    // Saturation throttle. Without this, supply matches demand
+    // exactly so any unconsumed seed accumulates indefinitely —
+    // foragers can't pick up perfectly-balanced supply, surplus
+    // builds, sprouts, the world turns green. We periodically count
+    // standing food and scale supply down once inventory exceeds a
+    // few days of consumption. Refresh every 200 ticks; drift is
+    // fine since the throttle is soft.
+    if (world.tick - world.foodCountTick >= 200 || world.foodCountTick < 0) {
+      let n = 0;
+      const f = world.food;
+      for (let i = 0; i < f.length; i++) if (f[i]! > 0) n++;
+      world.foodCountCached = n;
+      world.foodCountTick = world.tick;
+    }
+    // Soft saturation: at inventory = aliveDemandCount × 5 we halve
+    // the rate; at 15× we cut to ~14%. aliveDemandCount is the
+    // number of consuming-equivalent ants (workers + larvae count
+    // the same as a worker each, scaled to keep proportionality
+    // with `demand`). Below the threshold drops run at full
+    // demand-matching rate; above it they trickle.
+    const aliveDemand = Math.max(1, demand / species.metabolism);
+    const satiety = world.foodCountCached / (aliveDemand * 5);
+    const satMult = 1 / (1 + satiety);
+    const targetEnergyPerTick = Math.min(demand * 1.10, capDemand) * satMult;
     const targetSeedsPerTick = targetEnergyPerTick / species.foodValue;
     world.clumpAccum += targetSeedsPerTick;
     // Fire as many clumps as the accumulator can pay for. Typically
@@ -852,6 +875,52 @@ export function step(
     if (stateNow === STATE_QUEEN) {
       colony.prevX[i] = colony.posX[i]!;
       colony.prevY[i] = colony.posY[i]!;
+      // Queen migration. Real queens don't sit forever at one cell:
+      // attendants jostle them within the brood chamber (Pratt 2005)
+      // and the queen tracks the brood pile when nurses migrate it
+      // for thermoregulation (Penick & Tschinkel 2008, P. badius).
+      // Without movement she gets stranded when the brood pile
+      // diel-migrates away, loses her trophallaxis ring, and the
+      // colony decays even though brood and food are nominally fine.
+      // We follow the same diurnal depth target the brood piles do
+      // but at a 6× slower cadence — she's larger and harder to
+      // budge. Same chamber constraint: she only steps into 3+ wide
+      // passages, never the 1-cell entrance shaft.
+      const QUEEN_MIGRATE_TICK = species.broodMigrateInterval * 6;
+      if (
+        colony.stateTicks[i]! > 0 &&
+        colony.stateTicks[i]! % QUEEN_MIGRATE_TICK === 0
+      ) {
+        const qx = colony.posX[i]! | 0;
+        const qyNow = colony.posY[i]! | 0;
+        if (qx >= 0 && qx < world.width) {
+          const surf = world.naturalSurface[qx]!;
+          const day = daylight(world.tick);
+          const targetDepth =
+            species.broodMinDepth +
+            (species.broodMaxDepth - species.broodMinDepth) * day;
+          const targetY = surf + Math.round(targetDepth);
+          let dy = 0;
+          if (qyNow < targetY) dy = 1;
+          else if (qyNow > targetY) dy = -1;
+          if (dy !== 0) {
+            const newY = qyNow + dy;
+            const wW = world.width;
+            const leftIsSoil =
+              qx > 0 && world.cells[newY * wW + (qx - 1)] === CELL_SOIL;
+            const rightIsSoil =
+              qx < wW - 1 && world.cells[newY * wW + (qx + 1)] === CELL_SOIL;
+            const isChamber = !leftIsSoil && !rightIsSoil;
+            if (
+              newY >= 0 && newY < world.height &&
+              world.cells[world.index(qx, newY)] === CELL_AIR &&
+              isChamber
+            ) {
+              colony.posY[i] = qyNow + dy + 0.5;
+            }
+          }
+        }
+      }
       // Queen pheromone emission. Real ants emit non-volatile cuticular
       // hydrocarbons — Hölldobler & Wilson 1990 Ch. 7 list "queen
       // recognition substances" as one of the dozen-plus chemical

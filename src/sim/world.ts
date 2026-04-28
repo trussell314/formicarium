@@ -123,6 +123,13 @@ export class World {
    *  reset the food schedule. */
   clumpAccum = 0;
   tick = 0;
+  /** Cached count of cells with food[i] > 0. Refreshed by the food
+   *  spawn logic every ~200 ticks; used to throttle drops once
+   *  supply outstrips consumption (otherwise seeds pile up on the
+   *  surface, sprout, and turn the world green). Drift between
+   *  refreshes is fine — the throttle is soft, not exact. */
+  foodCountCached = 0;
+  foodCountTick = -1;
 
   constructor(width: number, height: number) {
     this.width = width;
