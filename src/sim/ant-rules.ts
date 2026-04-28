@@ -314,15 +314,29 @@ export function step(
       world.foodCountCached = n;
       world.foodCountTick = world.tick;
     }
-    // Soft saturation: at inventory = aliveDemandCount × 5 we halve
-    // the rate; at 15× we cut to ~14%. aliveDemandCount is the
-    // number of consuming-equivalent ants (workers + larvae count
-    // the same as a worker each, scaled to keep proportionality
-    // with `demand`). Below the threshold drops run at full
-    // demand-matching rate; above it they trickle.
+    // Saturation. Hard stop at 150% of current population: if
+    // standing seed inventory already covers more than that, no new
+    // drops fire this tick. Below the threshold supply ramps up
+    // smoothly via a soft taper rather than bang-bang switching
+    // (otherwise the spawn rate oscillates as seeds get picked up
+    // and the threshold is repeatedly crossed).
+    //
+    //   inventory ≤ 75% pop:   full rate
+    //   inventory  75-150%:    linearly fade from 1.0 to 0.0
+    //   inventory ≥ 150%:      drops stop completely
+    //
+    // aliveDemand is the consuming-equivalent ant count (workers +
+    // larvae weighted by their respective metabolisms, derived from
+    // `demand`). 150% is generous — empty granaries get refilled
+    // promptly when foragers eat through, but a thriving colony
+    // doesn't sit on a green wall of unconsumed surface seeds.
     const aliveDemand = Math.max(1, demand / species.metabolism);
-    const satiety = world.foodCountCached / (aliveDemand * 5);
-    const satMult = 1 / (1 + satiety);
+    const hardCap = aliveDemand * 1.5;
+    const softFloor = aliveDemand * 0.75;
+    let satMult: number;
+    if (world.foodCountCached >= hardCap) satMult = 0;
+    else if (world.foodCountCached <= softFloor) satMult = 1;
+    else satMult = (hardCap - world.foodCountCached) / (hardCap - softFloor);
     const targetEnergyPerTick = Math.min(demand * 1.10, capDemand) * satMult;
     const targetSeedsPerTick = targetEnergyPerTick / species.foodValue;
     world.clumpAccum += targetSeedsPerTick;

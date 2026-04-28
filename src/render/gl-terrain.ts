@@ -198,16 +198,25 @@ void main() {
     vec4 p0 = texelFetch(uPPack0, cell, 0);
     vec4 p1 = texelFetch(uPPack1, cell, 0);
     vec4 p2 = texelFetch(uPPack2, cell, 0);
-    float dv  = clamp(p0.r / 0.5,  0.0, 1.0);
-    float bv  = clamp(p0.g / 0.5,  0.0, 1.0);
-    float tv  = clamp(p0.b / 0.5,  0.0, 1.0);
-    float av  = clamp(p0.a / 0.15, 0.0, 1.0);
-    float qv  = clamp(p1.r / 4.0,  0.0, 1.0);
-    float brv = clamp(p1.g / 1.5,  0.0, 1.0);
-    float nv  = clamp(p1.b / 0.8,  0.0, 1.0);
-    float xv  = clamp(p1.a / 2.0,  0.0, 1.0);
-    float gv  = clamp(p2.r / 4.0,  0.0, 1.0);
-    float tkv = clamp(p2.g / 5.0,  0.0, 1.0);
+    // Non-linear (sqrt) mapping. Linear value/divisor mapping
+    // hides low concentrations: at high sim speeds deposits smear
+    // across more cells per wall-frame, peak values drop, and a
+    // linear ramp pushes them below visibility. sqrt boosts contrast
+    // at the low end (a value 4× below the divisor still renders
+    // at 50% intensity instead of 25%) while keeping saturation at
+    // the divisor stops. Divisors also halved across the board so
+    // sustained low-concentration trails register without forcing
+    // dig fronts to clip.
+    float dv  = sqrt(clamp(p0.r / 0.25,  0.0, 1.0));
+    float bv  = sqrt(clamp(p0.g / 0.25,  0.0, 1.0));
+    float tv  = sqrt(clamp(p0.b / 0.25,  0.0, 1.0));
+    float av  = sqrt(clamp(p0.a / 0.075, 0.0, 1.0));
+    float qv  = sqrt(clamp(p1.r / 2.0,   0.0, 1.0));
+    float brv = sqrt(clamp(p1.g / 0.75,  0.0, 1.0));
+    float nv  = sqrt(clamp(p1.b / 0.4,   0.0, 1.0));
+    float xv  = sqrt(clamp(p1.a / 1.0,   0.0, 1.0));
+    float gv  = sqrt(clamp(p2.r / 2.0,   0.0, 1.0));
+    float tkv = sqrt(clamp(p2.g / 2.5,   0.0, 1.0));
     col += (vec3(0.0,   220.0, 220.0) / 255.0 - col) * dv  * W;
     col += (vec3(220.0, 0.0,   220.0) / 255.0 - col) * bv  * W;
     col += (vec3(240.0, 220.0, 60.0)  / 255.0 - col) * tv  * W;

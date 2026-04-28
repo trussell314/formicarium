@@ -121,7 +121,13 @@ describe('population-driven clump rain', () => {
       const colony = new Colony(workers + 4);
       seedWorkers(colony, workers, w);
       const f = fields(w);
-      for (let t = 0; t < 5_000; t++) {
+      // 500 ticks rather than 5000 so we measure the supply RATE
+      // before the population-aware saturation throttle (hard stop
+      // at 1.5× population standing inventory) starts capping the
+      // smaller colony at a different inventory plateau than the
+      // larger one. In the early-supply window both colonies are
+      // bounded by foodCap and produce the same rate.
+      for (let t = 0; t < 500; t++) {
         step(w, colony, f.dig, f.build, rng, DEFAULT_PARAMS, undefined, FAST);
       }
       return countFood(w);
