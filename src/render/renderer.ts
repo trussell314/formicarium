@@ -119,6 +119,15 @@ export class Renderer {
    *  default 280×140 world. */
   private readonly SUB = 2;
 
+  /** Pre-baked star field for the night sky. Positions in normalized
+   *  (0..1) sky-rectangle space; each star has a stable twinkle phase
+   *  and base brightness so the field reads natural. Generated once
+   *  at construction; the same stars persist for the entire run. */
+  private readonly stars: ReadonlyArray<{
+    x: number; y: number; brightness: number; phase: number;
+    size: number; tint: [number, number, number];
+  }>;
+
   constructor(canvas: HTMLCanvasElement, world: RenderableWorld) {
     this.canvas = canvas;
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -133,6 +142,42 @@ export class Renderer {
     this.offCtx = offCtx;
     this.imageData = this.offCtx.createImageData(world.width * this.SUB, world.height * this.SUB);
     this.buf = this.imageData.data;
+    // Star field. Density picked so a typical viewport shows ~80
+    // stars — sparse enough that you can see individual ones, dense
+    // enough that the sky doesn't read as empty. Most stars are
+    // small white dots; a few are brighter and warmer (yellow/orange)
+    // or cooler (blue) to break up the monochrome look. Mulberry32
+    // PRNG inline so the field is the same every run without
+    // pulling sim/rng (renderer is sim-independent).
+    let seed = 0x9e3779b1;
+    const rand = (): number => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = seed;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const stars: { x: number; y: number; brightness: number; phase: number;
+      size: number; tint: [number, number, number] }[] = [];
+    for (let i = 0; i < 120; i++) {
+      const r = rand();
+      let tint: [number, number, number];
+      if (r < 0.05) tint = [255, 210, 160]; // warm giant
+      else if (r < 0.10) tint = [180, 200, 255]; // blue-white
+      else tint = [240, 240, 245]; // typical white
+      stars.push({
+        x: rand(),
+        // Bias toward the upper half of the sky band — feels closer
+        // to a real horizon view (more stars overhead than near the
+        // horizon haze).
+        y: rand() * rand(),
+        brightness: 0.3 + rand() * 0.7,
+        phase: rand() * Math.PI * 2,
+        size: 0.6 + rand() * 1.4,
+        tint,
+      });
+    }
+    this.stars = stars;
   }
 
   /** Toggleable pheromone-field overlay. Off by default; flip with
@@ -463,6 +508,110 @@ export class Renderer {
     this.ctx.fillRect(0, 0, cw, ch);
     this.ctx.imageSmoothingEnabled = false;
     this.ctx.drawImage(this.off, 0, 0, w * this.SUB, h * this.SUB, ox, oy, ow, oh);
+
+    // Celestial layer. Drawn on the visible canvas (not into the
+    // pixel buffer) so the sun/moon and stars are crisp vector
+    // shapes that don't pixelate at high zoom. Clipped to the sky
+    // band — the rectangle from the top of the world down to the
+    // highest natural-surface peak — so they never appear over
+    // soil or the cross-section. The sky band spans the columns of
+    // the world image at the current scale.
+    let minSurf = surfRow[0]!;
+    for (let x = 1; x < w; x++) if (surfRow[x]! < minSurf) minSurf = surfRow[x]!;
+    const skyHeightPx = Math.max(0, minSurf * scale);
+    if (skyHeightPx > 4) {
+      this.ctx.save();
+      this.ctx.beginPath();
+      this.ctx.rect(ox, oy, ow, skyHeightPx);
+      this.ctx.clip();
+
+      // Day-night phase. tick=0 is solar midnight; phase 0.25 = sunrise,
+      // 0.5 = noon, 0.75 = sunset. See sim/world.ts daylight().
+      const DAY_TICKS = 7200;
+      const phase = (tick % DAY_TICKS) / DAY_TICKS;
+
+      // Stars. Visible while the sun is below the horizon (phase ∉
+      // [0.25, 0.75]). Fade smoothly through the dawn/dusk shoulder
+      // so they don't pop. starAlpha = 1 at full night, 0 at full day.
+      const starAlpha = Math.max(0, 1 - daylight * 1.4);
+      if (starAlpha > 0.01) {
+        const tw = ow;
+        const th = skyHeightPx;
+        for (let i = 0; i < this.stars.length; i++) {
+          const s = this.stars[i]!;
+          const sx = ox + s.x * tw;
+          const sy = oy + s.y * th;
+          // Slow per-star twinkle. Period ~5–8 s at 60 fps. The
+          // 0.4..1.0 envelope keeps stars visible at the trough.
+          const twk = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(tick * 0.06 + s.phase));
+          const a = starAlpha * s.brightness * twk;
+          const r = s.tint[0]; const g = s.tint[1]; const b = s.tint[2];
+          this.ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a})`;
+          this.ctx.beginPath();
+          this.ctx.arc(sx, sy, s.size, 0, Math.PI * 2);
+          this.ctx.fill();
+        }
+      }
+
+      // Sun and moon arc across the sky in opposing half-cycles.
+      // Sun visible during the daylight half (phase in [0.25, 0.75]);
+      // moon visible during the night half. Both follow a parabolic
+      // arc from east horizon (x=0) up to overhead (x=cw/2) and
+      // down to west horizon (x=cw). t01 ∈ [0,1] across the rise→set.
+      const skyTop = oy;
+      const skyBottom = oy + skyHeightPx;
+      const peakY = skyTop + skyHeightPx * 0.15; // arc apex
+      const horizonY = skyBottom - skyHeightPx * 0.05;
+      const bodyR = Math.max(6, Math.min(skyHeightPx * 0.07, ow * 0.025));
+      const drawArcBody = (t01: number, isSun: boolean): void => {
+        // Parabolic arc: y = horizonY at t=0 and t=1, peakY at t=0.5.
+        const arc = Math.sin(t01 * Math.PI); // 0..1..0
+        const bx = ox + ow * t01;
+        const by = horizonY + (peakY - horizonY) * arc;
+        if (isSun) {
+          // Soft halo + bright disc. The halo is a radial gradient
+          // that fades the warm tint into transparency over 3× the
+          // disc radius — sells the "atmospheric scatter" without
+          // costing per-pixel work.
+          const g = this.ctx.createRadialGradient(bx, by, 0, bx, by, bodyR * 3.5);
+          g.addColorStop(0, 'rgba(255, 230, 160, 0.55)');
+          g.addColorStop(0.5, 'rgba(255, 200, 120, 0.18)');
+          g.addColorStop(1, 'rgba(255, 200, 120, 0)');
+          this.ctx.fillStyle = g;
+          this.ctx.beginPath();
+          this.ctx.arc(bx, by, bodyR * 3.5, 0, Math.PI * 2);
+          this.ctx.fill();
+          this.ctx.fillStyle = 'rgb(255, 240, 190)';
+          this.ctx.beginPath();
+          this.ctx.arc(bx, by, bodyR, 0, Math.PI * 2);
+          this.ctx.fill();
+        } else {
+          // Pale disc with a faint shadow crescent for moon-ness.
+          // The shadow offset rotates slowly through the lunar month
+          // (here: a synthetic 28-day cycle keyed off the tick) so
+          // the moon waxes and wanes over many sim days.
+          const lunar = ((tick / DAY_TICKS) % 28) / 28; // 0..1
+          const shadowDx = Math.cos(lunar * Math.PI * 2) * bodyR * 0.6;
+          this.ctx.fillStyle = 'rgba(225, 225, 235, 0.95)';
+          this.ctx.beginPath();
+          this.ctx.arc(bx, by, bodyR, 0, Math.PI * 2);
+          this.ctx.fill();
+          this.ctx.fillStyle = 'rgba(20, 22, 35, 0.55)';
+          this.ctx.beginPath();
+          this.ctx.arc(bx + shadowDx, by, bodyR * 0.95, 0, Math.PI * 2);
+          this.ctx.fill();
+        }
+      };
+      if (phase >= 0.25 && phase <= 0.75) {
+        const t = (phase - 0.25) * 2; // 0..1
+        drawArcBody(t, true);
+      } else {
+        // Night. phase in [0, 0.25) ∪ (0.75, 1] — map to [0,1] across night.
+        const t = phase < 0.25 ? (phase + 0.25) * 2 : (phase - 0.75) * 2;
+        drawArcBody(t, false);
+      }
+      this.ctx.restore();
+    }
 
     // Ant overlay.
     // Ant body radius. At 3 mm/cell the ant body is 2 cells wide, so
