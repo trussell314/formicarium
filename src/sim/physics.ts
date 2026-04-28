@@ -152,6 +152,24 @@ export function settleGrain(world: World, x: number, y: number, rng: RNG): { x: 
     const surf = world.naturalSurface[cx]!;
     return fromY < surf && toY >= surf;
   };
+  // Entrance-cap guard. A diagonal slide can deposit a grain in the
+  // cell directly above an entrance shaft (where the column's natural
+  // surface row is AIR). That grain caps the entrance from above:
+  // workers can walk over it but tryStep refuses to step DOWN through
+  // a GRAIN cell into the shaft, so the colony loses its access until
+  // a Theraulaz pickup eventually clears it. With 50 ants on the
+  // surface and 10+ cells of mound to the side, the cap reforms
+  // faster than it gets cleared and the queen suffocates below. Real
+  // ants don't drop spoil over their own entrance — they pile it
+  // adjacent to the lip. Block the slide instead of trying to
+  // simulate the heuristic, since the slide is the only path that
+  // gets a grain into an entrance column above the surface (direct
+  // deposit is already gated by groundIsIntact in ant-rules).
+  const isEntranceColumnAbove = (cx: number, cy: number): boolean => {
+    const surf = world.naturalSurface[cx]!;
+    if (cy >= surf) return false;
+    return world.cells[surf * w + cx] === CELL_AIR;
+  };
   while (true) {
     if (y + 1 >= h) break;
     const srcIdx = y * w + x;
@@ -174,10 +192,12 @@ export function settleGrain(world: World, x: number, y: number, rng: RNG): { x: 
     // explicit rule.
     const dl = x > 0 && world.cells[(y + 1) * w + x - 1] === CELL_AIR
       && world.cells[y * w + x - 1] === CELL_AIR
-      && !wouldCrossSurface(x - 1, y, y + 1);
+      && !wouldCrossSurface(x - 1, y, y + 1)
+      && !isEntranceColumnAbove(x - 1, y + 1);
     const dr = x < w - 1 && world.cells[(y + 1) * w + x + 1] === CELL_AIR
       && world.cells[y * w + x + 1] === CELL_AIR
-      && !wouldCrossSurface(x + 1, y, y + 1);
+      && !wouldCrossSurface(x + 1, y, y + 1)
+      && !isEntranceColumnAbove(x + 1, y + 1);
     if (!dl && !dr) break;
     let goLeft: boolean;
     if (dl && dr) goLeft = rng.next() < 0.5;
