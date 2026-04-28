@@ -296,8 +296,8 @@ for (let i = 0; i < colony.count; i++) {
   colony.age[i] = (rng.next() * HARVESTER.matureAge * 1.5) | 0;
 }
 
-const digField = new Pheromone(world.width, world.height, 0.24, 0.9999);
-const buildField = new Pheromone(world.width, world.height, 0.40, 0.99995);
+const digField = new Pheromone(world.width, world.height, 0.24, 0.999);
+const buildField = new Pheromone(world.width, world.height, 0.40, 0.9995);
 
 let prevSoil = world.countSoil();
 const WINDOW = 5000;
@@ -306,8 +306,94 @@ let windowDigs = 0;
 // so the diag can show per-window deltas (NEW digs that fired
 // during this window, broken down by direction).
 const prevDigsByDir = new Int32Array(4);
+
+// ── Per-ant motion tracking ─────────────────────────────────
+// Ring buffer of recent positions per ant. Each report window we
+// compute motion distributions over multiple lookback windows
+// (100/250/500/1000 ticks) so a stuck ant — one with low
+// effective displacement over a long window — is immediately
+// visible in the diag output.
+const MAX_LOOKBACK = 1024;
+const motionWindows = [100, 250, 500, 1000] as const;
+const histX = new Float32Array(colony.capacity * MAX_LOOKBACK);
+const histY = new Float32Array(colony.capacity * MAX_LOOKBACK);
+
+function recordPositions(tick: number): void {
+  const slot = tick % MAX_LOOKBACK;
+  for (let i = 0; i < colony.count; i++) {
+    histX[i * MAX_LOOKBACK + slot] = colony.posX[i]!;
+    histY[i * MAX_LOOKBACK + slot] = colony.posY[i]!;
+  }
+}
+
+function pct(sorted: number[], q: number): number {
+  if (sorted.length === 0) return NaN;
+  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * q));
+  return sorted[idx]!;
+}
+
+function reportMotion(tick: number): void {
+  if (tick < motionWindows[motionWindows.length - 1]!) return;
+  for (const W of motionWindows) {
+    const cellMoves: number[] = [];
+    const effDist: number[] = [];
+    let stuck = 0;
+    let aliveCount = 0;
+    for (let i = 0; i < colony.count; i++) {
+      const s = colony.state[i];
+      // Skip non-mobile states. EGG/LARVA/QUEEN are stationary by
+      // design and would dominate the "stuck" tail. DEAD ants don't
+      // count.
+      if (s === STATE_DEAD || s === STATE_EGG || s === 9 /* STATE_LARVA */ || s === STATE_QUEEN) continue;
+      aliveCount++;
+      let lastCx = -1, lastCy = -1;
+      let moves = 0;
+      let firstX = 0, firstY = 0, lastX = 0, lastY = 0;
+      for (let dt = W - 1; dt >= 0; dt--) {
+        const tickPast = tick - dt;
+        const slot = tickPast % MAX_LOOKBACK;
+        const px = histX[i * MAX_LOOKBACK + slot]!;
+        const py = histY[i * MAX_LOOKBACK + slot]!;
+        if (dt === W - 1) { firstX = px; firstY = py; }
+        const cx2 = px | 0;
+        const cy2 = py | 0;
+        if (cx2 !== lastCx || cy2 !== lastCy) {
+          if (lastCx !== -1) moves++;
+          lastCx = cx2; lastCy = cy2;
+        }
+        lastX = px; lastY = py;
+      }
+      cellMoves.push(moves);
+      const ed = Math.hypot(lastX - firstX, lastY - firstY);
+      effDist.push(ed);
+      if (ed < 1) stuck++;
+    }
+    const cmSorted = [...cellMoves].sort((a, b) => a - b);
+    const edSorted = [...effDist].sort((a, b) => a - b);
+    const fmt2 = (x: number, d = 1) => Number.isFinite(x) ? x.toFixed(d) : 'n/a';
+    console.log(
+      `         motion[${String(W).padStart(4)}t] cellMoves: ` +
+      `p5=${fmt2(pct(cmSorted, 0.05), 0)} ` +
+      `p25=${fmt2(pct(cmSorted, 0.25), 0)} ` +
+      `p50=${fmt2(pct(cmSorted, 0.50), 0)} ` +
+      `p75=${fmt2(pct(cmSorted, 0.75), 0)} ` +
+      `p95=${fmt2(pct(cmSorted, 0.95), 0)} ` +
+      `max=${fmt2(pct(cmSorted, 1.0), 0)}` +
+      `   effDist: ` +
+      `p5=${fmt2(pct(edSorted, 0.05), 1)} ` +
+      `p25=${fmt2(pct(edSorted, 0.25), 1)} ` +
+      `p50=${fmt2(pct(edSorted, 0.50), 1)} ` +
+      `p75=${fmt2(pct(edSorted, 0.75), 1)} ` +
+      `p95=${fmt2(pct(edSorted, 0.95), 1)} ` +
+      `max=${fmt2(pct(edSorted, 1.0), 1)}` +
+      `   stuck<1cell=${stuck}/${aliveCount}`,
+    );
+  }
+}
+
 for (let t = 1; t <= TICKS; t++) {
   step(world, colony, digField, buildField, rng, DEFAULT_PARAMS);
+  recordPositions(t);
   const s = world.countSoil();
   if (s < prevSoil) windowDigs += prevSoil - s;
   prevSoil = s;
@@ -489,6 +575,7 @@ for (let t = 1; t <= TICKS; t++) {
     );
     prevDigsByDir.set(world.digsByDir);
     windowDigs = 0;
+    reportMotion(t);
   }
 }
 

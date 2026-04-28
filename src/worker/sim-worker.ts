@@ -67,16 +67,25 @@ function buildBundle(s: SaveSettings, restoreBlob: string | null): SimBundle {
   const depth = Math.max(4, Math.floor(s.height * 0.05));
   world.generate(rng, surfaceRow, halfW, depth);
 
-  const digField = new Pheromone(s.width, s.height, 0.24, 0.9999);
-  const buildField = new Pheromone(s.width, s.height, 0.40, 0.99995);
+  // Pheromone half-lives, compressed 10× from the original
+  // calibration to compensate for the 100× time compression of
+  // sim activity rates. Without this, fields with deposit rates
+  // tied to colony activity (build, trunk, queen, granary, no-entry)
+  // accumulate to the saturation cap and produce a giant pile-up
+  // attractor that traps half the colony in a self-reinforcing
+  // loop. Short-lived fields (alarm, necromone) and the mid-life
+  // ones (trail, brood) are left as-is — they don't bloat at the
+  // new activity rate.
+  const digField = new Pheromone(s.width, s.height, 0.24, 0.999);
+  const buildField = new Pheromone(s.width, s.height, 0.40, 0.9995);
   const trailField = new Pheromone(s.width, s.height, 0.40, 0.999);
   const alarmField = new Pheromone(s.width, s.height, 0.50, 0.985);
-  const queenField = new Pheromone(s.width, s.height, 0.10, 0.9999);
+  const queenField = new Pheromone(s.width, s.height, 0.10, 0.999);
   const broodField = new Pheromone(s.width, s.height, 0.20, 0.999);
   const necroField = new Pheromone(s.width, s.height, 0.30, 0.99);
-  const noEntryField = new Pheromone(s.width, s.height, 0.05, 0.9995);
-  const granaryField = new Pheromone(s.width, s.height, 0.10, 0.9999);
-  const trunkField = new Pheromone(s.width, s.height, 0.20, 0.99995);
+  const noEntryField = new Pheromone(s.width, s.height, 0.05, 0.995);
+  const granaryField = new Pheromone(s.width, s.height, 0.10, 0.999);
+  const trunkField = new Pheromone(s.width, s.height, 0.20, 0.9995);
 
   const colony = new Colony(HARVESTER.maxColonySize);
   // Founding-colony spawn (matches main.ts pre-worker behaviour).

@@ -94,16 +94,29 @@ export const DEFAULT_PARAMS: SimParams = {
   pickProb: 0.02,
   stigmergy: 0.55,
   geotaxis: 0.35,
-  digDeposit: 1.0,
-  buildDeposit: 1.0,
+  // digDeposit and buildDeposit reduced 10× from the 1.0 originals
+  // to compensate for the 100× time-compression. With ~10× more
+  // dig events and grain placements per tick, the original deposit
+  // amounts saturated buildField into a self-reinforcing pile-up
+  // attractor that trapped half the colony in a magenta blob. The
+  // reduced per-event deposit keeps the steady-state field
+  // magnitude similar to the pre-compression calibration.
+  digDeposit: 0.1,
+  buildDeposit: 0.1,
   // Beshers & Fewell 2001: per-ant individual-threshold mean ~8
   // recent collisions before behavioural withdrawal.
   restThreshold: 8.0,
-  // Aina et al. 2023: collision-driven REST lasts ~minutes in real
-  // ants. 1-2 min real → 100× compressed = 0.6-1.2 sec bio = 5-10
-  // ticks. We pick 8 ticks — short enough that REST clusters don't
-  // permanently lock up dense areas at the new compression rate.
-  restDuration: 8,
+  // Aina et al. 2023 calibrates REST by real-time minutes. Strict
+  // 100× time-compression would give 5-10 ticks — but REST is a
+  // SPATIAL dispersal mechanism: the ant random-walks during REST
+  // and the goal is to leave the crowded area. At only 8 ticks of
+  // walking (with turn noise), random-walk dispersal is ~3 cells —
+  // not enough to escape any meaningful cluster. Pick 100 ticks
+  // instead so the dispersal radius (≤ 60 cells of straight-walk,
+  // ~7 cells of random-walk variance) is large enough to actually
+  // leave a chamber-sized pile-up. Bio time is ~12 sec which is
+  // shorter than literature but spatially correct.
+  restDuration: 100,
 };
 
 /** Distance below which two ants count as colliding. ≈ 1 body length
@@ -726,7 +739,13 @@ export function step(
         const lx = colony.posX[i]! | 0;
         const ly = colony.posY[i]! | 0;
         if (lx >= 0 && ly >= 0 && lx < world.width && ly < world.height) {
-          broodField.deposit(lx, ly, 0.05);
+          // Per-larva emission. Original 0.05 was calibrated for the
+          // pre-100×-compression broodpile (~7 larvae steady-state).
+          // After uniform 100× time compression the broodpile is
+          // ~126 larvae and that emission rate saturates the field
+          // far past the chamber. 0.005 keeps total broodpile signal
+          // similar in magnitude regardless of larva count.
+          broodField.deposit(lx, ly, 0.005);
         }
       }
       // Same depth-tracking drift as eggs.

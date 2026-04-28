@@ -39,16 +39,16 @@ const surfaceRow = Math.floor(H * 0.30);
 world.generate(rng, surfaceRow, Math.max(6, Math.floor(W * 0.06)), Math.max(4, Math.floor(H * 0.05)));
 
 // All ten pheromone fields with their main.ts default tuning.
-const dig = new Pheromone(W, H, 0.24, 0.9999);
-const buildField = new Pheromone(W, H, 0.40, 0.99995);
+const dig = new Pheromone(W, H, 0.24, 0.999);
+const buildField = new Pheromone(W, H, 0.40, 0.9995);
 const trail = new Pheromone(W, H, 0.40, 0.999);
 const alarm = new Pheromone(W, H, 0.50, 0.985);
-const queen = new Pheromone(W, H, 0.10, 0.9999);
+const queen = new Pheromone(W, H, 0.10, 0.999);
 const brood = new Pheromone(W, H, 0.20, 0.999);
 const necro = new Pheromone(W, H, 0.30, 0.99);
-const noEntry = new Pheromone(W, H, 0.05, 0.9995);
-const granary = new Pheromone(W, H, 0.10, 0.9999);
-const trunk = new Pheromone(W, H, 0.20, 0.99995);
+const noEntry = new Pheromone(W, H, 0.05, 0.995);
+const granary = new Pheromone(W, H, 0.10, 0.999);
+const trunk = new Pheromone(W, H, 0.20, 0.9995);
 
 const colony = new Colony(HARVESTER.maxColonySize);
 const cx = W >> 1;
