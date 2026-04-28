@@ -307,13 +307,17 @@ export function step(
     // standing food and scale supply down once inventory exceeds a
     // few days of consumption. Refresh every 200 ticks; drift is
     // fine since the throttle is soft.
-    if (world.tick - world.foodCountTick >= 200 || world.foodCountTick < 0) {
-      let n = 0;
-      const f = world.food;
-      for (let i = 0; i < f.length; i++) if (f[i]! > 0) n++;
-      world.foodCountCached = n;
-      world.foodCountTick = world.tick;
-    }
+    // Refresh per tick. Originally cached every 200 ticks to save
+    // a 40K-cell scan, but the lag let the throttle accumulate
+    // ~30 seeds per refresh window — over a long run this added
+    // up to hundreds of seeds dropped above the supposed cap. The
+    // scan is a Uint8 linear sweep, easily under 50 µs at default
+    // world dims; the cost is invisible.
+    let n = 0;
+    const f = world.food;
+    for (let i = 0; i < f.length; i++) if (f[i]! > 0) n++;
+    world.foodCountCached = n;
+    world.foodCountTick = world.tick;
     // Saturation. Hard stop at 150% of current population: if
     // standing seed inventory already covers more than that, no new
     // drops fire this tick. Below the threshold supply ramps up
@@ -325,18 +329,35 @@ export function step(
     //   inventory  75-150%:    linearly fade from 1.0 to 0.0
     //   inventory ≥ 150%:      drops stop completely
     //
-    // aliveDemand is the consuming-equivalent ant count (workers +
-    // larvae weighted by their respective metabolisms, derived from
-    // `demand`). 150% is generous — empty granaries get refilled
-    // promptly when foragers eat through, but a thriving colony
-    // doesn't sit on a green wall of unconsumed surface seeds.
-    const aliveDemand = Math.max(1, demand / species.metabolism);
-    const hardCap = aliveDemand * 1.5;
-    const softFloor = aliveDemand * 0.75;
+    // The cap is in HEAD COUNT, not energy demand. The earlier
+    // version used `demand / species.metabolism` which weighted
+    // larvae by their metabolism (15× worker rate); a colony with
+    // 100 larvae would have cap of ~1500, which let the surface
+    // drown in seeds even though larvae consume food indirectly
+    // via trophallaxis (surface → granary → worker → larva). What
+    // we actually want to cap is the visible standing inventory,
+    // and that's a head-count thing: 150% of consuming bodies.
+    let aliveBodies = 0;
+    for (let i = 0; i < colony.count; i++) {
+      const s = colony.state[i];
+      if (s === STATE_DEAD || s === STATE_EGG || s === STATE_PUPA) continue;
+      aliveBodies++;
+    }
+    const popCap = Math.max(10, aliveBodies);
+    const hardCap = popCap * 1.5;
+    const softFloor = popCap * 0.75;
     let satMult: number;
     if (world.foodCountCached >= hardCap) satMult = 0;
     else if (world.foodCountCached <= softFloor) satMult = 1;
     else satMult = (hardCap - world.foodCountCached) / (hardCap - softFloor);
+    // When the throttle is at zero, also drain any accumulated clump
+    // budget so a leftover from before the cap kicked in doesn't
+    // immediately fire as soon as the throttle next eases. Without
+    // this, clumpAccum can sit at e.g. 9.9 indefinitely waiting
+    // for the next 0.1 to push it over.
+    if (satMult === 0 && world.clumpAccum >= species.clumpSize) {
+      world.clumpAccum = 0;
+    }
     const targetEnergyPerTick = Math.min(demand * 1.10, capDemand) * satMult;
     const targetSeedsPerTick = targetEnergyPerTick / species.foodValue;
     world.clumpAccum += targetSeedsPerTick;

@@ -134,6 +134,9 @@ const measure = (): string => {
   const dug = world.initialSoilCells - world.countSoil() - world.countGrains();
   const grns = world.countGrains();
   const sf = surfaceFood();
+  // Total food everywhere — the value the saturation throttle uses.
+  let totalFood = 0;
+  for (let i = 0; i < world.food.length; i++) if (world.food[i]! > 0) totalFood++;
   const qx = QUEEN >= 0 && colony.state[QUEEN] !== STATE_DEAD ? colony.posX[QUEEN]! : -1;
   const qy = QUEEN >= 0 && colony.state[QUEEN] !== STATE_DEAD ? colony.posY[QUEEN]! : -1;
   return [
@@ -147,8 +150,9 @@ const measure = (): string => {
     String(dug).padStart(5),
     String(grns).padStart(5),
     String(sf.food).padStart(5),
-    String(sf.sprt).padStart(5),
-    String(sf.surfMound).padStart(5),
+    String(totalFood).padStart(5),  // total food (throttle target)
+    String(world.foodCountCached).padStart(5),  // cached value
+    String(sf.sprt).padStart(4),
   ].join(' ');
 };
 
