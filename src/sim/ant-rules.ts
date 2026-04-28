@@ -1838,7 +1838,7 @@ export function step(
       && ay + 1 < world.height
       && world.cells[(ay + 1) * wW + ax] === CELL_SOIL;
     if (stranded) {
-      const SHAFT_RANGE = 8;
+      const SHAFT_RANGE = 16;
       const SHAFT_SCAN_DEPTH = 5;
       const xMin = Math.max(0, ax - SHAFT_RANGE);
       const xMax = Math.min(world.width - 1, ax + SHAFT_RANGE);
@@ -1962,7 +1962,21 @@ export function step(
         const airRight = tx < tW - 1 && world.cells[ty * tW + (tx + 1)] === CELL_AIR ? 1 : 0;
         const vAir = airAbove + airBelow;
         const lAir = airLeft + airRight;
-        const dirBonus = vAir > lAir ? 1.5 : (lAir > vAir ? 0.3 : 1.0);
+        // Direction-of-extension bonus.
+        //   vertical extension (target sits below an air cell):     1.5×
+        //   equal / fresh ground (no neighbouring air):              1.0×
+        //   lateral extension (target sits beside an air cell):      0.7×
+        // The lateral penalty was 0.3× originally — the stated goal
+        // was Tschinkel's "vertical galleries with chambers branching
+        // off" — but at 0.3× chambers never actually form. Long runs
+        // produced colonies of pencil-thin parallel shafts with the
+        // queen alone in one of them and no path to brood / food /
+        // workers in the others. 0.7× still favours vertical extension
+        // (galleries push down ~2× faster than they widen) but lets
+        // chambers and lateral connections actually develop, and the
+        // Khuong boost on build-pheromone-marked walls amplifies
+        // chamber growth into proper lobes once one starts.
+        const dirBonus = vAir > lAir ? 1.5 : (lAir > vAir ? 0.7 : 1.0);
         // Alarm boost. Strong local alarm pheromone signals "dig
         // here, fast" — multiplies the dig roll by up to 3× when
         // saturated. This is what produces the visible mass
