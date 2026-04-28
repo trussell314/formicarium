@@ -68,17 +68,15 @@ uniform sampler2D uSprout;      // u8 per-cell sprout marker
 uniform sampler2D uSproutTick;  // i32 per-cell sprout tick (R32I)
 uniform sampler2D uDigTick;     // i32 per-cell dig tick (R32I)
 
-// Pheromone fields. All Float32 single-channel (R32F).
-uniform sampler2D uPDig;
-uniform sampler2D uPBuild;
-uniform sampler2D uPTrail;
-uniform sampler2D uPAlarm;
-uniform sampler2D uPQueen;
-uniform sampler2D uPBrood;
-uniform sampler2D uPNecro;
-uniform sampler2D uPNoEntry;
-uniform sampler2D uPGranary;
-uniform sampler2D uPTrunk;
+// Pheromone fields packed into 3 RGBA32F textures so the total
+// sampler count stays under MAX_TEXTURE_IMAGE_UNITS (WebGL2
+// guarantees ≥ 16; we had 19 with one sampler per field). Layout:
+//   uPPack0: dig(r),  build(g), trail(b),  alarm(a)
+//   uPPack1: queen(r), brood(g), necro(b),  noEntry(a)
+//   uPPack2: granary(r), trunk(g), unused, unused
+uniform sampler2D uPPack0;
+uniform sampler2D uPPack1;
+uniform sampler2D uPPack2;
 
 // Palette stops mirror the Canvas2D constants in renderer.ts so
 // the visual output matches frame-for-frame.
@@ -199,16 +197,19 @@ void main() {
   // Pheromone overlay (additive composition).
   if (uShowPhero > 0.5) {
     float W = 0.55;
-    float dv  = clamp(sampleF32(uPDig,     cell) / 0.5,  0.0, 1.0);
-    float bv  = clamp(sampleF32(uPBuild,   cell) / 0.5,  0.0, 1.0);
-    float tv  = clamp(sampleF32(uPTrail,   cell) / 0.5,  0.0, 1.0);
-    float av  = clamp(sampleF32(uPAlarm,   cell) / 0.15, 0.0, 1.0);
-    float qv  = clamp(sampleF32(uPQueen,   cell) / 4.0,  0.0, 1.0);
-    float brv = clamp(sampleF32(uPBrood,   cell) / 1.5,  0.0, 1.0);
-    float nv  = clamp(sampleF32(uPNecro,   cell) / 0.8,  0.0, 1.0);
-    float xv  = clamp(sampleF32(uPNoEntry, cell) / 2.0,  0.0, 1.0);
-    float gv  = clamp(sampleF32(uPGranary, cell) / 4.0,  0.0, 1.0);
-    float tkv = clamp(sampleF32(uPTrunk,   cell) / 5.0,  0.0, 1.0);
+    vec4 p0 = texelFetch(uPPack0, cell, 0);
+    vec4 p1 = texelFetch(uPPack1, cell, 0);
+    vec4 p2 = texelFetch(uPPack2, cell, 0);
+    float dv  = clamp(p0.r / 0.5,  0.0, 1.0);
+    float bv  = clamp(p0.g / 0.5,  0.0, 1.0);
+    float tv  = clamp(p0.b / 0.5,  0.0, 1.0);
+    float av  = clamp(p0.a / 0.15, 0.0, 1.0);
+    float qv  = clamp(p1.r / 4.0,  0.0, 1.0);
+    float brv = clamp(p1.g / 1.5,  0.0, 1.0);
+    float nv  = clamp(p1.b / 0.8,  0.0, 1.0);
+    float xv  = clamp(p1.a / 2.0,  0.0, 1.0);
+    float gv  = clamp(p2.r / 4.0,  0.0, 1.0);
+    float tkv = clamp(p2.g / 5.0,  0.0, 1.0);
     col += (vec3(0.0,   220.0, 220.0) / 255.0 - col) * dv  * W;
     col += (vec3(220.0, 0.0,   220.0) / 255.0 - col) * bv  * W;
     col += (vec3(240.0, 220.0, 60.0)  / 255.0 - col) * tv  * W;
@@ -270,6 +271,12 @@ export class GLTerrainRenderer {
   private readonly SUB: number;
   private slots: Record<string, TextureSlot>;
   private uniforms: Record<string, WebGLUniformLocation | null>;
+  /** Interleave scratch for the 3 RGBA32F pheromone packs. Allocated
+   *  once at the size of the world × 4; reused every frame so we
+   *  don't churn GC. Sized lazily on first uploadPheromones() call. */
+  private pheroPack0?: Float32Array;
+  private pheroPack1?: Float32Array;
+  private pheroPack2?: Float32Array;
 
   constructor(width: number, height: number, SUB: number) {
     this.width = width;
@@ -311,8 +318,7 @@ export class GLTerrainRenderer {
       'uW', 'uH', 'uTick', 'uShowPhero', 'uDaylight',
       'uCells', 'uSoilNoise', 'uSurf', 'uFood', 'uFoodMoves', 'uCorpse',
       'uSprout', 'uSproutTick', 'uDigTick',
-      'uPDig', 'uPBuild', 'uPTrail', 'uPAlarm', 'uPQueen',
-      'uPBrood', 'uPNecro', 'uPNoEntry', 'uPGranary', 'uPTrunk',
+      'uPPack0', 'uPPack1', 'uPPack2',
     ]) {
       this.uniforms[name] = gl.getUniformLocation(prog, name);
     }
@@ -344,30 +350,33 @@ export class GLTerrainRenderer {
     addSlot('sproutTick', gl.R32I, gl.RED_INTEGER, gl.INT);
     addSlot('digTick', gl.R32I, gl.RED_INTEGER, gl.INT);
     addSlot('surf', gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT);
-    // Pheromone textures (R32F).
-    for (const name of ['pDig', 'pBuild', 'pTrail', 'pAlarm', 'pQueen',
-      'pBrood', 'pNecro', 'pNoEntry', 'pGranary', 'pTrunk']) {
-      addSlot(name, gl.R32F, gl.RED, gl.FLOAT);
-    }
+    // Pheromone textures: 4 fields per RGBA32F texture, 3 textures
+    // for 10 fields. Keeping 19 single-channel samplers exceeded
+    // the WebGL2 minimum guarantee (MAX_TEXTURE_IMAGE_UNITS = 16).
+    addSlot('pPack0', gl.RGBA32F, gl.RGBA, gl.FLOAT);
+    addSlot('pPack1', gl.RGBA32F, gl.RGBA, gl.FLOAT);
+    addSlot('pPack2', gl.RGBA32F, gl.RGBA, gl.FLOAT);
     // Initialise every texture with a 1×1 zero so samplers don't read
     // from uninitialised memory before the first uploadGrid call.
-    // After the first frame the real data overwrites these.
-    const zeroU8 = new Uint8Array(1);
+    // The RGBA32F pheromone packs need 4 channels of data, even at
+    // 1×1, so they get a 4-element zero buffer; everything else is
+    // single-channel and a 1-element zero suffices.
+    const zeroU8 = new Uint8Array(4);
     const zeroI32 = new Int32Array(1);
     const zeroU16 = new Uint16Array(1);
-    const zeroF32 = new Float32Array(1);
+    const zero1F = new Float32Array(1);
+    const zero4F = new Float32Array(4);
     for (const name of Object.keys(this.slots)) {
       const slot = this.slots[name]!;
       gl.activeTexture(gl.TEXTURE0 + slot.unit);
       gl.bindTexture(gl.TEXTURE_2D, slot.tex);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
       let data: ArrayBufferView;
-      switch (slot.type) {
-        case gl.INT: data = zeroI32; break;
-        case gl.UNSIGNED_SHORT: data = zeroU16; break;
-        case gl.FLOAT: data = zeroF32; break;
-        default: data = zeroU8;
-      }
+      if (slot.format === gl.RGBA) data = zero4F;
+      else if (slot.type === gl.INT) data = zeroI32;
+      else if (slot.type === gl.UNSIGNED_SHORT) data = zeroU16;
+      else if (slot.type === gl.FLOAT) data = zero1F;
+      else data = zeroU8;
       gl.texImage2D(gl.TEXTURE_2D, 0, slot.internalFormat, 1, 1, 0,
         slot.format, slot.type, data);
     }
@@ -399,16 +408,24 @@ export class GLTerrainRenderer {
     this.uploadGrid('digTick', world.digTick, w, h);
     this.uploadGrid('surf', world.naturalSurface, w, 1);
     if (pheromones) {
-      this.uploadGrid('pDig', pheromones.dig, w, h);
-      this.uploadGrid('pBuild', pheromones.build, w, h);
-      this.uploadGrid('pTrail', pheromones.trail, w, h);
-      this.uploadGrid('pAlarm', pheromones.alarm, w, h);
-      this.uploadGrid('pQueen', pheromones.queen, w, h);
-      this.uploadGrid('pBrood', pheromones.brood, w, h);
-      this.uploadGrid('pNecro', pheromones.necro, w, h);
-      this.uploadGrid('pNoEntry', pheromones.noEntry, w, h);
-      this.uploadGrid('pGranary', pheromones.granary, w, h);
-      this.uploadGrid('pTrunk', pheromones.trunk, w, h);
+      // Interleave 4 single-channel Float32 fields into an RGBA
+      // buffer per packed texture. We hold the scratch buffers as
+      // class fields so we don't allocate every frame.
+      const cells = w * h;
+      if (!this.pheroPack0 || this.pheroPack0.length !== cells * 4) {
+        this.pheroPack0 = new Float32Array(cells * 4);
+        this.pheroPack1 = new Float32Array(cells * 4);
+        this.pheroPack2 = new Float32Array(cells * 4);
+      }
+      packFour(this.pheroPack0, pheromones.dig, pheromones.build,
+        pheromones.trail, pheromones.alarm, cells);
+      packFour(this.pheroPack1!, pheromones.queen, pheromones.brood,
+        pheromones.necro, pheromones.noEntry, cells);
+      packFour(this.pheroPack2!, pheromones.granary, pheromones.trunk,
+        null, null, cells);
+      this.uploadGrid('pPack0', this.pheroPack0, w, h);
+      this.uploadGrid('pPack1', this.pheroPack1!, w, h);
+      this.uploadGrid('pPack2', this.pheroPack2!, w, h);
     }
 
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
@@ -431,16 +448,9 @@ export class GLTerrainRenderer {
     this.bindSampler('uSprout', 'sprout');
     this.bindSampler('uSproutTick', 'sproutTick');
     this.bindSampler('uDigTick', 'digTick');
-    this.bindSampler('uPDig', 'pDig');
-    this.bindSampler('uPBuild', 'pBuild');
-    this.bindSampler('uPTrail', 'pTrail');
-    this.bindSampler('uPAlarm', 'pAlarm');
-    this.bindSampler('uPQueen', 'pQueen');
-    this.bindSampler('uPBrood', 'pBrood');
-    this.bindSampler('uPNecro', 'pNecro');
-    this.bindSampler('uPNoEntry', 'pNoEntry');
-    this.bindSampler('uPGranary', 'pGranary');
-    this.bindSampler('uPTrunk', 'pTrunk');
+    this.bindSampler('uPPack0', 'pPack0');
+    this.bindSampler('uPPack1', 'pPack1');
+    this.bindSampler('uPPack2', 'pPack2');
 
     // Fullscreen triangle strip — vertex shader emits the corners.
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -468,6 +478,26 @@ export class GLTerrainRenderer {
       slot.format, slot.type,
       data,
     );
+  }
+}
+
+/** Interleave up to 4 single-channel Float32 fields into an RGBA
+ *  buffer. Channels with no source field get zeroed. The dst buffer
+ *  must be pre-allocated to length 4 × cells. */
+function packFour(
+  dst: Float32Array,
+  r: Float32Array,
+  g: Float32Array | null,
+  b: Float32Array | null,
+  a: Float32Array | null,
+  cells: number,
+): void {
+  for (let i = 0; i < cells; i++) {
+    const o = i << 2;
+    dst[o] = r[i] ?? 0;
+    dst[o + 1] = g ? (g[i] ?? 0) : 0;
+    dst[o + 2] = b ? (b[i] ?? 0) : 0;
+    dst[o + 3] = a ? (a[i] ?? 0) : 0;
   }
 }
 
