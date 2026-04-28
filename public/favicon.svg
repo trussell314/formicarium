@@ -1,0 +1,29 @@
+<!--
+  Top-down ant silhouette favicon. Drawn at viewBox 32×32 so it
+  rasterises cleanly at the typical 16×16 / 32×32 favicon sizes.
+  Three body segments (head, thorax, gaster) plus six legs and
+  two antennae. Solid dark earth-brown so the silhouette reads
+  against most browser-tab backgrounds.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <g fill="#1a0e08" stroke="#1a0e08" stroke-linecap="round" stroke-linejoin="round">
+    <!-- antennae -->
+    <path d="M14.5 6 Q12 3 10 1.5" stroke-width="1.5" fill="none"/>
+    <path d="M17.5 6 Q20 3 22 1.5" stroke-width="1.5" fill="none"/>
+    <!-- legs (front/middle/back pairs) -->
+    <path d="M14 12 Q9 11 5 8"   stroke-width="1.6" fill="none"/>
+    <path d="M18 12 Q23 11 27 8" stroke-width="1.6" fill="none"/>
+    <path d="M14 14 Q8 14 3 14"   stroke-width="1.6" fill="none"/>
+    <path d="M18 14 Q24 14 29 14" stroke-width="1.6" fill="none"/>
+    <path d="M14 16 Q9 17 5 20"   stroke-width="1.6" fill="none"/>
+    <path d="M18 16 Q23 17 27 20" stroke-width="1.6" fill="none"/>
+    <!-- gaster (rear, largest) -->
+    <ellipse cx="16" cy="23" rx="4.5" ry="5.5"/>
+    <!-- petiole / waist -->
+    <circle cx="16" cy="17.5" r="1"/>
+    <!-- thorax (middle, smaller) -->
+    <ellipse cx="16" cy="14" rx="3" ry="3.5"/>
+    <!-- head (front, small) -->
+    <circle cx="16" cy="7.5" r="3.2"/>
+  </g>
+</svg>
