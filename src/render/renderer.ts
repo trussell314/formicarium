@@ -8,11 +8,49 @@
 // Renderer reads sim state. Never writes. (CLAUDE.md invariant.)
 
 import {
-  Colony, STATE_CARRY, STATE_DEAD, STATE_EGG, STATE_LARVA,
+  STATE_CARRY, STATE_DEAD, STATE_EGG, STATE_LARVA,
   STATE_NECRO_CARRY, STATE_QUEEN,
 } from '../sim/colony';
-import type { ParticleSystem } from '../sim/particles';
-import { CELL_AIR, CELL_SOIL, World } from '../sim/world';
+import { CELL_AIR, CELL_SOIL } from '../sim/world';
+
+// Renderer reads a structural subset of World/Colony — same field
+// names so both the live class instances and the worker's
+// RenderSnapshot satisfy this duck-typed contract. Renderer never
+// writes to sim state (CLAUDE.md invariant), so this is read-only
+// in spirit.
+export interface RenderableWorld {
+  width: number;
+  height: number;
+  tick: number;
+  cells: Uint8Array;
+  soilNoise: Uint8Array;
+  naturalSurface: Uint16Array;
+  food: Uint8Array;
+  foodMoves: Uint8Array;
+  corpse: Uint8Array;
+  sprout: Uint8Array;
+  sproutTick: Int32Array;
+  digTick: Int32Array;
+}
+
+export interface RenderableColony {
+  count: number;
+  posX: Float32Array;
+  posY: Float32Array;
+  prevX: Float32Array;
+  prevY: Float32Array;
+  heading: Float32Array;
+  state: Uint8Array;
+  energy: Float32Array;
+}
+
+export interface RenderableParticles {
+  posX: Float32Array;
+  posY: Float32Array;
+  life: Int16Array;
+  maxLife: Int16Array;
+  highWater: number;
+}
 
 // Sky palette is two pairs: a NIGHT pair (cool deep blue, near-black at
 // the horizon) and a DAY pair (pale slate above, hazy off-white at the
@@ -71,9 +109,9 @@ export class Renderer {
    *  main.ts swaps in a freshly-generated world without rebuilding
    *  the whole renderer. Width/height are assumed unchanged across
    *  the swap (the offscreen canvas is sized at construction). */
-  private world: World;
+  private world: RenderableWorld;
 
-  constructor(canvas: HTMLCanvasElement, world: World) {
+  constructor(canvas: HTMLCanvasElement, world: RenderableWorld) {
     this.canvas = canvas;
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('2d context not available');
@@ -104,7 +142,7 @@ export class Renderer {
 
   /** Swap in a freshly-generated World. Width and height must match
    *  the existing offscreen canvas; the renderer assumes that. */
-  setWorld(world: World): void {
+  setWorld(world: RenderableWorld): void {
     this.world = world;
   }
 
@@ -159,7 +197,7 @@ export class Renderer {
   }
 
   render(
-    colony: Colony, alpha: number, particles?: ParticleSystem,
+    colony: RenderableColony, alpha: number, particles?: RenderableParticles,
     pheromones?: {
       dig: { current: Float32Array };
       build: { current: Float32Array };
