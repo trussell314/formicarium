@@ -353,10 +353,14 @@ export function step(
 
   // Environmental dynamics: pheromone fields advance one tick;
   // dust particle ringbuffer ages and gravity-falls one tick.
-  digField.step();
-  buildField.step();
-  if (trailField) trailField.step();
-  if (alarmField) alarmField.step();
+  // Each step receives world.cells so diffusion is gated to AIR —
+  // volatile pheromones live in the carved-out air column, not
+  // through soil walls. See pheromone.ts step() for the full note.
+  const cells = world.cells;
+  digField.step(cells);
+  buildField.step(cells);
+  if (trailField) trailField.step(cells);
+  if (alarmField) alarmField.step(cells);
   // Slow-evaporation pheromone fields step every 2 ticks instead
   // of every tick. With per-tick retention ≥ 0.99, half-lives in
   // these fields are 700+ ticks; a 1-tick lag in the diffusion
@@ -368,12 +372,12 @@ export function step(
   // confirmed pheromone.step() is the largest single hot path
   // and these slow fields contribute ~half of it.
   const slowStep = (world.tick & 1) === 0;
-  if (queenField && slowStep) queenField.step();
-  if (broodField && slowStep) broodField.step();
-  if (necroField && slowStep) necroField.step();
-  if (noEntryField && slowStep) noEntryField.step();
-  if (granaryField && slowStep) granaryField.step();
-  if (trunkField && slowStep) trunkField.step();
+  if (queenField && slowStep) queenField.step(cells);
+  if (broodField && slowStep) broodField.step(cells);
+  if (necroField && slowStep) necroField.step(cells);
+  if (noEntryField && slowStep) noEntryField.step(cells);
+  if (granaryField && slowStep) granaryField.step(cells);
+  if (trunkField && slowStep) trunkField.step(cells);
   if (particles) particles.step();
 
   // Necromone emission. Corpse cells evaporate oleic acid (Wilson,

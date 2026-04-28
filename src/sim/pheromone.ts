@@ -59,7 +59,7 @@ export class Pheromone {
    * Sub-1e-6 values clamp to zero to keep sparse regions sparse
    * and avoid denormal-float drag.
    */
-  step(): void {
+  step(cells?: Uint8Array): void {
     const w = this.width;
     const h = this.height;
     const src = this.current;
@@ -77,11 +77,18 @@ export class Pheromone {
     // the densest field — so capping here doesn't change visible
     // behaviour at any concentration the rest of the system reads.
     const CAP = 1000;
-    // Hot-path interior loop: cells with 1 ≤ x ≤ w-2, 1 ≤ y ≤ h-2
-    // have all four cardinal neighbours in bounds, so we skip the
-    // four `if (x > 0)…` branches per cell. That's the (w-2)×(h-2)
-    // case which is ~98% of the field at default sizes. Edges
-    // handled below by separate boundary loops.
+    // AIR-only diffusion. Real volatile pheromones don't propagate
+    // through soil walls — they live in the air column the colony
+    // has carved out. When `cells` is provided, non-AIR cells (SOIL,
+    // GRAIN) are zeroed and contribute nothing to neighbour sums.
+    // Pheromone "leaks into" walls in the sense that the AIR cell
+    // adjacent to a wall has fewer contributing neighbours and
+    // therefore loses some signal each tick (an absorbing boundary
+    // at every wall). This drops the over-bloomed gradient that
+    // previously bled through 30+ cells of solid earth.
+    //
+    // CELL_AIR == 0 (see world.ts). Skip the import to keep the
+    // pheromone module self-contained.
     if (w >= 2 && h >= 2) {
       const wm1 = w - 1;
       const hm1 = h - 1;
@@ -89,7 +96,12 @@ export class Pheromone {
         const rowStart = y * w + 1;
         const rowEnd = y * w + wm1;
         for (let i = rowStart; i < rowEnd; i++) {
-          const sum = src[i - 1]! + src[i + 1]! + src[i - w]! + src[i + w]!;
+          if (cells && cells[i] !== 0) { dst[i] = 0; continue; }
+          let sum = 0;
+          if (!cells || cells[i - 1] === 0) sum += src[i - 1]!;
+          if (!cells || cells[i + 1] === 0) sum += src[i + 1]!;
+          if (!cells || cells[i - w] === 0) sum += src[i - w]!;
+          if (!cells || cells[i + w] === 0) sum += src[i + w]!;
           let v = m * src[i]! + f4 * sum;
           v *= e;
           if (v < 1e-6) v = 0;
@@ -102,13 +114,13 @@ export class Pheromone {
     // Use the original guarded form. Total work: 2*(w + h - 2).
     const stepBoundaryCell = (x: number, y: number): void => {
       const i = y * w + x;
-      const c = src[i]!;
+      if (cells && cells[i] !== 0) { dst[i] = 0; return; }
       let sum = 0;
-      if (x > 0) sum += src[i - 1]!;
-      if (x < w - 1) sum += src[i + 1]!;
-      if (y > 0) sum += src[i - w]!;
-      if (y < h - 1) sum += src[i + w]!;
-      let v = ((1 - f) * c + f4 * sum) * e;
+      if (x > 0 && (!cells || cells[i - 1] === 0)) sum += src[i - 1]!;
+      if (x < w - 1 && (!cells || cells[i + 1] === 0)) sum += src[i + 1]!;
+      if (y > 0 && (!cells || cells[i - w] === 0)) sum += src[i - w]!;
+      if (y < h - 1 && (!cells || cells[i + w] === 0)) sum += src[i + w]!;
+      let v = ((1 - f) * src[i]! + f4 * sum) * e;
       if (v < 1e-6) v = 0;
       else if (v > CAP) v = CAP;
       dst[i] = v;
