@@ -2156,56 +2156,118 @@ export function step(
     // builds spoil pillars between adjacent chambers, or when a
     // floor between the queen's chamber and one above pinches.
     if (stateIn === STATE_WANDER && (queenField || broodField)) {
-      // Early bail: a worker far from the queen has no chance of
-      // finding the partition signal in any cardinal direction.
-      // Skip the 4-direction probe unless the worker's OWN cell
-      // already shows nearby sanctum pheromone via permeable
-      // diffusion. Cuts the per-tick cost from 4 probes × 50 ants
-      // to roughly 4 probes × the few ants actually near the queen.
+      // Sample own-cell queen/brood pheromone once. Used to (a) gate
+      // the 4-direction sanctum probe (cheap thin-partition fix) and
+      // (b) drive the roof-breach rule (heavy thick-cap escape).
       const ownQ = queenField ? queenField.sample(ax, ay) : 0;
       const ownB = broodField ? broodField.sample(ax, ay) : 0;
-      if (ownQ < 0.3 && ownB < 0.3) continue;
       const wW = world.width;
       let didMaintenance = false;
-      for (const [dx, dy] of SANCTUM_DIRS) {
-        if (didMaintenance) break;
-        const sx = ax + dx;
-        const sy = ay + dy;
-        const ox2 = ax + dx * 2;
-        const oy2 = ay + dy * 2;
-        if (sx < 0 || sy < 0 || sx >= wW || sy >= world.height) continue;
-        if (ox2 < 0 || oy2 < 0 || ox2 >= wW || oy2 >= world.height) continue;
-        if (world.cells[sy * wW + sx] !== CELL_SOIL) continue;
-        if (world.cells[oy2 * wW + ox2] !== CELL_AIR) continue;
-        const farQ = queenField ? queenField.sample(ox2, oy2) : 0;
-        const farB = broodField ? broodField.sample(ox2, oy2) : 0;
-        // Higher threshold than the in-chamber sanctum check (0.3)
-        // because permeable diffusion makes EVERY nearby air cell
-        // carry some signal. 1.0 specifically targets "an attended
-        // chamber on the other side of this thin wall".
-        if (farQ > 1.0 || farB > 1.0) {
-          if (rng.next() < colony.digProb[i]!) {
-            if (digCell(world, sx, sy, rng)) {
+      // Probe gate: a worker far from the queen has no chance of
+      // finding the partition signal in any cardinal direction. Skip
+      // the 4-probe loop (not the rest of the WANDER block — earlier
+      // versions used `continue` here, which silently skipped Sudd
+      // dig and grain pickup for every worker outside the queen's
+      // chemical halo and stalled colony expansion).
+      if (ownQ >= 0.3 || ownB >= 0.3) {
+        for (const [dx, dy] of SANCTUM_DIRS) {
+          if (didMaintenance) break;
+          const sx = ax + dx;
+          const sy = ay + dy;
+          const ox2 = ax + dx * 2;
+          const oy2 = ay + dy * 2;
+          if (sx < 0 || sy < 0 || sx >= wW || sy >= world.height) continue;
+          if (ox2 < 0 || oy2 < 0 || ox2 >= wW || oy2 >= world.height) continue;
+          if (world.cells[sy * wW + sx] !== CELL_SOIL) continue;
+          if (world.cells[oy2 * wW + ox2] !== CELL_AIR) continue;
+          const farQ = queenField ? queenField.sample(ox2, oy2) : 0;
+          const farB = broodField ? broodField.sample(ox2, oy2) : 0;
+          // Higher threshold than the in-chamber sanctum check (0.3)
+          // because permeable diffusion makes EVERY nearby air cell
+          // carry some signal. 1.0 specifically targets "an attended
+          // chamber on the other side of this thin wall".
+          if (farQ > 1.0 || farB > 1.0) {
+            if (rng.next() < colony.digProb[i]!) {
+              if (digCell(world, sx, sy, rng)) {
+                colony.setState(i, STATE_CARRY);
+                colony.carryMoves[i] = 0;
+                colony.heading[i] = Math.atan2(dy, dx);
+                if (particles) {
+                  for (let k = 0; k < 2; k++) {
+                    const a = rng.range(-Math.PI, 0);
+                    const sp = rng.range(0.04, 0.14);
+                    particles.spawn(
+                      sx + 0.5, sy + 0.3,
+                      Math.cos(a) * sp, Math.sin(a) * sp - 0.04,
+                      24 + ((rng.next() * 12) | 0),
+                    );
+                  }
+                }
+                didMaintenance = true;
+              }
+            }
+          }
+        }
+        if (didMaintenance) continue;
+      }
+      // Roof-breach. Sanctum maintenance handles 1-cell partitions
+      // (AIR is two cells away with queen/brood signal beyond), but
+      // a real cave-in / steady spoil settlement / surface storm
+      // can leave a brood chamber under 5+ cells of solid soil with
+      // no AIR-two-away to trigger the probe. Workers in such a
+      // sealed chamber would otherwise just bump the walls until
+      // they starve, which is exactly the failure mode we keep
+      // observing — eggs and larvae mature into wanderers inside
+      // the crypt and die en masse without breaking the cap.
+      //
+      // Trigger: WANDER worker, near-queen pheromone in own cell
+      // (the worker IS in the brood chamber), SOIL directly above,
+      // AND zero AIR cells in the column from the worker's row up
+      // to the natural surface (= no lateral access to surface via
+      // this column at all). The column-sealed gate keeps the rule
+      // from firing whenever a worker happens to walk past the
+      // queen — only a fully buried column triggers escape digging.
+      if (
+        !didMaintenance &&
+        (ownQ > 0.5 || ownB > 0.5) &&
+        ay > 0 &&
+        world.cells[(ay - 1) * wW + ax] === CELL_SOIL
+      ) {
+        let columnSealed = true;
+        const surfHere = world.naturalSurface[ax]!;
+        for (let yy = ay - 1; yy >= surfHere && columnSealed; yy--) {
+          if (world.cells[yy * wW + ax] === CELL_AIR) columnSealed = false;
+        }
+        if (columnSealed) {
+          // 3× boost — escape from a sealed chamber is the only
+          // survival action available; routine digProb (1–2% per
+          // tick) would take hours to chew through a 5-cell cap
+          // even with multiple workers rolling each tick.
+          if (rng.next() < colony.digProb[i]! * 3.0) {
+            if (digCell(world, ax, ay - 1, rng)) {
               colony.setState(i, STATE_CARRY);
               colony.carryMoves[i] = 0;
-              colony.heading[i] = Math.atan2(dy, dx);
+              colony.heading[i] = -Math.PI / 2;
+              world.digsByDir[0]!++;
+              digField.deposit(ax, ay - 1, digDeposit * 0.5);
+              digField.deposit(ax, ay, digDeposit * 1.0);
+              if (alarmField) alarmField.deposit(ax, ay, 0.2);
               if (particles) {
                 for (let k = 0; k < 2; k++) {
                   const a = rng.range(-Math.PI, 0);
                   const sp = rng.range(0.04, 0.14);
                   particles.spawn(
-                    sx + 0.5, sy + 0.3,
+                    ax + 0.5, ay - 0.5,
                     Math.cos(a) * sp, Math.sin(a) * sp - 0.04,
-                    24 + ((rng.next() * 12) | 0),
+                    28 + ((rng.next() * 12) | 0),
                   );
                 }
               }
-              didMaintenance = true;
+              continue;
             }
           }
         }
       }
-      if (didMaintenance) continue;
     }
 
     // (3) Sudd contact-triggered digging. Per soil contact, P(dig) =
