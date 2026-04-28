@@ -44,11 +44,25 @@ const FLOOR: f32 = 1e-6;
     return;
   }
   let sum: f32 = 0;
-  if (x > 0       && load<u8>(cellsI - 1) == 0) sum += load<f32>(srcPtr + ((i - 1) << 2));
-  if (x < w - 1   && load<u8>(cellsI + 1) == 0) sum += load<f32>(srcPtr + ((i + 1) << 2));
-  if (y > 0       && load<u8>(cellsI - w) == 0) sum += load<f32>(srcPtr + ((i - w) << 2));
-  if (y < h - 1   && load<u8>(cellsI + w) == 0) sum += load<f32>(srcPtr + ((i + w) << 2));
-  let v = m * load<f32>(srcPtr + (i << 2)) + f4 * sum;
+  // kOut counts directions where outflow leaves the cell — in-grid
+  // AIR neighbours (which absorb it via inflow) plus out-of-grid
+  // directions (which absorb it as the world boundary). In-grid
+  // SOIL/GRAIN reflects: outflow stays put.
+  let kOut: i32 = 0;
+  if (x > 0) {
+    if (load<u8>(cellsI - 1) == 0) { sum += load<f32>(srcPtr + ((i - 1) << 2)); kOut++; }
+  } else { kOut++; }
+  if (x < w - 1) {
+    if (load<u8>(cellsI + 1) == 0) { sum += load<f32>(srcPtr + ((i + 1) << 2)); kOut++; }
+  } else { kOut++; }
+  if (y > 0) {
+    if (load<u8>(cellsI - w) == 0) { sum += load<f32>(srcPtr + ((i - w) << 2)); kOut++; }
+  } else { kOut++; }
+  if (y < h - 1) {
+    if (load<u8>(cellsI + w) == 0) { sum += load<f32>(srcPtr + ((i + w) << 2)); kOut++; }
+  } else { kOut++; }
+  const mEff: f32 = 1.0 - (kOut as f32) * f4;
+  let v = mEff * load<f32>(srcPtr + (i << 2)) + f4 * sum;
   v *= e;
   if (v < FLOOR) v = 0;
   else if (v > cap) v = cap;
@@ -74,10 +88,9 @@ export function step(
   f: f32, e: f32, cap: f32,
 ): void {
   const f4 = f * 0.25;
-  const m = (1.0 as f32) - f;
+  const m = (1.0 as f32) - f; // legacy: still passed to stepCell for ABI stability
   const wm1 = w - 1;
   const hm1 = h - 1;
-  const mSplat = f32x4.splat(m);
   const f4Splat = f32x4.splat(f4);
   const eSplat = f32x4.splat(e);
   const capSplat = f32x4.splat(cap);
@@ -114,7 +127,18 @@ export function step(
           f32x4.add(f32x4.mul(tv, tMask), f32x4.mul(bv, bMask)),
         );
 
-        let result = f32x4.add(f32x4.mul(mSplat, cv), f32x4.mul(f4Splat, sum));
+        // Reflecting walls: each non-AIR neighbour means f/4 of the
+        // would-be outflow stays put rather than vanishing into soil.
+        // Sum the air masks (each lane is 0.0 or 1.0) for kAir, then
+        // mEff = 1 - kAir × (f/4). Cells with all-air neighbours
+        // recover the standard (1-f) self-retention; sealed cells
+        // (kAir=0) reach mEff=1 and only lose to evaporation.
+        const kAir = f32x4.add(
+          f32x4.add(lMask, rMask),
+          f32x4.add(tMask, bMask),
+        );
+        const mEff = f32x4.sub(f32x4.splat(1.0), f32x4.mul(kAir, f4Splat));
+        let result = f32x4.add(f32x4.mul(mEff, cv), f32x4.mul(f4Splat, sum));
         result = f32x4.mul(result, eSplat);
         // Zero non-AIR centers regardless of computed value.
         result = f32x4.mul(result, centerMask);

@@ -124,7 +124,6 @@ export class Pheromone {
     const f = this.diffuse;
     const f4 = f * 0.25;
     const e = this.evaporate;
-    const m = 1 - f;
     // Saturation cap. Without an upper bound, fields with steady
     // deposit > evaporation grow unbounded over long runs (Float32
     // eventually loses precision; gradient at saturated cells reads
@@ -134,15 +133,23 @@ export class Pheromone {
     // the densest field — so capping here doesn't change visible
     // behaviour at any concentration the rest of the system reads.
     const CAP = 1000;
-    // AIR-only diffusion. Real volatile pheromones don't propagate
-    // through soil walls — they live in the air column the colony
-    // has carved out. When `cells` is provided, non-AIR cells (SOIL,
-    // GRAIN) are zeroed and contribute nothing to neighbour sums.
-    // Pheromone "leaks into" walls in the sense that the AIR cell
-    // adjacent to a wall has fewer contributing neighbours and
-    // therefore loses some signal each tick (an absorbing boundary
-    // at every wall). This drops the over-bloomed gradient that
-    // previously bled through 30+ cells of solid earth.
+    // AIR-only diffusion with REFLECTING walls. Real volatile
+    // pheromones don't propagate through soil walls — they live in
+    // the air column the colony has carved out. The 5-point stencil
+    // would normally lose fraction f per tick (split f/4 to each
+    // direction), but in a narrow tunnel where most directions are
+    // soil that f/4 outflow has nowhere to go: previously we just
+    // discarded it (absorbing walls), so a 1-cell-wide tunnel cell
+    // lost 3f/4 per tick to nothing. That made pheromone trails
+    // attenuate fast through narrow passages and queen-pheromone
+    // gradients vanish a few cells from the source.
+    //
+    // Reflecting walls are the physically-correct alternative for
+    // "molecules can't pass": a cell only loses outflow toward
+    // AIR neighbours. Total outflow = (kAir/4) × f × src[i] where
+    // kAir is the count of AIR cardinal neighbours; the rest of the
+    // would-be outflow stays put (reflects). Net concentration in
+    // narrow tunnels and dead-end pockets is preserved.
     //
     // CELL_AIR == 0 (see world.ts). Skip the import to keep the
     // pheromone module self-contained.
@@ -155,11 +162,13 @@ export class Pheromone {
         for (let i = rowStart; i < rowEnd; i++) {
           if (cells && cells[i] !== 0) { dst[i] = 0; continue; }
           let sum = 0;
-          if (!cells || cells[i - 1] === 0) sum += src[i - 1]!;
-          if (!cells || cells[i + 1] === 0) sum += src[i + 1]!;
-          if (!cells || cells[i - w] === 0) sum += src[i - w]!;
-          if (!cells || cells[i + w] === 0) sum += src[i + w]!;
-          let v = m * src[i]! + f4 * sum;
+          let kAir = 0;
+          if (!cells || cells[i - 1] === 0) { sum += src[i - 1]!; kAir++; }
+          if (!cells || cells[i + 1] === 0) { sum += src[i + 1]!; kAir++; }
+          if (!cells || cells[i - w] === 0) { sum += src[i - w]!; kAir++; }
+          if (!cells || cells[i + w] === 0) { sum += src[i + w]!; kAir++; }
+          const mEff = 1 - kAir * f4;
+          let v = mEff * src[i]! + f4 * sum;
           v *= e;
           if (v < 1e-6) v = 0;
           else if (v > CAP) v = CAP;
@@ -168,16 +177,34 @@ export class Pheromone {
       }
     }
     // Edge rows (y=0 and y=h-1) and edge columns (x=0 and x=w-1).
-    // Use the original guarded form. Total work: 2*(w + h - 2).
+    // World-edge boundaries are ABSORBING (out-of-grid is a sink:
+    // outflow leaves the simulated cross-section permanently — the
+    // sky above the world or the deep soil below). Soil walls inside
+    // the world are REFLECTING (outflow has nowhere to go; stays put).
+    // Implementation: kOut counts directions where outflow goes
+    // somewhere — either an in-grid AIR neighbour (which receives
+    // it) OR an out-of-grid direction (which absorbs it). In-grid
+    // SOIL/GRAIN neighbours don't count: outflow toward them
+    // reflects. mEff = 1 - kOut × f/4.
     const stepBoundaryCell = (x: number, y: number): void => {
       const i = y * w + x;
       if (cells && cells[i] !== 0) { dst[i] = 0; return; }
       let sum = 0;
-      if (x > 0 && (!cells || cells[i - 1] === 0)) sum += src[i - 1]!;
-      if (x < w - 1 && (!cells || cells[i + 1] === 0)) sum += src[i + 1]!;
-      if (y > 0 && (!cells || cells[i - w] === 0)) sum += src[i - w]!;
-      if (y < h - 1 && (!cells || cells[i + w] === 0)) sum += src[i + w]!;
-      let v = ((1 - f) * src[i]! + f4 * sum) * e;
+      let kOut = 0;
+      if (x > 0) {
+        if (!cells || cells[i - 1] === 0) { sum += src[i - 1]!; kOut++; }
+      } else { kOut++; } // OOB: absorbs
+      if (x < w - 1) {
+        if (!cells || cells[i + 1] === 0) { sum += src[i + 1]!; kOut++; }
+      } else { kOut++; }
+      if (y > 0) {
+        if (!cells || cells[i - w] === 0) { sum += src[i - w]!; kOut++; }
+      } else { kOut++; }
+      if (y < h - 1) {
+        if (!cells || cells[i + w] === 0) { sum += src[i + w]!; kOut++; }
+      } else { kOut++; }
+      const mEff = 1 - kOut * f4;
+      let v = (mEff * src[i]! + f4 * sum) * e;
       if (v < 1e-6) v = 0;
       else if (v > CAP) v = CAP;
       dst[i] = v;
