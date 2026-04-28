@@ -8,8 +8,8 @@
 // Renderer reads sim state. Never writes. (CLAUDE.md invariant.)
 
 import {
-  STATE_CARRY, STATE_DEAD, STATE_EGG, STATE_LARVA,
-  STATE_NECRO_CARRY, STATE_QUEEN,
+  STATE_CARRY, STATE_CARRY_FOOD, STATE_DEAD, STATE_EGG, STATE_FORAGE, STATE_LARVA,
+  STATE_NECRO_CARRY, STATE_QUEEN, STATE_REST,
 } from '../sim/colony';
 import { CELL_AIR, CELL_SOIL } from '../sim/world';
 
@@ -775,14 +775,30 @@ export class Renderer {
       const heading = colony.heading[i]!;
       const cosH = Math.cos(heading);
       const sinH = Math.sin(heading);
-      // Caste tint by energy as a simple proxy for "well-fed
-      // forager" vs "depleted nurse". Less saturated bodies for
-      // hungry ants. Base body colour is dark earth-brown.
+      // Caste tint by role + energy. Pogonomyrmex worker polyethism
+      // (Mirenda & Vinson 1981; Tschinkel 2006) produces visibly
+      // different cuticle tones: callow (newly eclosed) workers
+      // are pale tan, nurses mid-brown, foragers darkest from sun
+      // exposure and chitin maturation. We approximate that with
+      // role-keyed base colours and modulate brightness by energy
+      // so depleted ants read as duller across the board.
+      //
+      //   STATE_REST       → callow / nurse: light brown, slight red.
+      //   STATE_FORAGE/CF  → forager: nearly black, sun-tanned.
+      //   STATE_NECRO      → undertaker: cool slate-grey-brown.
+      //   default          → general worker / wander / carry-grain.
       const e = colony.energy[i]!;
-      const tint = Math.max(0.55, Math.min(1, e * 1.1));
-      const bodyR = (26 * tint) | 0;
-      const bodyG = (15 * tint) | 0;
-      const bodyB = (8  * tint) | 0;
+      const tint = Math.max(0.6, Math.min(1, e * 1.1));
+      let baseR = 26, baseG = 15, baseB = 8;
+      if (state === STATE_REST) { baseR = 70; baseG = 38; baseB = 22; }
+      else if (state === STATE_FORAGE || state === STATE_CARRY_FOOD) {
+        baseR = 14; baseG = 8; baseB = 5;
+      } else if (state === STATE_NECRO_CARRY) {
+        baseR = 36; baseG = 30; baseB = 32;
+      }
+      const bodyR = (baseR * tint) | 0;
+      const bodyG = (baseG * tint) | 0;
+      const bodyB = (baseB * tint) | 0;
       this.ctx.fillStyle = `rgb(${bodyR},${bodyG},${bodyB})`;
       // Abdomen — pointing backward from centre.
       this.ctx.beginPath();
