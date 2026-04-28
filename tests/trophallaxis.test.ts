@@ -10,7 +10,7 @@
 //      feed the queen).
 
 import { describe, expect, it } from 'vitest';
-import { Colony, STATE_QUEEN } from '../src/sim/colony';
+import { Colony, STATE_LARVA, STATE_QUEEN } from '../src/sim/colony';
 import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { Pheromone } from '../src/sim/pheromone';
 import { RNG } from '../src/sim/rng';
@@ -164,5 +164,41 @@ describe('trophallaxis', () => {
     // No transfer should have happened at distance 8.
     expect(colony.energy[0]!).toBeCloseTo(0.9, 4);
     expect(colony.energy[1]!).toBeCloseTo(0.1, 4);
+  });
+
+  it('a queen feeding many adjacent larvae does NOT have her energy multi-drained', () => {
+    // Hölldobler & Wilson 1990 Ch. 5: queens nourish first brood
+    // from non-modelled wing-muscle / yolk reserves. If the per-pair
+    // trophallaxis transfer drained queen.energy, a queen surrounded
+    // by N hungry larvae would crash to zero in N/give = ~N×200
+    // ticks. We make queen→larva donation cost-free for the queen.
+    const rng = new RNG(7);
+    const w = makeWorld();
+    const colony = new Colony(11);
+    // Queen at center, 10 hungry larvae packed adjacent (all
+    // inside the COLLISION_RADIUS=2 pair window).
+    colony.spawn(20.0, 14.5, 0, rng, TRAITS);
+    colony.state[0] = STATE_QUEEN;
+    colony.energy[0] = 1.0;
+    for (let k = 1; k <= 10; k++) {
+      colony.spawn(20.0 + (k * 0.15), 14.5, 0, rng, TRAITS);
+      colony.state[k] = STATE_LARVA;
+      colony.stateTicks[k] = 0;
+      colony.energy[k] = 0.10;
+    }
+    const dig = new Pheromone(w.width, w.height, 0.12, 0.99);
+    const build = new Pheromone(w.width, w.height, 0.10, 0.997);
+    for (let t = 0; t < 50; t++) {
+      step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, QUIET);
+    }
+    // Queen energy unchanged (within metabolism slop, which is 0
+    // for QUIET).
+    expect(colony.energy[0]!).toBeCloseTo(1.0, 5);
+    // At least some larvae received.
+    let larvaeFed = 0;
+    for (let k = 1; k <= 10; k++) {
+      if (colony.energy[k]! > 0.10) larvaeFed++;
+    }
+    expect(larvaeFed).toBeGreaterThan(0);
   });
 });

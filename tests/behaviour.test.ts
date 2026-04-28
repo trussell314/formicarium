@@ -180,6 +180,12 @@ describe('shaft wear', () => {
     }
     expect(w.wearLost).toBeGreaterThan(0);
     expect(w.countSoil()).toBeLessThan(initialSoil);
+    // Wear is by definition lateral — when it fires it must increment
+    // either the East or West dig-direction histogram bucket. Without
+    // tracking it the diag couldn't separate Sudd-vertical activity
+    // from wear-lateral activity, which is how we caught the
+    // horizontal-gallery architecture bug originally.
+    expect(w.digsByDir[2]! + w.digsByDir[3]!).toBeGreaterThan(0);
   });
 
   it('grain conservation invariant holds with wear: dug = grain + carriers + wearLost', () => {

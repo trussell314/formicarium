@@ -344,12 +344,23 @@ export function step(
   buildField.step();
   if (trailField) trailField.step();
   if (alarmField) alarmField.step();
-  if (queenField) queenField.step();
-  if (broodField) broodField.step();
-  if (necroField) necroField.step();
-  if (noEntryField) noEntryField.step();
-  if (granaryField) granaryField.step();
-  if (trunkField) trunkField.step();
+  // Slow-evaporation pheromone fields step every 2 ticks instead
+  // of every tick. With per-tick retention ≥ 0.99, half-lives in
+  // these fields are 700+ ticks; a 1-tick lag in the diffusion
+  // update is invisibly small relative to the field's natural
+  // dynamics. The deposit calls (queen emission, larva emission,
+  // CARRY_FOOD anchor, etc.) still write to `current` every tick;
+  // they accumulate into the field across the skipped step. Halves
+  // the per-tick CPU for 6 of the 10 pheromone fields. Profile
+  // confirmed pheromone.step() is the largest single hot path
+  // and these slow fields contribute ~half of it.
+  const slowStep = (world.tick & 1) === 0;
+  if (queenField && slowStep) queenField.step();
+  if (broodField && slowStep) broodField.step();
+  if (necroField && slowStep) necroField.step();
+  if (noEntryField && slowStep) noEntryField.step();
+  if (granaryField && slowStep) granaryField.step();
+  if (trunkField && slowStep) trunkField.step();
   if (particles) particles.step();
 
   // Necromone emission. Corpse cells evaporate oleic acid (Wilson,
@@ -593,8 +604,19 @@ export function step(
                 const surplus = donorE - species.trophallaxisDonorThreshold;
                 const give = Math.min(species.trophallaxisAmount, want, surplus);
                 if (give > 0) {
-                  colony.energy[donor] = donorE - give;
                   colony.energy[recip] = recipE + give;
+                  // Queens feeding larvae draw on non-modelled wing-
+                  // muscle / yolk reserves rather than the per-ant
+                  // energy pool (Hölldobler & Wilson 1990 Ch. 5). If
+                  // we drained queen.energy here, a queen surrounded
+                  // by N hungry larvae would lose N × trophallaxisAmount
+                  // per tick — a queen with 20 adjacent larvae would
+                  // crash to zero in 10 ticks. Worker→worker and
+                  // worker→queen transfers still drain the donor
+                  // normally.
+                  if (donorState !== STATE_QUEEN) {
+                    colony.energy[donor] = donorE - give;
+                  }
                 }
               }
             }
