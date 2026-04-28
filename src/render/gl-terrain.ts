@@ -55,6 +55,7 @@ out vec4 fragColor;
 uniform float uW;
 uniform float uH;
 uniform int uTick;
+uniform int uSub;       // sub-cell scale (SUB×SUB pixels per cell)
 uniform float uShowPhero;
 
 // Per-cell scalar fields. Integer textures (R16UI / R32I) MUST be
@@ -118,9 +119,9 @@ void main() {
   int wi = int(uW);
   int hi = int(uH);
   // Pixel coord in the framebuffer (sub-cell space).
-  ivec2 sub = ivec2(uv * vec2(uW * 2.0, uH * 2.0));
-  ivec2 cell = sub / 2;
-  ivec2 subOff = sub - cell * 2; // 0..1 in each axis
+  ivec2 sub = ivec2(uv * vec2(uW * float(uSub), uH * float(uSub)));
+  ivec2 cell = sub / uSub;
+  ivec2 subOff = sub - cell * uSub; // 0..uSub-1 in each axis
 
   if (cell.x < 0 || cell.x >= wi || cell.y < 0 || cell.y >= hi) {
     fragColor = vec4(0.0, 0.0, 0.0, 1.0);
@@ -131,6 +132,26 @@ void main() {
   // surfRow is per-column. Stored as a 1-row-tall R16UI texture.
   int surf = sampleU16(uSurf, ivec2(cell.x, 0));
   int noiseByte = sampleU8(uSoilNoise, cell);
+
+  // Multi-octave soil noise (#5). Three hashed bands at different
+  // spatial frequencies sum to a believable rocky/sedimentary
+  // texture instead of uniform white-noise speckle. Cheap because
+  // they're all pure integer hashes per pixel.
+  int hashA = noiseByte;
+  int hashB = sampleU8(uSoilNoise, ivec2(cell.x / 2, cell.y / 2));
+  int hashC = sampleU8(uSoilNoise, ivec2(cell.x / 4, cell.y / 6));
+  float n1 = (float(hashA) / 255.0 - 0.5);
+  float n2 = (float(hashB) / 255.0 - 0.5);
+  float n3 = (float(hashC) / 255.0 - 0.5);
+  float multiNoise = (n1 * 0.10 + n2 * 0.06 + n3 * 0.04);
+
+  // Cell-neighbour samples for rim-light + AO (#6, #7). Cheap:
+  // 4 extra texelFetches.
+  int kU = cell.y > 0 ? sampleU8(uCells, ivec2(cell.x, cell.y - 1)) : 1;
+  int kD = cell.y < hi - 1 ? sampleU8(uCells, ivec2(cell.x, cell.y + 1)) : 1;
+  int kL = cell.x > 0 ? sampleU8(uCells, ivec2(cell.x - 1, cell.y)) : 1;
+  int kR = cell.x < wi - 1 ? sampleU8(uCells, ivec2(cell.x + 1, cell.y)) : 1;
+  int airNbrs = (kU == 0 ? 1 : 0) + (kD == 0 ? 1 : 0) + (kL == 0 ? 1 : 0) + (kR == 0 ? 1 : 0);
 
   vec3 col;
   // Sky vs tunnel vs soil vs grain branches. Mirrors the JS terrain
@@ -151,19 +172,66 @@ void main() {
         float t = 1.0 - float(age) / 120.0;
         col = mix(col, FRESH_DIG, 0.5 * t);
       }
+      // Sunlight cone (#9). When the column above this AIR cell
+      // remains open all the way to the surface, daylight reaches
+      // down. Approximate by checking surf — if cell.y is just
+      // below surf, give a vertical brightening that fades with
+      // depth and with daylight. Cheap: no ray-march, just a
+      // distance-from-surface factor.
+      int colSurf = sampleU16(uSurf, ivec2(cell.x, 0));
+      float depthFromSurf = float(cell.y - colSurf);
+      float coneDepth = clamp(1.0 - depthFromSurf / 8.0, 0.0, 1.0);
+      // Only apply if the surface row at this column has been
+      // dug (i.e. there's an entrance above us).
+      int surfCell = sampleU8(uCells, ivec2(cell.x, colSurf));
+      if (surfCell == 0) {
+        float coneAmt = coneDepth * uDaylight * 0.4;
+        col = mix(col, vec3(1.0, 0.95, 0.78), coneAmt);
+      }
+      // AO at chamber corners (#7). Cells with FEW air neighbours
+      // (1-2 = chamber corner pocket) get a subtle dark halo;
+      // open chambers (3-4 air nbrs) get neutral. Reads as
+      // self-shadowing in concave geometry.
+      float aoFactor = airNbrs <= 1 ? 0.85 : (airNbrs == 2 ? 0.93 : 1.0);
+      col *= aoFactor;
+      // Localized brood/queen lighting (#10). At night, lit
+      // chambers glow softly. Sample the same packed pheromones
+      // we'll use for the overlay below.
+      vec4 p1Light = texelFetch(uPPack1, cell, 0);
+      float queenLight = clamp(p1Light.r / 4.0, 0.0, 1.0);
+      float broodLight = clamp(p1Light.g / 1.0, 0.0, 1.0);
+      float darkness = 1.0 - uDaylight;
+      col += vec3(0.7, 0.5, 0.3) * (queenLight + broodLight) * 0.18 * darkness;
     }
   } else {
     // Soil or grain: identical palette (real spoil mounds are the
-    // same earth as undisturbed substrate). Per-cell noise +
+    // same earth as undisturbed substrate). Multi-octave noise +
     // depth-fog darkening below 55%.
     float depth = clamp(float(cell.y - surf) / max(1.0, uH - float(surf)), 0.0, 1.0);
     col = mix(SOIL_TOP, SOIL_BOT, depth);
-    float n = (float(noiseByte) / 255.0 - 0.5) * 0.18;
-    col *= (1.0 + n);
+    col *= (1.0 + multiNoise);
     if (depth > 0.55) {
       float f = (depth - 0.55) / 0.45;
       col *= (1.0 - 0.55 * f);
     }
+    // Rim light (#6). A SOIL cell adjacent to AIR above gets a
+    // brighter top edge — simulates ambient sky-light bouncing
+    // off the chamber ceiling. Pure shader logic; no extra cost
+    // beyond the existing kU sample above.
+    if (kU == 0) {
+      // Brighten the upper sub-cell rows of this cell. subOff.y=0
+      // is the top half of the SUB×SUB block; biggest tint there.
+      float rimT = subOff.y == 0 ? 0.18 : 0.06;
+      col = mix(col, col * 1.4, rimT);
+    }
+    // Time-of-day color grading (#8). Soil takes a warm tint at
+    // low daylight (sunset) and a cool blue at high daylight, with
+    // neutral at midday. Subtle — just shifts the hue slightly.
+    vec3 tintWarm = vec3(1.05, 0.95, 0.85);
+    vec3 tintCool = vec3(0.92, 0.96, 1.05);
+    float dayBlend = smoothstep(0.0, 1.0, uDaylight);
+    vec3 todTint = mix(tintWarm, tintCool, dayBlend);
+    col *= mix(vec3(1.0), todTint, 0.35);
   }
 
   // Food overlay — always over AIR/SOIL.
@@ -186,8 +254,9 @@ void main() {
     col = vec3(70.0 * t, 230.0 * t, 50.0 * t) / 255.0;
   }
 
-  // Per-sub-cell luminance variation — same hash as the JS path.
-  int subI = subOff.y * 2 + subOff.x;
+  // Per-sub-cell luminance variation. Hash uses subOff packed into
+  // a single index that's stable across SUB values.
+  int subI = subOff.y * uSub + subOff.x;
   int subBase = (noiseByte + subI * 67) & 0xff;
   float subN = float(subBase) / 255.0 - 0.5;
   col *= (1.0 + subN * 0.10);
@@ -195,28 +264,57 @@ void main() {
   // Pheromone overlay (additive composition).
   if (uShowPhero > 0.5) {
     float W = 0.55;
-    vec4 p0 = texelFetch(uPPack0, cell, 0);
-    vec4 p1 = texelFetch(uPPack1, cell, 0);
-    vec4 p2 = texelFetch(uPPack2, cell, 0);
+    // Edge-fade halos (#16). Box-blur the packed pheromones across
+    // the 3×3 cell neighbourhood so trails read as fuzzy chemical
+    // clouds rather than the cell-grid mosaic produced by raw
+    // texelFetch. 9 reads per pack × 3 packs = 27 reads; trivial
+    // GPU cost. Only runs when overlay is on.
+    vec4 p0 = vec4(0.0), p1 = vec4(0.0), p2 = vec4(0.0);
+    float wTot = 0.0;
+    for (int dy = -1; dy <= 1; dy++) {
+      for (int dx = -1; dx <= 1; dx++) {
+        int sx = clamp(cell.x + dx, 0, wi - 1);
+        int sy = clamp(cell.y + dy, 0, hi - 1);
+        // Centre-weighted: 4 / 2 / 1 falloff (corners get 1).
+        float w = (dx == 0 && dy == 0) ? 4.0 : ((dx == 0 || dy == 0) ? 2.0 : 1.0);
+        ivec2 sc = ivec2(sx, sy);
+        p0 += texelFetch(uPPack0, sc, 0) * w;
+        p1 += texelFetch(uPPack1, sc, 0) * w;
+        p2 += texelFetch(uPPack2, sc, 0) * w;
+        wTot += w;
+      }
+    }
+    p0 /= wTot; p1 /= wTot; p2 /= wTot;
     // Non-linear (sqrt) mapping. Linear value/divisor mapping
     // hides low concentrations: at high sim speeds deposits smear
     // across more cells per wall-frame, peak values drop, and a
     // linear ramp pushes them below visibility. sqrt boosts contrast
-    // at the low end (a value 4× below the divisor still renders
-    // at 50% intensity instead of 25%) while keeping saturation at
-    // the divisor stops. Divisors also halved across the board so
-    // sustained low-concentration trails register without forcing
-    // dig fronts to clip.
+    // at the low end.
     float dv  = sqrt(clamp(p0.r / 0.25,  0.0, 1.0));
     float bv  = sqrt(clamp(p0.g / 0.25,  0.0, 1.0));
     float tv  = sqrt(clamp(p0.b / 0.25,  0.0, 1.0));
     float av  = sqrt(clamp(p0.a / 0.075, 0.0, 1.0));
+    // Pulsing alarm (#17). Multiply alarm contribution by
+    // 0.7 + 0.3 sin(uTick * 0.2) so active alarm visibly throbs
+    // rather than reading as static colouring. Real alarm is a
+    // burst response, not a steady signal.
+    av *= 0.7 + 0.3 * sin(float(uTick) * 0.2);
     float qv  = sqrt(clamp(p1.r / 2.0,   0.0, 1.0));
     float brv = sqrt(clamp(p1.g / 0.75,  0.0, 1.0));
     float nv  = sqrt(clamp(p1.b / 0.4,   0.0, 1.0));
     float xv  = sqrt(clamp(p1.a / 1.0,   0.0, 1.0));
     float gv  = sqrt(clamp(p2.r / 2.0,   0.0, 1.0));
     float tkv = sqrt(clamp(p2.g / 2.5,   0.0, 1.0));
+    // Heat-distortion at saturation (#19). When any field is at
+    // its display peak, jitter the colour slightly with a
+    // tick-driven sine — reads as a chemical haze rippling at
+    // high concentration. The peakAny check keeps quiet fields
+    // smooth and reserves the effect for visible saturation.
+    float peakAny = max(max(max(dv, bv), max(qv, brv)), max(av, gv));
+    if (peakAny > 0.85) {
+      float wobble = sin(float(uTick) * 0.3 + float(cell.x) * 0.4 + float(cell.y) * 0.4) * 0.04 * (peakAny - 0.85);
+      col += vec3(wobble);
+    }
     col += (vec3(0.0,   220.0, 220.0) / 255.0 - col) * dv  * W;
     col += (vec3(220.0, 0.0,   220.0) / 255.0 - col) * bv  * W;
     col += (vec3(240.0, 220.0, 60.0)  / 255.0 - col) * tv  * W;
@@ -322,7 +420,7 @@ export class GLTerrainRenderer {
     this.vao = vao;
     this.uniforms = {};
     for (const name of [
-      'uW', 'uH', 'uTick', 'uShowPhero', 'uDaylight',
+      'uW', 'uH', 'uTick', 'uSub', 'uShowPhero', 'uDaylight',
       'uCells', 'uSoilNoise', 'uSurf', 'uFood', 'uFoodMoves', 'uCorpse',
       'uSprout', 'uSproutTick', 'uDigTick',
       'uPPack0', 'uPPack1', 'uPPack2',
@@ -443,6 +541,7 @@ export class GLTerrainRenderer {
     const u = this.uniforms;
     gl.uniform1f(u.uW!, w);
     gl.uniform1f(u.uH!, h);
+    gl.uniform1i(u.uSub!, this.SUB);
     gl.uniform1i(u.uTick!, world.tick);
     gl.uniform1f(u.uShowPhero!, showPheromones && pheromones ? 1.0 : 0.0);
     gl.uniform1f(u.uDaylight!, daylight);

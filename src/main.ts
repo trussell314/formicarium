@@ -531,16 +531,27 @@ function main(): void {
         }
         return `${fmt(requestedSpeed)}× (effective ${fmt(effective)}×)`;
       })();
+      // Set with pulse: re-trigger the .pulse animation on text
+      // change so the user notices when a number ticks. We strip
+      // the class first to restart the CSS animation.
+      const setPulse = (el: Element, text: string): void => {
+        if (el.textContent === text) return;
+        el.textContent = text;
+        el.classList.remove('pulse');
+        // Force reflow so the animation re-runs.
+        void (el as HTMLElement).offsetWidth;
+        el.classList.add('pulse');
+      };
       hudEls.seed.textContent =
         `0x${settings.seed.toString(16)} · ${snap.width}×${snap.height}`;
-      hudEls.colony.textContent =
-        `${snap.hud.alive} alive (start ${start}, +${snap.hud.totalBorn} −${snap.hud.totalDied})`;
-      hudEls.brood.textContent =
-        `Q ${snap.hud.queens} · ${snap.hud.eggs}E · ${snap.hud.larvae}L · ${snap.hud.pupae}P`;
-      hudEls.nest.textContent =
-        `${snap.hud.nestVol} cells · depth ${snap.hud.maxDepth} · ${snap.hud.chambers} ch · dug ${dugTotal}`;
-      hudEls.res.textContent =
-        `${snap.hud.grains} grains · ${snap.hud.foodCount} seeds`;
+      setPulse(hudEls.colony,
+        `${snap.hud.alive} alive (start ${start}, +${snap.hud.totalBorn} −${snap.hud.totalDied})`);
+      setPulse(hudEls.brood,
+        `Q ${snap.hud.queens} · ${snap.hud.eggs}E · ${snap.hud.larvae}L · ${snap.hud.pupae}P`);
+      setPulse(hudEls.nest,
+        `${snap.hud.nestVol} cells · depth ${snap.hud.maxDepth} · ${snap.hud.chambers} ch · dug ${dugTotal}`);
+      setPulse(hudEls.res,
+        `${snap.hud.grains} grains · ${snap.hud.foodCount} seeds`);
       hudEls.time.textContent =
         `t=${snap.tick.toLocaleString()} · ${bioTime} · ${phaseLabel}`;
       // Status flag. Priority: PAUSED > EXTINCT > STARVING. Below

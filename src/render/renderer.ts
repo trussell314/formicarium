@@ -115,10 +115,12 @@ export class Renderer {
   /** Sub-cell rendering scale. Each sim cell maps to SUB×SUB
    *  pixels in the offscreen buffer; per-sub-cell variation
    *  (driven by world.soilNoise) breaks up the blocky appearance
-   *  without changing sim resolution. SUB=2 quadruples the pixel
-   *  buffer and per-cell write cost — well within budget at the
-   *  default 280×140 world. */
-  private readonly SUB = 2;
+   *  without changing sim resolution. Bumped 2→4: each sim cell
+   *  now occupies 16 framebuffer pixels, giving room for finer
+   *  sub-cell shading (rim light, AO, multi-octave noise) and
+   *  smoother edges at the cost of 4× framebuffer memory
+   *  (~600 KB → ~2.4 MB at default world dims, trivial). */
+  private readonly SUB = 4;
 
   /** Pre-baked star field for the night sky. Positions in normalized
    *  (0..1) sky-rectangle space; each star has a stable twinkle phase
@@ -795,13 +797,24 @@ export class Renderer {
       const px = ox + x * scale;
       const py = oy + y * scale;
       const carry = state === STATE_CARRY;
+      const carryFood = state === STATE_CARRY_FOOD;
       const necro = state === STATE_NECRO_CARRY;
+      // Per-ant size variation (#13). Real Pogonomyrmex workers
+      // vary visibly in head and gaster size; uniform ant
+      // silhouettes look like clones. Hash the ant's index so the
+      // size is stable across frames. We apply the jitter via the
+      // strokeStyle / ellipse calls below by referencing `r` not
+      // `radius` — the outer `radius` stays the egg/larva-friendly
+      // baseline, and `r` is the per-ant sized version.
+      const sizeHash = ((i * 2654435761) >>> 0) / 4294967296;
+      const sizeJitter = 0.85 + sizeHash * 0.30; // 0.85..1.15
+      const r = radius * sizeJitter;
       // Contact shadow: a small dim ellipse a fraction below the ant
       // anchors them to the substrate. Without it ants read as
       // floating overlay sprites instead of agents on the ground.
       this.ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
       this.ctx.beginPath();
-      this.ctx.ellipse(px, py + radius * 0.85, radius * 1.3, radius * 0.4, 0, 0, Math.PI * 2);
+      this.ctx.ellipse(px, py + r * 0.85, r * 1.3, r * 0.4, 0, 0, Math.PI * 2);
       this.ctx.fill();
       // Six legs, three per side. The walk phase comes from a hash of
       // (id, tick, distance moved) so ants in motion shuffle their
@@ -820,16 +833,16 @@ export class Renderer {
         this.ctx.lineWidth = Math.max(0.8, scale * 0.12);
         this.ctx.lineCap = 'round';
         for (let leg = 0; leg < 3; leg++) {
-          const along = (leg - 1) * radius * 0.9;
+          const along = (leg - 1) * r * 0.9;
           const swing = Math.sin(phase + leg * 1.1) * 0.45;
           for (const side of [-1, 1] as const) {
-            const lx = along + swing * radius * 0.4;
-            const ly = side * (radius * 0.6 + Math.abs(swing) * radius * 0.5);
+            const lx = along + swing * r * 0.4;
+            const ly = side * (r * 0.6 + Math.abs(swing) * r * 0.5);
             const ex = px + cosH * lx - sinH * ly;
             const ey = py + sinH * lx + cosH * ly;
             // Hip is a tiny inset so legs anchor to the body silhouette.
-            const hx = px + cosH * along * 0.4 - sinH * (side * radius * 0.3);
-            const hy = py + sinH * along * 0.4 + cosH * (side * radius * 0.3);
+            const hx = px + cosH * along * 0.4 - sinH * (side * r * 0.3);
+            const hy = py + sinH * along * 0.4 + cosH * (side * r * 0.3);
             this.ctx.beginPath();
             this.ctx.moveTo(hx, hy);
             this.ctx.lineTo(ex, ey);
@@ -879,28 +892,76 @@ export class Renderer {
       // Abdomen — pointing backward from centre.
       this.ctx.beginPath();
       this.ctx.ellipse(
-        px - cosH * radius * 0.7, py - sinH * radius * 0.7,
-        radius * 0.85, radius * 0.62, heading, 0, Math.PI * 2,
+        px - cosH * r * 0.7, py - sinH * r * 0.7,
+        r * 0.85, r * 0.62, heading, 0, Math.PI * 2,
       );
       this.ctx.fill();
       // Thorax — slightly forward of centre, narrower.
       this.ctx.beginPath();
       this.ctx.ellipse(
-        px + cosH * radius * 0.10, py + sinH * radius * 0.10,
-        radius * 0.42, radius * 0.40, heading, 0, Math.PI * 2,
+        px + cosH * r * 0.10, py + sinH * r * 0.10,
+        r * 0.42, r * 0.40, heading, 0, Math.PI * 2,
       );
       this.ctx.fill();
       // Head — at the front, near-circular.
+      const headX = px + cosH * r * 0.85;
+      const headY = py + sinH * r * 0.85;
       this.ctx.beginPath();
-      this.ctx.arc(
-        px + cosH * radius * 0.85, py + sinH * radius * 0.85,
-        radius * 0.45, 0, Math.PI * 2,
-      );
+      this.ctx.arc(headX, headY, r * 0.45, 0, Math.PI * 2);
       this.ctx.fill();
+      // Antennae (#11). Two short forward-curving lines from the
+      // head, splaying ±30° from the heading. Real ants flick
+      // their antennae continuously; we add a small per-tick
+      // wiggle for life.
+      const antennaWiggle = Math.sin(this.world.tick * 0.4 + i * 1.7) * 0.15;
+      const antLen = r * 0.6;
+      this.ctx.strokeStyle = `rgb(${bodyR},${bodyG},${bodyB})`;
+      this.ctx.lineWidth = Math.max(0.6, scale * 0.08);
+      for (const dir of [-1, 1] as const) {
+        const angle = heading + dir * (0.5 + antennaWiggle);
+        const ax = headX + Math.cos(angle) * antLen;
+        const ay = headY + Math.sin(angle) * antLen;
+        this.ctx.beginPath();
+        this.ctx.moveTo(headX, headY);
+        // Curved antenna: a quadratic with mid-point bent outward.
+        const cx = headX + Math.cos(heading + dir * 0.7) * antLen * 0.5;
+        const cy = headY + Math.sin(heading + dir * 0.7) * antLen * 0.5;
+        this.ctx.quadraticCurveTo(cx, cy, ax, ay);
+        this.ctx.stroke();
+      }
+      // Body segment seams (#15). Faint dark line marking the
+      // petiole between thorax and abdomen — sells the
+      // 3-segment morphology without overdrawing.
+      this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+      this.ctx.lineWidth = Math.max(0.5, scale * 0.06);
+      this.ctx.beginPath();
+      const seamX = px - cosH * r * 0.18;
+      const seamY = py - sinH * r * 0.18;
+      this.ctx.moveTo(seamX - sinH * r * 0.35, seamY + cosH * r * 0.35);
+      this.ctx.lineTo(seamX + sinH * r * 0.35, seamY - cosH * r * 0.35);
+      this.ctx.stroke();
+      // Mandibles when carrying anything (#12). Two short forward-
+      // pointing lines from the head, gripping the cargo. Reads as
+      // "ant holding object" instead of "object floating above ant".
+      if (carry || carryFood || necro) {
+        this.ctx.strokeStyle = `rgb(${Math.max(0, bodyR - 4)},${Math.max(0, bodyG - 4)},${Math.max(0, bodyB - 4)})`;
+        this.ctx.lineWidth = Math.max(0.7, scale * 0.10);
+        const mLen = r * 0.35;
+        for (const dir of [-0.4, 0.4] as const) {
+          const angle = heading + dir;
+          const mx = headX + Math.cos(angle) * mLen;
+          const my = headY + Math.sin(angle) * mLen;
+          this.ctx.beginPath();
+          this.ctx.moveTo(headX + cosH * r * 0.2, headY + sinH * r * 0.2);
+          this.ctx.lineTo(mx, my);
+          this.ctx.stroke();
+        }
+      }
+      this.ctx.fillStyle = `rgb(${bodyR},${bodyG},${bodyB})`;
       if (carry) {
         this.ctx.fillStyle = GRAIN_COLOR_CSS;
         this.ctx.beginPath();
-        this.ctx.arc(px, py - radius * 0.6, radius * 0.55, 0, Math.PI * 2);
+        this.ctx.arc(px, py - r * 0.6, r * 0.55, 0, Math.PI * 2);
         this.ctx.fill();
       } else if (necro) {
         // Hauled corpse — same dim purplish-grey as the world.corpse
@@ -910,8 +971,8 @@ export class Renderer {
         this.ctx.fillStyle = 'rgb(90, 70, 92)';
         this.ctx.beginPath();
         this.ctx.ellipse(
-          px, py - radius * 0.7,
-          radius * 0.85, radius * 0.55,
+          px, py - r * 0.7,
+          r * 0.85, r * 0.55,
           colony.heading[i]!, 0, Math.PI * 2,
         );
         this.ctx.fill();
@@ -976,6 +1037,52 @@ export class Renderer {
     grad.addColorStop(1, 'rgba(0, 0, 0, 0.55)');
     this.ctx.fillStyle = grad;
     this.ctx.fillRect(ox, oy, ow, oh);
+
+    // Selected-ant inset preview (#21). When an ant is picked,
+    // show a 8× zoom of a small region around them in the
+    // bottom-right corner above the mini-map. Re-blits from the
+    // terrainSource (already-composited terrain + pheromone) and
+    // overlays the worker's body using the same renderer logic
+    // would be ideal, but a simple imageSmoothingEnabled=false
+    // re-blit is enough to read the per-ant detail and gives the
+    // user a quick "what's this ant doing" look.
+    if (selectedId >= 0 && selectedId < colony.count
+        && colony.state[selectedId]! !== STATE_DEAD) {
+      const insetSize = 120; // px on the visible canvas
+      const insetSrcCells = 16; // 16×16 cell window around the ant
+      const insetX = cw - insetSize - 12;
+      const insetY = ch - insetSize - (this.showMinimap ? 124 : 12);
+      const ix = colony.posX[selectedId]!;
+      const iy = colony.posY[selectedId]!;
+      // Source region in framebuffer pixels (each cell = SUB px).
+      const sxF = Math.max(0,
+        Math.min(w * this.SUB - insetSrcCells * this.SUB,
+          (ix - insetSrcCells / 2) * this.SUB));
+      const syF = Math.max(0,
+        Math.min(h * this.SUB - insetSrcCells * this.SUB,
+          (iy - insetSrcCells / 2) * this.SUB));
+      // Backdrop + border for legibility.
+      this.ctx.fillStyle = 'rgba(10, 6, 6, 0.7)';
+      this.ctx.fillRect(insetX - 4, insetY - 4, insetSize + 8, insetSize + 8);
+      this.ctx.imageSmoothingEnabled = false;
+      this.ctx.drawImage(
+        terrainSource,
+        sxF, syF, insetSrcCells * this.SUB, insetSrcCells * this.SUB,
+        insetX, insetY, insetSize, insetSize,
+      );
+      this.ctx.strokeStyle = 'rgba(255, 220, 80, 0.85)';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeRect(insetX + 0.5, insetY + 0.5, insetSize - 1, insetSize - 1);
+      // Crosshair where the ant sits within the inset.
+      const insetScale = insetSize / (insetSrcCells * this.SUB);
+      const crossX = insetX + (ix * this.SUB - sxF) * insetScale;
+      const crossY = insetY + (iy * this.SUB - syF) * insetScale;
+      this.ctx.strokeStyle = 'rgba(255, 220, 80, 0.6)';
+      this.ctx.lineWidth = 1;
+      this.ctx.beginPath();
+      this.ctx.arc(crossX, crossY, 8, 0, Math.PI * 2);
+      this.ctx.stroke();
+    }
 
     // Mini-map. Bottom-right inset showing the full world at low
     // resolution with the current viewport rectangle outlined when

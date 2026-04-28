@@ -30,6 +30,17 @@
       #hud .row.hdr { color: #f0e2c4; font-weight: 600; letter-spacing: 0.04em; margin-bottom: 4px; padding-right: 22px; }
       #hud .row .v { color: #f0e2c4; }
       #hud .row.dim { opacity: 0.66; }
+      /* Counter animation (#22). When a value changes, briefly
+         flash the .v span — catches the eye on births/deaths/digs
+         without adding extra UI clutter. */
+      #hud .v.pulse {
+        animation: hud-pulse 600ms ease;
+      }
+      @keyframes hud-pulse {
+        0% { color: #ffe060; transform: translateX(0); }
+        30% { color: #ffe060; }
+        100% { color: #f0e2c4; }
+      }
       #hud .row.sel .v { color: #ffdc50; }
       #hud .row.hidden { display: none; }
       #hud .legend {
