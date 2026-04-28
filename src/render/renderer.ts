@@ -111,6 +111,14 @@ export class Renderer {
    *  the swap (the offscreen canvas is sized at construction). */
   private world: RenderableWorld;
 
+  /** Sub-cell rendering scale. Each sim cell maps to SUB×SUB
+   *  pixels in the offscreen buffer; per-sub-cell variation
+   *  (driven by world.soilNoise) breaks up the blocky appearance
+   *  without changing sim resolution. SUB=2 quadruples the pixel
+   *  buffer and per-cell write cost — well within budget at the
+   *  default 280×140 world. */
+  private readonly SUB = 2;
+
   constructor(canvas: HTMLCanvasElement, world: RenderableWorld) {
     this.canvas = canvas;
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -118,12 +126,12 @@ export class Renderer {
     this.ctx = ctx;
     this.world = world;
     this.off = document.createElement('canvas');
-    this.off.width = world.width;
-    this.off.height = world.height;
+    this.off.width = world.width * this.SUB;
+    this.off.height = world.height * this.SUB;
     const offCtx = this.off.getContext('2d', { alpha: false });
     if (!offCtx) throw new Error('off-screen 2d context not available');
     this.offCtx = offCtx;
-    this.imageData = this.offCtx.createImageData(world.width, world.height);
+    this.imageData = this.offCtx.createImageData(world.width * this.SUB, world.height * this.SUB);
     this.buf = this.imageData.data;
   }
 
@@ -323,11 +331,35 @@ export class Renderer {
           const t = Math.min(1, Math.max(0.4, age / 1000));
           r = 70 * t; g = 230 * t; b = 50 * t;
         }
-        const o = idx * 4;
-        data[o] = r;
-        data[o + 1] = g;
-        data[o + 2] = b;
-        data[o + 3] = 255;
+        // Write SUB×SUB sub-pixels for this sim cell. Each sub-pixel
+        // gets a different small luminance perturbation derived from
+        // the per-cell soilNoise plus the sub-cell index — gives an
+        // intra-cell texture that breaks up the blocky look without
+        // changing sim resolution. The four perturbation values are
+        // [-0.06, +0.04, +0.02, -0.04] of luminance scale; fine
+        // enough to read as natural variation, coarse enough to
+        // visibly add detail. Sub-cell ordering: row-major
+        // (sy=0,sx=0), (sy=0,sx=1), (sy=1,sx=0), (sy=1,sx=1).
+        const SUB = this.SUB;
+        const subBase = noise[idx]!;
+        for (let sy = 0; sy < SUB; sy++) {
+          for (let sx = 0; sx < SUB; sx++) {
+            const subI = sy * SUB + sx;
+            // Per-sub-cell variation. Hashing the cell noise with
+            // the sub-index gives a stable, cheap pattern that's
+            // different for each of the 4 sub-cells of every cell.
+            const subN = ((subBase + subI * 67) & 0xff) / 255 - 0.5;
+            const k = 0.10; // luminance perturbation scale
+            const sr = r * (1 + subN * k);
+            const sg = g * (1 + subN * k);
+            const sb = b * (1 + subN * k);
+            const so = ((y * SUB + sy) * (w * SUB) + (x * SUB + sx)) * 4;
+            data[so] = sr < 0 ? 0 : sr > 255 ? 255 : sr;
+            data[so + 1] = sg < 0 ? 0 : sg > 255 ? 255 : sg;
+            data[so + 2] = sb < 0 ? 0 : sb > 255 ? 255 : sb;
+            data[so + 3] = 255;
+          }
+        }
       }
     }
     // Optional pheromone overlay. Each field is alpha-blended into
@@ -363,6 +395,13 @@ export class Renderer {
       // order-independent blending and lets weak signals from many
       // fields combine without later layers wiping out earlier ones.
       const W = 0.55;
+      const SUB = this.SUB;
+      const sw = w * SUB;
+      // Single-cell composite then write to all SUB×SUB sub-pixels.
+      // The pheromone field itself is per-cell so within a cell all
+      // sub-pixels get the same overlay tint. Variation in the
+      // underlying terrain shows through unchanged because we read
+      // each sub-pixel's pre-overlay RGB.
       for (let i = 0; i < dig.length; i++) {
         const dv = Math.min(1, dig[i]! / 0.5);
         const bv = Math.min(1, build[i]! / 0.5);
@@ -378,34 +417,30 @@ export class Renderer {
           dv < 0.01 && bv < 0.01 && tv < 0.01 && av < 0.01 && qv < 0.01 &&
           brv < 0.01 && nv < 0.01 && xv < 0.01 && gv < 0.01 && tkv < 0.01
         ) continue;
-        const o = i * 4;
-        let r = data[o]!;
-        let g = data[o + 1]!;
-        let b = data[o + 2]!;
-        // Color targets:
-        //   dig       cyan        (  0, 220, 220)
-        //   build     magenta     (220,   0, 220)
-        //   trail     yellow      (240, 220,  60)
-        //   alarm     bright red  (255,  30,  30)
-        //   queen     indigo      (110,  70, 200)
-        //   brood     pale pink   (255, 180, 180)
-        //   necro     olive       (140, 130,  50)
-        //   no-entry  cool grey   (140, 150, 170)
-        //   granary   warm orange (255, 160,  60)
-        //   trunk     deep gold   (200, 170,  30)
-        r += (0   - r) * dv  * W; g += (220 - g) * dv  * W; b += (220 - b) * dv  * W;
-        r += (220 - r) * bv  * W; g += (0   - g) * bv  * W; b += (220 - b) * bv  * W;
-        r += (240 - r) * tv  * W; g += (220 - g) * tv  * W; b += (60  - b) * tv  * W;
-        r += (255 - r) * av  * 0.75; g += (30  - g) * av  * 0.75; b += (30  - b) * av  * 0.75;
-        r += (110 - r) * qv  * W; g += (70  - g) * qv  * W; b += (200 - b) * qv  * W;
-        r += (255 - r) * brv * W; g += (180 - g) * brv * W; b += (180 - b) * brv * W;
-        r += (140 - r) * nv  * W; g += (130 - g) * nv  * W; b += (50  - b) * nv  * W;
-        r += (140 - r) * xv  * W; g += (150 - g) * xv  * W; b += (170 - b) * xv  * W;
-        r += (255 - r) * gv  * W; g += (160 - g) * gv  * W; b += (60  - b) * gv  * W;
-        r += (200 - r) * tkv * W; g += (170 - g) * tkv * W; b += (30  - b) * tkv * W;
-        data[o]     = r < 0 ? 0 : r > 255 ? 255 : r | 0;
-        data[o + 1] = g < 0 ? 0 : g > 255 ? 255 : g | 0;
-        data[o + 2] = b < 0 ? 0 : b > 255 ? 255 : b | 0;
+        const cy = (i / w) | 0;
+        const cx = i - cy * w;
+        for (let sy = 0; sy < SUB; sy++) {
+          for (let sx = 0; sx < SUB; sx++) {
+            const so = ((cy * SUB + sy) * sw + (cx * SUB + sx)) * 4;
+            let r = data[so]!;
+            let g = data[so + 1]!;
+            let b = data[so + 2]!;
+            // Color targets — see overlay legend in HUD.
+            r += (0   - r) * dv  * W; g += (220 - g) * dv  * W; b += (220 - b) * dv  * W;
+            r += (220 - r) * bv  * W; g += (0   - g) * bv  * W; b += (220 - b) * bv  * W;
+            r += (240 - r) * tv  * W; g += (220 - g) * tv  * W; b += (60  - b) * tv  * W;
+            r += (255 - r) * av  * 0.75; g += (30  - g) * av  * 0.75; b += (30  - b) * av  * 0.75;
+            r += (110 - r) * qv  * W; g += (70  - g) * qv  * W; b += (200 - b) * qv  * W;
+            r += (255 - r) * brv * W; g += (180 - g) * brv * W; b += (180 - b) * brv * W;
+            r += (140 - r) * nv  * W; g += (130 - g) * nv  * W; b += (50  - b) * nv  * W;
+            r += (140 - r) * xv  * W; g += (150 - g) * xv  * W; b += (170 - b) * xv  * W;
+            r += (255 - r) * gv  * W; g += (160 - g) * gv  * W; b += (60  - b) * gv  * W;
+            r += (200 - r) * tkv * W; g += (170 - g) * tkv * W; b += (30  - b) * tkv * W;
+            data[so]     = r < 0 ? 0 : r > 255 ? 255 : r | 0;
+            data[so + 1] = g < 0 ? 0 : g > 255 ? 255 : g | 0;
+            data[so + 2] = b < 0 ? 0 : b > 255 ? 255 : b | 0;
+          }
+        }
       }
     }
     this.offCtx.putImageData(this.imageData, 0, 0);
@@ -427,7 +462,7 @@ export class Renderer {
     this.ctx.fillStyle = '#000';
     this.ctx.fillRect(0, 0, cw, ch);
     this.ctx.imageSmoothingEnabled = false;
-    this.ctx.drawImage(this.off, 0, 0, w, h, ox, oy, ow, oh);
+    this.ctx.drawImage(this.off, 0, 0, w * this.SUB, h * this.SUB, ox, oy, ow, oh);
 
     // Ant overlay.
     // Ant body radius. At 3 mm/cell the ant body is 2 cells wide, so
