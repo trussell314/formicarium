@@ -4,10 +4,10 @@
 // after many ticks. If this breaks, the kernel has drifted from
 // the JS spec and stigmergy behaviour will diverge in production.
 
-import { describe, it, expect, beforeAll } from 'vitest';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
 import { Pheromone, attachPheromoneWasm } from '../src/sim/pheromone';
 import { initPheromoneWasm } from '../src/sim/pheromone-wasm';
 
@@ -38,8 +38,10 @@ describe('WASM pheromone parity', () => {
     for (let t = 0; t < 50; t++) js.step(cells);
 
     // WASM path: attach runtime, allocate the field after upload.
-    const bytes = await readFile(wasmPath);
-    const rt = await initPheromoneWasm(async () => bytes.buffer);
+    const bytes = readFileSync(wasmPath);
+    const rt = await initPheromoneWasm(async () => bytes.buffer.slice(
+      bytes.byteOffset, bytes.byteOffset + bytes.byteLength,
+    ));
     expect(rt).not.toBeNull();
     rt!.uploadCells(cells);
     attachPheromoneWasm(rt);

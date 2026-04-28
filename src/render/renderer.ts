@@ -12,6 +12,7 @@ import {
   STATE_NECRO_CARRY, STATE_QUEEN, STATE_REST,
 } from '../sim/colony';
 import { CELL_AIR, CELL_SOIL } from '../sim/world';
+import { GLTerrainRenderer } from './gl-terrain';
 
 // Renderer reads a structural subset of World/Colony — same field
 // names so both the live class instances and the worker's
@@ -128,6 +129,14 @@ export class Renderer {
     size: number; tint: [number, number, number];
   }>;
 
+  /** WebGL2 terrain + pheromone-overlay renderer. Owns its own
+   *  canvas, sized identically to the offscreen Canvas2D buffer.
+   *  When non-null, terrain rendering offloads to a fragment
+   *  shader and the per-pixel CPU loop is skipped. Falls back to
+   *  the Canvas2D path when WebGL2 isn't supported (very old
+   *  hardware, screensaver runtimes without 3D acceleration). */
+  private gltr: GLTerrainRenderer | null;
+
   constructor(canvas: HTMLCanvasElement, world: RenderableWorld) {
     this.canvas = canvas;
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -142,6 +151,15 @@ export class Renderer {
     this.offCtx = offCtx;
     this.imageData = this.offCtx.createImageData(world.width * this.SUB, world.height * this.SUB);
     this.buf = this.imageData.data;
+    // Try WebGL2; on failure we keep the Canvas2D pixel loop as a
+    // backwards-compatible fallback. Errors here aren't fatal — they
+    // just mean the user falls back to the slower path.
+    try {
+      this.gltr = new GLTerrainRenderer(world.width, world.height, this.SUB);
+    } catch (err) {
+      console.warn('GL terrain renderer init failed; using CPU fallback', err);
+      this.gltr = null;
+    }
     // Star field. Density picked so a typical viewport shows ~80
     // stars — sparse enough that you can see individual ones, dense
     // enough that the sky doesn't read as empty. Most stars are
@@ -305,6 +323,28 @@ export class Renderer {
     const digTick = this.world.digTick;
     const tick = this.world.tick;
     const data = this.buf;
+    // GL fast-path: a single fragment shader does terrain +
+    // pheromone overlay in one pass, replacing the per-pixel CPU
+    // loop and the second per-cell pheromone composite. We still
+    // need the rest of the render() body (celestial, ants,
+    // particles, frame, mini-map) so the body doesn't return — it
+    // just skips the CPU-pixel work below.
+    const useGL = this.gltr !== null;
+    if (this.gltr !== null) {
+      this.gltr.render(this.world, daylight, this.showPheromones,
+        pheromones ? {
+          dig: pheromones.dig.current,
+          build: pheromones.build.current,
+          trail: pheromones.trail?.current ?? new Float32Array(0),
+          alarm: pheromones.alarm?.current ?? new Float32Array(0),
+          queen: pheromones.queen?.current ?? new Float32Array(0),
+          brood: pheromones.brood?.current ?? new Float32Array(0),
+          necro: pheromones.necro?.current ?? new Float32Array(0),
+          noEntry: pheromones.noEntry?.current ?? new Float32Array(0),
+          granary: pheromones.granary?.current ?? new Float32Array(0),
+          trunk: pheromones.trunk?.current ?? new Float32Array(0),
+        } : null);
+    }
 
     // Sky palette lerps between night and day pairs by the daylight
     // parameter passed in by main(). Computed once outside the pixel
@@ -313,7 +353,7 @@ export class Renderer {
     const skyTop = lerp3(SKY_TOP_NIGHT, SKY_TOP_DAY, daylight);
     const skyBottom = lerp3(SKY_BOTTOM_NIGHT, SKY_BOTTOM_DAY, daylight);
 
-    for (let y = 0; y < h; y++) {
+    if (!useGL) for (let y = 0; y < h; y++) {
       const skyT = y / Math.max(1, h * 0.5);
       const sky = lerp3(skyTop, skyBottom, Math.min(1, skyT));
       for (let x = 0; x < w; x++) {
@@ -443,7 +483,7 @@ export class Renderer {
     // its pixel using a colour outside the terrain palette: cyan
     // (dig) and magenta (build). The intensity is normalised to a
     // soft cap so a single deposit doesn't blow out the picture.
-    if (this.showPheromones && pheromones) {
+    if (!useGL && this.showPheromones && pheromones) {
       const dig = pheromones.dig.current;
       const build = pheromones.build.current;
       const trail = pheromones.trail?.current;
@@ -520,7 +560,11 @@ export class Renderer {
         }
       }
     }
-    this.offCtx.putImageData(this.imageData, 0, 0);
+    if (!useGL) this.offCtx.putImageData(this.imageData, 0, 0);
+    // Source canvas for the visible-canvas drawImage and the mini-map.
+    // GL path uses the GL canvas (already rendered); CPU path uses
+    // the offscreen Canvas2D buffer that just received putImageData.
+    const terrainSource = useGL ? this.gltr!.canvas : this.off;
 
     // Scale to viewport. Letterbox if aspect mismatch — the world has a
     // canonical aspect ratio (e.g. 12:7) we don't want to distort.
@@ -539,7 +583,7 @@ export class Renderer {
     this.ctx.fillStyle = '#000';
     this.ctx.fillRect(0, 0, cw, ch);
     this.ctx.imageSmoothingEnabled = false;
-    this.ctx.drawImage(this.off, 0, 0, w * this.SUB, h * this.SUB, ox, oy, ow, oh);
+    this.ctx.drawImage(terrainSource, 0, 0, w * this.SUB, h * this.SUB, ox, oy, ow, oh);
 
     // Celestial layer. Drawn on the visible canvas (not into the
     // pixel buffer) so the sun/moon and stars are crisp vector
@@ -926,7 +970,7 @@ export class Renderer {
       // the mini-map matches the main view's content. Smoothing on
       // for a clean reduction (aliasing reads as "noise" at this size).
       this.ctx.imageSmoothingEnabled = true;
-      this.ctx.drawImage(this.off, 0, 0, w * this.SUB, h * this.SUB, mmX, mmY, mmW, mmH);
+      this.ctx.drawImage(terrainSource, 0, 0, w * this.SUB, h * this.SUB, mmX, mmY, mmW, mmH);
       this.ctx.imageSmoothingEnabled = false;
       // Border.
       this.ctx.strokeStyle = 'rgba(216, 200, 168, 0.55)';
