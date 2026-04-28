@@ -57,16 +57,18 @@ uniform float uH;
 uniform int uTick;
 uniform float uShowPhero;
 
-// Per-cell scalar fields (all u8 textures except surfRow).
-uniform sampler2D uCells;       // 0=AIR, 1=SOIL, 2=GRAIN
-uniform sampler2D uSoilNoise;   // u8 per-cell hash
-uniform sampler2D uSurf;        // u16 per-column natural surface (stored in R16UI)
-uniform sampler2D uFood;        // u8 per-cell food count
-uniform sampler2D uFoodMoves;   // u8 per-cell move counter
-uniform sampler2D uCorpse;      // u8 per-cell corpse marker
-uniform sampler2D uSprout;      // u8 per-cell sprout marker
-uniform sampler2D uSproutTick;  // i32 per-cell sprout tick (R32I)
-uniform sampler2D uDigTick;     // i32 per-cell dig tick (R32I)
+// Per-cell scalar fields. Integer textures (R16UI / R32I) MUST be
+// sampled with usampler2D / isampler2D respectively; using a plain
+// sampler2D returns implementation-defined garbage in WebGL2.
+uniform sampler2D uCells;        // R8: 0=AIR, 1=SOIL, 2=GRAIN
+uniform sampler2D uSoilNoise;    // R8: per-cell hash
+uniform usampler2D uSurf;        // R16UI: per-column natural surface
+uniform sampler2D uFood;         // R8: per-cell food count
+uniform sampler2D uFoodMoves;    // R8: per-cell move counter
+uniform sampler2D uCorpse;       // R8: per-cell corpse marker
+uniform sampler2D uSprout;       // R8: per-cell sprout marker
+uniform isampler2D uSproutTick;  // R32I: per-cell sprout tick
+uniform isampler2D uDigTick;     // R32I: per-cell dig tick
 
 // Pheromone fields packed into 3 RGBA32F textures so the total
 // sampler count stays under MAX_TEXTURE_IMAGE_UNITS (WebGL2
@@ -95,20 +97,16 @@ const float MOVE_COLOUR_CAP = 30.0;
 
 uniform float uDaylight;
 
-// Sample a u8 single-channel texture with nearest filtering at
-// integer cell coords. The texture format is R8 normalized to [0,1];
-// multiply by 255 for the integer value.
+// Sample helpers. R8 textures are normalized to [0,1] — multiply by
+// 255 for the original integer value. R16UI / R32I are integer-typed
+// and need usampler2D / isampler2D variants of texelFetch.
 int sampleU8(sampler2D s, ivec2 c) {
   return int(texelFetch(s, c, 0).r * 255.0 + 0.5);
 }
-int sampleU16(sampler2D s, ivec2 c) {
-  // R16UI is integer-typed, so we use texelFetch returning uvec4.
+int sampleU16(usampler2D s, ivec2 c) {
   return int(texelFetch(s, c, 0).r);
 }
-int sampleI32(sampler2D s, ivec2 c) {
-  return int(texelFetch(s, c, 0).r);
-}
-float sampleF32(sampler2D s, ivec2 c) {
+int sampleI32(isampler2D s, ivec2 c) {
   return texelFetch(s, c, 0).r;
 }
 
