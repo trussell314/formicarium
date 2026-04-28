@@ -355,14 +355,29 @@ export const HARVESTER: AntSpecies = {
   // Founding queen lays ~5-15 eggs/day (Tschinkel 1998). Take 6
   // eggs/day → inter-egg ~4 hr real → 144 sec bio compressed →
   // 1,200 ticks.
-  eggLayInterval: 1200,
+  // 4× slower than the prior 1200 (4800 = ~9.6 min bio at 100×
+  // compression). Pairs with the 4× faster brood-stage timings
+  // below: per-egg adult emergence rate is now 1/4 of before, so
+  // the colony grows ~4× more slowly and brood census is ~1/16
+  // of the prior steady state. Trade is a more visible brood
+  // turnover (eggs→larvae→pupae transition during a watching
+  // window) and less brood pile-up against the maxColonySize cap.
+  eggLayInterval: 4800,
   // Real egg → larva: ~1 week → 100× compressed = 1.68 hr bio =
   // 50,400 ticks.
-  eggMatureTicks: 50400,
+  // Brood stage timings 4× faster than the original 100×-bio
+  // calibration. The prior values (50400 / 151200 / 100800 ticks
+  // = 7 days / 21 days / 14 days bio) made brood transitions
+  // invisible during a single watching session — eggs took 7
+  // sim-days to hatch, an entire afternoon at 1× speed. 4× faster
+  // (1.75 / 5.25 / 3.5 days bio) is still slow enough to read as
+  // "a real life cycle" but fast enough that a viewer sees
+  // multiple egg→larva→pupa transitions in a session.
+  eggMatureTicks: 12600,
   // Real larva → adult: ~3 weeks → 100× compressed = 5.04 hr bio =
   // 151,200 ticks. Total brood time = 201,600 ticks ≈ 6.7 hr bio.
-  larvaMatureTicks: 151200,
-  pupaMatureTicks: 100800, // ~14 days bio at 100× compression
+  larvaMatureTicks: 37800,
+  pupaMatureTicks: 25200,
   // Larvae burn ~15× faster than adult workers (growing tissue).
   // 100× compressed: 6.6e-6 × 15 ≈ 1.0e-4. A neglected larva at
   // 50% energy lasts ~5,000 ticks before starving; a fed one
