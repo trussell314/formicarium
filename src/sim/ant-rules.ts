@@ -1814,11 +1814,27 @@ export function step(
     if (ay < world.height - 1 && world.cells[(ay + 1) * wW + ax] === CELL_AIR) cardAir++;
     const entombed = cardAir === 0;
 
+    // Stranded surface ant. Walking on intact natural surface with
+    // solid soil directly below — no tunnel here, no way to find an
+    // existing entrance. hitSoil rarely triggers on the surface
+    // because lateral walks step into AIR, so without an implicit
+    // contact-trigger here the colony has no recovery from a sealed
+    // entrance: workers dance on top while the queen suffocates
+    // below. We let stranded trigger the dig roll the same way
+    // `entombed` does, but throttled by a small multiplier (see
+    // STRANDED_DIG_MULT below) so we get slow background drilling
+    // rather than the surface turning into Swiss cheese.
+    const surfHere = world.naturalSurface[ax]!;
+    const stranded =
+      ay < surfHere
+      && ay + 1 < world.height
+      && world.cells[(ay + 1) * wW + ax] === CELL_SOIL;
+
     // (3) Sudd contact-triggered digging. Per soil contact, P(dig) =
     // params.digProb. If the dig fires, ask the env to remove the
     // soil cell; the env handles any granular cascade. Drop dig
     // pheromone at the new air cell so other ants are recruited.
-    if (stateIn === STATE_WANDER && (hitSoil || entombed)) {
+    if (stateIn === STATE_WANDER && (hitSoil || entombed || stranded)) {
       // Enclosure gate. Sudd 1970 measured per-contact dig rates on
       // isolated workers in EXCAVATION CONTEXTS — tubes, dishes,
       // partially-built chambers — not on open ground. An ant that
@@ -1850,7 +1866,13 @@ export function step(
       // ant that gets routed to alarm is also the one that can dig.
       const alarmHere = alarmField ? alarmField.sample(ax, ay) : 0;
       const alarmBypass = alarmHere > 0.08;
-      if (neighbourSoil < 2 && !alarmBypass) {
+      // Surface-stranded bypass. The `stranded` flag was computed
+      // above as a third trigger for the dig roll; here it also
+      // bypasses the enclosure gate and forces the dig target to
+      // be directly below the ant (see target override). Without
+      // both, hitSoil rarely fires on the surface AND the gate
+      // would block the roll even when it does.
+      if (neighbourSoil < 2 && !alarmBypass && !stranded) {
         // Not enclosed — skip dig (and the Khuong roll). Grain
         // pickup is still allowed below; that's a different
         // behaviour and works fine on open ground.
@@ -1897,7 +1919,16 @@ export function step(
       // single air cell (above), digging it extends DOWN — boost.
       // If the target sits beside an air cell (left/right), digging
       // it extends laterally — penalty.
-      const target = adjacentSoil(world, ax, ay, h);
+      //
+      // For the surface-stranded bypass we force the target to be
+      // directly below the ant: heading on the surface is usually
+      // horizontal (random walk along the surface), so adjacentSoil
+      // would pick a lateral mound cell most of the time. The whole
+      // point of the bypass is to drill DOWN through intact ground,
+      // so we override.
+      const target = stranded && neighbourSoil < 2
+        ? { x: ax, y: ay + 1 }
+        : adjacentSoil(world, ax, ay, h);
       if (target !== null) {
         const tW = world.width;
         const tx = target.x;
@@ -1915,7 +1946,15 @@ export function step(
         // response: a buried entrance accumulates alarm, surface
         // ants pile in and excavate through.
         const alarmBoost = 1 + Math.min(2, alarmHere * 8);
-        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus * dirBonus * digMult * alarmBoost) {
+        // Stranded throttle. The stranded trigger fires every WANDER
+        // tick on the surface (not just on hitSoil), so the per-tick
+        // dig probability would be ~50× higher than a normal contact
+        // event without dampening. 0.02 brings the effective surface
+        // dig rate down to a few cells per second wall at 8× speed —
+        // enough for the colony to recover from a sealed entrance,
+        // not so much that the surface turns into Swiss cheese.
+        const strandedMult = stranded && !hitSoil && !entombed ? 0.02 : 1.0;
+        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus * dirBonus * digMult * alarmBoost * strandedMult) {
           if (digCell(world, target.x, target.y, rng)) {
             // Track dig direction relative to the digger's cell, so
             // the diag can surface a vertical-vs-lateral histogram.
