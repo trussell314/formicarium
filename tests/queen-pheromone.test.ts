@@ -105,6 +105,10 @@ describe('queen pheromone', () => {
     // stays near her starting value — only the small turnNoise +
     // geotaxis perturb it. Compare to the nurse delta to confirm
     // the field is the only thing pulling her around.
+    //
+    // Pad the colony to >= 30 workers so the small-colony override
+    // (which forces queen attendance regardless of age in tiny
+    // colonies) doesn't fire. We test the AGE gate in isolation.
     const rng = new RNG(3);
     const w = chamberWorld();
     const f = fields(w);
@@ -113,9 +117,15 @@ describe('queen pheromone', () => {
         f.queen.deposit(x, 18, (x - 10) / 40);
       }
     }
-    const colony = new Colony(1);
+    const colony = new Colony(40);
     colony.spawn(20.5, 18.5, Math.PI, rng, { ...NURSE_TRAITS, turnNoise: 0 });
     colony.age[0] = HARVESTER.matureAge * 2; // ageFrac saturates at 1
+    // Pad with 35 dummy WANDER workers so aliveWorkers >= 30. They
+    // sit out of the gradient (column 5, far from the deposit) so
+    // they don't perturb the test ant.
+    for (let k = 0; k < 35; k++) {
+      colony.spawn(5.5, 18.5, 0, rng, NURSE_TRAITS);
+    }
     const headingStart = colony.heading[0]!;
     step(w, colony, f.dig, f.build, rng, DEFAULT_PARAMS, undefined, QUIET, undefined, undefined, f.queen);
     const headingForager = colony.heading[0]!;

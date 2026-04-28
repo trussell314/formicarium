@@ -79,12 +79,21 @@ describe('REST exit transition', () => {
     const rng = new RNG(2);
     const w = flatWorld();
     w.tick = 3600; // noon — daylight=1 so the diurnal gate doesn't suppress forage (DAY_TICKS = 7200)
-    const colony = new Colony(1);
+    const colony = new Colony(40);
     colony.spawn(20.5, 15.5, 0, rng, {
       digProb: 0, pickProb: 0, stigmergy: 0, turnNoise: 0, restThreshold: 100,
     });
     colony.state[0] = STATE_REST;
     colony.stateTicks[0] = 0;
+    // Pad with 35 dummy workers so aliveWorkers >= 30. The small-
+    // colony forage damper (which suppresses sorties when there
+    // are <SMALL_COLONY workers) would otherwise mute the very
+    // forageProb=0.99 we're testing.
+    for (let k = 0; k < 35; k++) {
+      colony.spawn(7.5, 18.5, 0, rng, {
+        digProb: 0, pickProb: 0, stigmergy: 0, turnNoise: 0, restThreshold: 100,
+      });
+    }
     const f = fields(w);
     const params = { ...DEFAULT_PARAMS, restDuration: 1 };
     // Use a custom species with very high forageProb so ONE tick of

@@ -544,6 +544,24 @@ export function step(
   const { walkSpeed, geotaxis, digDeposit, buildDeposit } = params;
   const subSteps = Math.max(2, Math.ceil(walkSpeed));
   const stepLen = walkSpeed / subSteps;
+  // Count alive non-brood workers for colony-size-dependent caste
+  // gating. Wilson's polyethism research: in small colonies all
+  // workers act as multi-purpose generalists; specialisation
+  // (forager-vs-nurse) emerges only in larger colonies. We use this
+  // below to bypass the nurse-only `ageFrac < 0.5` gate on queen-
+  // and brood-pheromone bias when the colony is below SMALL_COLONY,
+  // so even old workers attend the queen when she'd otherwise be
+  // alone. Counting is O(N) per tick but N is small at the regime
+  // where this matters.
+  let aliveWorkers = 0;
+  for (let i = 0; i < colony.count; i++) {
+    const s = colony.state[i]!;
+    if (s !== STATE_DEAD && s !== STATE_EGG && s !== STATE_LARVA && s !== STATE_QUEEN) {
+      aliveWorkers++;
+    }
+  }
+  const SMALL_COLONY = 30;
+  const isSmallColony = aliveWorkers < SMALL_COLONY;
 
   // Collision pass — Aguilar et al. 2018 / Aina et al. 2023 "agitation"
   // model. Each ant's collisionCount decays each tick and is bumped
@@ -1636,8 +1654,19 @@ export function step(
     // al.; the age-modulation was reverted (see comment at age++
     // above). Diurnal species (HARVESTER) only roll at daylight;
     // nocturnal species at darkness — see `forageActivity` above.
+    // Small-colony forage damper. With only a handful of workers
+    // alive, sending any of them outside on a foraging trip leaves
+    // the queen unattended (no trophallaxis donor, no brood-pile
+    // assistance). Real Pogonomyrmex founding colonies foraging at
+    // this scale show 1-2 trips/day rather than the steady-state
+    // sortie rate. Scale forageProb down sharply when aliveWorkers
+    // is below SMALL_COLONY: 0.05× at 5 workers ramping linearly to
+    // full rate at SMALL_COLONY=30.
+    const smallForageMult = isSmallColony
+      ? Math.max(0.05, aliveWorkers / SMALL_COLONY)
+      : 1.0;
     if (stateIn === STATE_WANDER && iy >= world.naturalSurface[ix]! &&
-        rng.next() < species.forageProb * forageActivity * forageMult) {
+        rng.next() < species.forageProb * forageActivity * forageMult * smallForageMult) {
       colony.setState(i, STATE_FORAGE);
       colony.collisionCount[i] = 0;
       // Heading reset toward the surface so the trip starts in the
@@ -1696,20 +1725,26 @@ export function step(
     // young WANDER worker who's also responding to a dig front still
     // gets some queen-ward bias, just not as strongly as a nurse
     // sitting in the broodpile. Older workers (forager caste, ageFrac
-    // ≥ 0.5) ignore the field entirely — they have other jobs.
-    // Result is the broodpile crowd that real Pogonomyrmex queens
-    // are surrounded by, and reliable trophallaxis-driven queen
-    // feeding without needing explicit attendant orientation code.
-    if (
-      stateIn === STATE_WANDER && queenField &&
-      ageFrac < 0.5
-    ) {
+    // ≥ 0.5) normally ignore the field — they have other jobs.
+    //
+    // Small-colony override: when fewer than SMALL_COLONY workers
+    // are alive, ALL workers participate in attendance regardless
+    // of age. Wilson's polyethism research: small colonies don't
+    // have specialised castes — every worker is a generalist.
+    // Without this override the queen sits alone in failing
+    // colonies because the few remaining workers happen to be old
+    // and "specialised" out of nurse duty.
+    const queenAttend = stateIn === STATE_WANDER && (isSmallColony || ageFrac < 0.5);
+    if (queenAttend && queenField) {
       const qGrad = queenField.gradient(ix, iy);
       const qMag = Math.hypot(qGrad.dx, qGrad.dy);
       if (qMag > 1e-6) {
         const want = Math.atan2(qGrad.dy, qGrad.dx);
-        // Linear ramp: full strength at ageFrac=0, zero at 0.5.
-        const nurseWeight = 1 - ageFrac * 2;
+        // Linear ramp from ageFrac=0 to 0.5. Small-colony floor at
+        // 0.6 keeps old generalist workers attending firmly.
+        const nurseWeight = isSmallColony
+          ? Math.max(0.6, 1 - ageFrac * 2)
+          : 1 - ageFrac * 2;
         h += wrapAngle(want - h) * colony.stigmergy[i]! * 0.6 * nurseWeight;
       }
     }
@@ -1719,16 +1754,15 @@ export function step(
     // result is attendant traffic toward whichever signal is
     // strongest locally. Ensures larvae receive trophallaxis even
     // when their thermoregulation has carried them far from the
-    // queen's chamber.
-    if (
-      stateIn === STATE_WANDER && broodField &&
-      ageFrac < 0.5
-    ) {
+    // queen's chamber. Small-colony override applies the same way.
+    if (queenAttend && broodField) {
       const bGrad = broodField.gradient(ix, iy);
       const bMag = Math.hypot(bGrad.dx, bGrad.dy);
       if (bMag > 1e-6) {
         const want = Math.atan2(bGrad.dy, bGrad.dx);
-        const nurseWeight = 1 - ageFrac * 2;
+        const nurseWeight = isSmallColony
+          ? Math.max(0.6, 1 - ageFrac * 2)
+          : 1 - ageFrac * 2;
         h += wrapAngle(want - h) * colony.stigmergy[i]! * 0.6 * nurseWeight;
       }
     }
