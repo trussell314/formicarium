@@ -593,19 +593,19 @@ export function step(
   // self-pace this via local crowding feedback (workers brushing
   // mandibles with other carriers reduce their own dig roll). We
   // approximate with a colony-level multiplier on dig probability:
-  //   ratio < 0.3:  full dig rate (1.0)
-  //   0.3 → 0.5:    linear taper 1.0 → 0
-  //   ≥ 0.5:        0.0 — no more digs until the queue clears
-  // Empirical: a soft taper at higher ratios lets equilibrium
-  // settle around 80% carriers because each deposit is matched by
-  // a fresh dig at the still-permitted rate. A hard cliff at 50%
-  // forces the equilibrium down to 50% — the colony can resume
-  // digging only after enough deposits have cleared the queue.
+  //   ratio < 0.5:  full dig rate (1.0)
+  //   0.5 → 0.7:    linear taper 1.0 → 0
+  //   ≥ 0.7:        0.0 — no more digs until the queue clears
+  // Empirical: at the original 30/50 thresholds the colony stopped
+  // building after ~50 cells were excavated because the throttle
+  // fired even at modest carrier ratios. Healthy P. barbatus
+  // colonies typically run 40-60% of workers in transport at any
+  // moment; leaving room there for ongoing excavation.
   const carryRatio = aliveWorkers > 0 ? carriers / aliveWorkers : 0;
   let carrySaturation: number;
-  if (carryRatio >= 0.5) carrySaturation = 0;
-  else if (carryRatio <= 0.3) carrySaturation = 1;
-  else carrySaturation = 1 - (carryRatio - 0.3) / 0.2;
+  if (carryRatio >= 0.7) carrySaturation = 0;
+  else if (carryRatio <= 0.5) carrySaturation = 1;
+  else carrySaturation = 1 - (carryRatio - 0.5) / 0.2;
 
   // Collision pass — Aguilar et al. 2018 / Aina et al. 2023 "agitation"
   // model. Each ant's collisionCount decays each tick and is bumped

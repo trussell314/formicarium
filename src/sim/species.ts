@@ -334,8 +334,8 @@ export const HARVESTER: AntSpecies = {
   // 1990 Ch. 13). 3 weeks real / 100 = 5.04 hr bio = 18,144 sec
   // bio = 151,200 ticks. metabolism = 1 / 151,200 ≈ 6.6e-6.
   metabolism: 6.6e-6,
-  foodValue: 0.4,         // 1 seed restores ~40% — multiple seeds for full recovery
-  hungerThreshold: 0.6,   // ants seek food below 60%
+  foodValue: 0.6,         // 1 seed restores ~60% — refills more in one meal
+  hungerThreshold: 0.85,  // eat early; small colonies starve at 0.6 because
 
   // ── Age polyethism ───────────────────────────────────────────
   // Same magnitude as surface-funnel and CARRY upward geotaxis (0.35).
@@ -367,7 +367,11 @@ export const HARVESTER: AntSpecies = {
   // 100× compressed: 6.6e-6 × 15 ≈ 1.0e-4. A neglected larva at
   // 50% energy lasts ~5,000 ticks before starving; a fed one
   // matures in 151k.
-  larvaMetabolism: 1.0e-4,
+  // Larvae cost ~5× a worker (Tschinkel 2006 metabolic measurements);
+  // the previous 15× rate produced an unsustainable energy drain
+  // once the brood pile exceeded ~50 larvae and the colony tipped
+  // into starvation by 200K ticks despite a full granary.
+  larvaMetabolism: 3.0e-5,
   // Pogonomyrmex barbatus mature colonies hold 5,000-10,000 workers
   // (Tschinkel 1998). We cap lower to fit performance/render budget.
   maxColonySize: 1000,
