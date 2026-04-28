@@ -499,7 +499,16 @@ function main(): void {
       const snap = latest;
       const start = settings.ants + 1;
       const dugTotal = snap.cells.length - snap.hud.soilCount - snap.hud.grains;
-      const bioSecs = snap.tick * 0.12;
+      // Bio time conversion. 100× wall-to-bio compression at 1×
+      // speed and TICK_MS = 120 ms wall, so each sim tick advances
+      // 12 sec of biological time (DAY_TICKS = 7200 → 1 bio day =
+      // 86400 sec = 7200 ticks). Earlier the HUD multiplied by
+      // 0.12 (off by 100×) and computed the diel phase against
+      // 720000 — both vestigial from a pre-time-compression
+      // calibration. The sim itself uses world.daylight() which
+      // reads DAY_TICKS directly and was always correct; only the
+      // HUD label was out of sync.
+      const bioSecs = snap.tick * 12;
       const bioDays = Math.floor(bioSecs / 86400);
       const bioHours = Math.floor((bioSecs / 3600) % 24);
       const bioMins = Math.floor((bioSecs / 60) % 60);
@@ -509,7 +518,7 @@ function main(): void {
         : bioHours > 0
           ? `${bioHours}h ${bioMins}m ${bioSecsR}s`
           : `${bioMins}m ${bioSecsR}s`;
-      const dayPhase = (snap.tick % 720000) / 720000;
+      const dayPhase = (snap.tick % 7200) / 7200;
       const phaseLabel =
         dayPhase < 0.20 ? 'night'
           : dayPhase < 0.30 ? 'dawn'
