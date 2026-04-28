@@ -87,13 +87,14 @@ describe('brood: queen', () => {
     const w = makeWorld();
     const colony = new Colony(50);
     const qi = spawnQueen(colony, rng);
-    // Queen drains energy at 0.05× the species metabolism rate; bump
-    // to 0.5 so 50 ticks of drain (= 1.25 energy) crashes her below
-    // zero. Worker rate would have killed her in 10 ticks here, but
-    // queens are tougher by design.
-    const fastDeath: AntSpecies = { ...HARVESTER, metabolism: 0.5 };
+    // Queen drains energy at a tapered rate: 0.02× metabolism while
+    // energy ≥ 0.5, 0.05× below that. Bump metabolism high so 200
+    // ticks crashes her: phase 1 = 100 ticks × (2.0 × 0.02) = 4.0
+    // would deplete past 0.5; phase 2 takes the rest below zero.
+    // Queens are tougher than workers by design.
+    const fastDeath: AntSpecies = { ...HARVESTER, metabolism: 2.0 };
     const { dig, build } = fields(w);
-    for (let t = 0; t < 50; t++) {
+    for (let t = 0; t < 200; t++) {
       step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, fastDeath);
       if (colony.state[qi] === STATE_DEAD) break;
     }
@@ -201,7 +202,8 @@ describe('brood: egg maturation', () => {
       ...HARVESTER,
       eggLayInterval: 50,
       eggMatureTicks: 100,    // egg → larva
-      larvaMatureTicks: 100,  // larva → adult
+      larvaMatureTicks: 100,  // larva → pupa
+      pupaMatureTicks: 50,    // pupa → adult
       larvaMetabolism: 0,     // no starvation in this test
     };
     const { dig, build } = fields(w);
@@ -351,6 +353,7 @@ describe('brood: lifecycle counters', () => {
       eggLayInterval: 30,
       eggMatureTicks: 60,
       larvaMatureTicks: 60,
+      pupaMatureTicks: 30,
       larvaMetabolism: 0, // never starve in this test
     };
     const { dig, build } = fields(w);
@@ -393,17 +396,21 @@ describe('brood: lifecycle counters', () => {
       eggLayInterval: 50,
       eggMatureTicks: 50,
       larvaMatureTicks: 50,
+      pupaMatureTicks: 30,
       larvaMetabolism: 0,
     };
     for (let t = 0; t < 1000; t++) {
       step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, fast);
     }
     // alive_adults = workers (STATE_WANDER..CARRY_FOOD) + queen.
-    // Excludes brood (STATE_EGG, STATE_LARVA) and STATE_DEAD.
+    // Excludes brood (STATE_EGG, STATE_LARVA, STATE_PUPA) and STATE_DEAD.
     let aliveAdults = 0;
     for (let i = 0; i < colony.count; i++) {
       const s = colony.state[i];
-      if (s === STATE_DEAD || s === 7 /* STATE_EGG */ || s === 9 /* STATE_LARVA */) continue;
+      if (s === STATE_DEAD
+          || s === 7 /* STATE_EGG */
+          || s === 9 /* STATE_LARVA */
+          || s === 10 /* STATE_PUPA */) continue;
       aliveAdults++;
     }
     expect(aliveAdults).toBe(start + w.totalBorn - w.totalDied);

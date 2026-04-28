@@ -60,8 +60,18 @@ export const STATE_NECRO_CARRY = 8;
  *  into the late-larva stage so there's only one transition to
  *  manage between hatching and the worker debut. */
 export const STATE_LARVA = 9;
+/** Pupa. Stationary cocoon stage between LARVA and adult worker.
+ *  Real Pogonomyrmex pupae form ~1 week into development and emerge
+ *  ~2 weeks later as workers (Hölldobler & Wilson 1990 Ch. 9).
+ *  Pupae don't feed (no trophallaxis) and are visually small white
+ *  oblongs in the brood pile — a distinct shape from the soft larval
+ *  grub. We give them their own state so the renderer can draw them
+ *  separately and the maturation pipeline transitions LARVA → PUPA
+ *  → adult on the same ageTicks-driven schedule the egg→larva
+ *  hatch already uses. */
+export const STATE_PUPA = 10;
 
-export type AntState = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+export type AntState = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
 export class Colony {
   count = 0;

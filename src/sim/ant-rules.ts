@@ -39,8 +39,8 @@
 
 import {
   Colony, STATE_CARRY, STATE_CARRY_FOOD, STATE_DEAD, STATE_EGG,
-  STATE_FORAGE, STATE_LARVA, STATE_NECRO_CARRY, STATE_QUEEN,
-  STATE_REST, STATE_WANDER, type AntState,
+  STATE_FORAGE, STATE_LARVA, STATE_NECRO_CARRY, STATE_PUPA,
+  STATE_QUEEN, STATE_REST, STATE_WANDER, type AntState,
 } from './colony';
 import type { ParticleSystem } from './particles';
 import { Pheromone, uploadPheromoneCells } from './pheromone';
@@ -290,7 +290,7 @@ export function step(
     let demand = 0;
     for (let i = 0; i < colony.count; i++) {
       const s = colony.state[i];
-      if (s === STATE_DEAD || s === STATE_EGG) continue;
+      if (s === STATE_DEAD || s === STATE_EGG || s === STATE_PUPA) continue;
       if (s === STATE_LARVA) {
         demand += species.larvaMetabolism;
       } else if (s === STATE_QUEEN) {
@@ -556,7 +556,8 @@ export function step(
   let aliveWorkers = 0;
   for (let i = 0; i < colony.count; i++) {
     const s = colony.state[i]!;
-    if (s !== STATE_DEAD && s !== STATE_EGG && s !== STATE_LARVA && s !== STATE_QUEEN) {
+    if (s !== STATE_DEAD && s !== STATE_EGG && s !== STATE_LARVA
+        && s !== STATE_PUPA && s !== STATE_QUEEN) {
       aliveWorkers++;
     }
   }
@@ -633,8 +634,8 @@ export function step(
             // into REST (workers crowd the brood pile by design,
             // not by congestion). Larvae and queens have no REST
             // state of their own.
-            const stationaryI = stI === STATE_QUEEN || stI === STATE_LARVA;
-            const stationaryJ = stJ === STATE_QUEEN || stJ === STATE_LARVA;
+            const stationaryI = stI === STATE_QUEEN || stI === STATE_LARVA || stI === STATE_PUPA;
+            const stationaryJ = stJ === STATE_QUEEN || stJ === STATE_LARVA || stJ === STATE_PUPA;
             if (!stationaryI && !stationaryJ) {
               colony.collisionCount[i]! += 1;
               colony.collisionCount[j]! += 1;
@@ -880,8 +881,30 @@ export function step(
         }
         continue;
       }
-      // Maturation: enough fed-and-growing time → adult worker.
+      // Maturation: enough fed-and-growing time → pupa stage.
+      // Real Pogonomyrmex larvae spin a cocoon and pupate before
+      // emerging as adults; we route through STATE_PUPA so the
+      // renderer shows a distinct cocoon shape and the ~2-week
+      // pupal window is visible in the brood pile rather than
+      // being hidden in the larva timer.
       if (colony.stateTicks[i]! >= species.larvaMatureTicks) {
+        colony.setState(i, STATE_PUPA);
+        // Pupae don't drain energy through metabolism; reset to a
+        // healthy reserve so the maturation timer can run cleanly.
+        colony.energy[i] = species.maxEnergy;
+      }
+      continue;
+    }
+
+    // Pupa. Stationary cocoon: no movement, no metabolism drain, no
+    // trophallaxis. Just runs the maturation timer and emerges as
+    // an adult worker once pupaMatureTicks have elapsed. Renderer
+    // shows them as small white oblongs in the brood pile.
+    if (stateNow === STATE_PUPA) {
+      colony.prevX[i] = colony.posX[i]!;
+      colony.prevY[i] = colony.posY[i]!;
+      colony.stateTicks[i]!++;
+      if (colony.stateTicks[i]! >= species.pupaMatureTicks) {
         colony.setState(i, STATE_WANDER);
         colony.energy[i] = species.maxEnergy;
         colony.heading[i] = rng.range(0, Math.PI * 2);
@@ -974,7 +997,16 @@ export function step(
           queenField.deposit(qx, qy, 0.10);
         }
       }
-      colony.energy[i]! -= species.metabolism * 0.05;
+      // Queen energy drain. Real Pogonomyrmex queens have wing-
+      // muscle reserves (Tschinkel 2006) that buffer them through
+      // the founding phase. We model this as a tapered drain:
+      // when energy ≥ 0.5 the queen draws on her reserve at 0.02×
+      // metabolism (very slow), only ramping to the original
+      // 0.05× when she's running low. This keeps a queen with
+      // unreliable trophallaxis attendance alive long enough for
+      // brood to mature without being trivially immortal.
+      const drain = colony.energy[i]! >= 0.5 ? 0.02 : 0.05;
+      colony.energy[i]! -= species.metabolism * drain;
       if (colony.energy[i]! <= 0) {
         // Queen death → colony doom. We mark her STATE_DEAD just
         // like a worker; brood production stops and the colony
@@ -1054,8 +1086,23 @@ export function step(
     // by old age. With egg → larva → adult brood now in, workers
     // are continuously replaced and the cohort balance is stable.
     const ageFrac = Math.min(1, colony.age[i]! / species.matureAge);
-    const geoMult = Math.max(0.3, 1.0 - 0.7 * ageFrac);
-    const forageMult = Math.max(0.1, Math.min(1.5, 1.5 * ageFrac));
+    // Sigmoid-stepped polyethism plateaus. Real Pogonomyrmex caste
+    // transitions (Mirenda & Vinson 1981; Tschinkel 2006) aren't
+    // smooth ramps — workers spend ~weeks on each role, then
+    // transition over a ~few-day window. Soft sigmoids (logistic-
+    // like) reproduce that better than the previous linear ramps:
+    // each multiplier saturates inside its caste age range and
+    // transitions sharply between phases. Centres at ageFrac
+    // 0.3 (nurse → cleaner) and 0.65 (cleaner → forager) match
+    // the published age-band proportions.
+    const sig = (x: number, c: number, k: number): number =>
+      1 / (1 + Math.exp(-k * (x - c)));
+    // geoMult: 1.0 (young, dives deep with brood) → 0.3 (old,
+    // shallow / outside). Centre 0.5, fairly sharp.
+    const geoMult = 1.0 - 0.7 * sig(ageFrac, 0.5, 8);
+    // forageMult: 0.1 (young) → 1.5 (old). Centre 0.65 — foraging
+    // is the late-life specialty.
+    const forageMult = 0.1 + 1.4 * sig(ageFrac, 0.65, 10);
     // Bell curve: 0.7 at the extremes, 1.5 at middle age. Floor of
     // 0.7 (rather than the more aggressive 0.5 originally tried)
     // keeps dig productivity from collapsing at age=0; the
@@ -1689,8 +1736,27 @@ export function step(
     // (most workers are stuck in CARRY) into FORAGE that the
     // colony can starve while sitting on a pile of seeds.
     const foodVisibleBoost = world.foodCountCached > 0 ? 5.0 : 1.0;
+    // Starvation emergency. When average alive worker energy drops
+    // below 0.4 the colony is in real trouble — half of the workers
+    // are running on fumes and the queen's drain is starting to
+    // outpace incoming trophallaxis. Real colonies respond to
+    // crises by mobilising more foragers (Gordon 2010, Ch. 5
+    // discusses the "tactile" recruitment cascade triggered by
+    // hungry workers' antennation rate). Boost forage rolls 3×
+    // until the average recovers. Computed lazily per tick from
+    // the same loop that already needed alive counts; effectively
+    // free.
+    let totalEnergy = 0, energyN = 0;
+    for (let i = 0; i < colony.count; i++) {
+      const s = colony.state[i]!;
+      if (s === STATE_DEAD || s === STATE_EGG || s === STATE_LARVA || s === STATE_QUEEN) continue;
+      totalEnergy += colony.energy[i]!;
+      energyN++;
+    }
+    const avgEnergy = energyN > 0 ? totalEnergy / energyN : 1;
+    const starvationBoost = avgEnergy < 0.4 ? 3.0 : 1.0;
     if (stateIn === STATE_WANDER && iy >= world.naturalSurface[ix]! &&
-        rng.next() < species.forageProb * forageActivity * forageMult * smallForageMult * foodVisibleBoost) {
+        rng.next() < species.forageProb * forageActivity * forageMult * smallForageMult * foodVisibleBoost * starvationBoost) {
       colony.setState(i, STATE_FORAGE);
       colony.collisionCount[i] = 0;
       // Heading reset toward the surface so the trip starts in the
@@ -1758,7 +1824,17 @@ export function step(
     // Without this override the queen sits alone in failing
     // colonies because the few remaining workers happen to be old
     // and "specialised" out of nurse duty.
-    const queenAttend = stateIn === STATE_WANDER && (isSmallColony || ageFrac < 0.5);
+    // Brood attendance gate. Real Pogonomyrmex polyethism is gradual,
+    // not stepped — Mirenda & Vinson 1981 show middle-aged workers
+    // (ageFrac 0.5-0.8) still drop in on the broodpile occasionally
+    // before transitioning fully to forager. Gate now includes a
+    // probabilistic mid-age component: 80% pass at ageFrac=0.5,
+    // 20% pass at 0.7, ~0 at ageFrac >= 0.8. Below 0.5 always
+    // attends. Small colonies (already a separate gate) override
+    // this entirely and put all workers on attendance duty.
+    const midAgeAttend = ageFrac >= 0.5 && ageFrac < 0.8
+      && rng.next() < (0.8 - (ageFrac - 0.5) * 2.6);
+    const queenAttend = stateIn === STATE_WANDER && (isSmallColony || ageFrac < 0.5 || midAgeAttend);
     if (queenAttend && queenField) {
       const qGrad = queenField.gradient(ix, iy);
       const qMag = Math.hypot(qGrad.dx, qGrad.dy);
@@ -2142,7 +2218,14 @@ export function step(
         // enough for the colony to recover from a sealed entrance,
         // not so much that the surface turns into Swiss cheese.
         const strandedMult = stranded && !hitSoil && !entombed ? 0.02 : 1.0;
-        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus * dirBonus * digMult * alarmBoost * strandedMult) {
+        // Founding boost. Real foundress colonies excavate their
+        // claustral chamber within hours of nuptial flight (Tschinkel
+        // 2006). Without help our 5-ant scenario produced 3 cells of
+        // dug nest in 30K ticks. Bump dig probability while the
+        // colony is below SMALL_COLONY so the chamber opens up
+        // before workers age into foragers and abandon excavation.
+        const foundingBoost = isSmallColony ? 3.0 : 1.0;
+        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus * dirBonus * digMult * alarmBoost * strandedMult * foundingBoost) {
           if (digCell(world, target.x, target.y, rng)) {
             // Track dig direction relative to the digger's cell, so
             // the diag can surface a vertical-vs-lateral histogram.
@@ -2447,7 +2530,8 @@ export function step(
   // properly.
   for (let i = 0; i < colony.count; i++) {
     const sG = colony.state[i];
-    if (sG === STATE_DEAD || sG === STATE_QUEEN || sG === STATE_EGG || sG === STATE_LARVA) continue;
+    if (sG === STATE_DEAD || sG === STATE_QUEEN || sG === STATE_EGG
+        || sG === STATE_LARVA || sG === STATE_PUPA) continue;
     const sx = colony.posX[i]! | 0;
     const sy = colony.posY[i]! | 0;
     const settled = settle(world, sx, sy);

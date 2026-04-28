@@ -321,12 +321,30 @@ export function pickGrain(world: World, x: number, y: number, rng: RNG): number 
   // (potentially sliding diagonally), and the next iteration's
   // grain then falls through the freshly-vacated cell. Track all
   // touched columns for the mound recompute.
+  //
+  // Adjacent columns also need re-cascade: a grain at (x±1, y-1)
+  // may have used the picked-up cell as its diagonal-down support,
+  // and now that the support is gone it could slide into the void.
+  // Without this an aggressive dig/pickup cycle leaves grains
+  // hanging on row y-1 with AIR below — sandpile invariant fails.
   const touched = new Set<number>([x]);
   let above = y - 1;
   while (above >= 0 && world.cells[above * world.width + x] === CELL_GRAIN) {
     const final = settleGrain(world, x, above, rng);
     if (final.x !== x) touched.add(final.x);
     above--;
+  }
+  if (y > 0) {
+    for (const dx of [-1, 1] as const) {
+      const cx = x + dx;
+      if (cx < 0 || cx >= world.width) continue;
+      const cIdx = (y - 1) * world.width + cx;
+      if (world.cells[cIdx] === CELL_GRAIN) {
+        const final = settleGrain(world, cx, y - 1, rng);
+        touched.add(cx);
+        if (final.x !== cx) touched.add(final.x);
+      }
+    }
   }
   for (const col of touched) recomputeMound(world, col);
   return moves;

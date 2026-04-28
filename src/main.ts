@@ -536,14 +536,28 @@ function main(): void {
       hudEls.colony.textContent =
         `${snap.hud.alive} alive (start ${start}, +${snap.hud.totalBorn} −${snap.hud.totalDied})`;
       hudEls.brood.textContent =
-        `Q ${snap.hud.queens} · ${snap.hud.eggs} eggs · ${snap.hud.larvae} larvae`;
+        `Q ${snap.hud.queens} · ${snap.hud.eggs}E · ${snap.hud.larvae}L · ${snap.hud.pupae}P`;
       hudEls.nest.textContent =
-        `${snap.hud.nestVol} cells · depth ${snap.hud.maxDepth} · dug ${dugTotal}`;
+        `${snap.hud.nestVol} cells · depth ${snap.hud.maxDepth} · ${snap.hud.chambers} ch · dug ${dugTotal}`;
       hudEls.res.textContent =
         `${snap.hud.grains} grains · ${snap.hud.foodCount} seeds`;
       hudEls.time.textContent =
         `t=${snap.tick.toLocaleString()} · ${bioTime} · ${phaseLabel}`;
-      const flag = paused ? ' · PAUSED' : extinct ? ' · EXTINCT — press r' : '';
+      // Status flag. Priority: PAUSED > EXTINCT > STARVING. Below
+      // 0.4 mean worker energy the colony is in real trouble — half
+      // the workers are running on fumes and trophallaxis can't
+      // keep up. Surfacing this earlier than EXTINCT lets the user
+      // notice a slow collapse before it's too late to intervene.
+      const starving = !paused && !extinct
+        && snap.hud.alive > 0
+        && snap.hud.meanWorkerEnergy < 0.4;
+      const flag = paused
+        ? ' · PAUSED'
+        : extinct
+          ? ' · EXTINCT — press r'
+          : starving
+            ? ' · STARVING'
+            : '';
       hudEls.speed.textContent = speedDisplay + flag;
       // Worker breakdown — letter codes match the diag conventions.
       // W=wander, C=carry-grain, R=rest, F=forage, Cf=carry-food,

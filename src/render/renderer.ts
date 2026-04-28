@@ -9,7 +9,7 @@
 
 import {
   STATE_CARRY, STATE_CARRY_FOOD, STATE_DEAD, STATE_EGG, STATE_FORAGE, STATE_LARVA,
-  STATE_NECRO_CARRY, STATE_QUEEN, STATE_REST,
+  STATE_NECRO_CARRY, STATE_PUPA, STATE_QUEEN, STATE_REST,
 } from '../sim/colony';
 import { CELL_AIR, CELL_SOIL } from '../sim/world';
 import { GLTerrainRenderer } from './gl-terrain';
@@ -731,6 +731,29 @@ export class Renderer {
         this.ctx.beginPath();
         this.ctx.ellipse(lx, ly, radius * 0.65, radius * 0.4, 0, 0, Math.PI * 2);
         this.ctx.fill();
+        continue;
+      }
+      // Pupa — slightly oblong cocoon, pale ivory with a faint
+      // dorsal seam. Smaller than a fully-fed larva (real pupae
+      // shed water during metamorphosis), and the seam shows the
+      // worker outline forming inside. Vertical orientation
+      // because real pupae are stacked head-up in the brood pile.
+      if (state === STATE_PUPA) {
+        const px2 = ox + colony.posX[i]! * scale;
+        const py2 = oy + colony.posY[i]! * scale;
+        this.ctx.fillStyle = 'rgb(245, 240, 220)';
+        this.ctx.beginPath();
+        this.ctx.ellipse(px2, py2, radius * 0.40, radius * 0.62, 0, 0, Math.PI * 2);
+        this.ctx.fill();
+        // Dorsal seam: narrow darker line down the centre showing
+        // the developing worker. Subtle so the cocoon still reads
+        // as ivory at small zoom.
+        this.ctx.strokeStyle = 'rgba(180, 160, 130, 0.6)';
+        this.ctx.lineWidth = Math.max(0.5, scale * 0.05);
+        this.ctx.beginPath();
+        this.ctx.moveTo(px2, py2 - radius * 0.45);
+        this.ctx.lineTo(px2, py2 + radius * 0.45);
+        this.ctx.stroke();
         continue;
       }
 

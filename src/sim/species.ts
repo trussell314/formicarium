@@ -114,6 +114,10 @@ export interface AntSpecies {
    *  Ch. 9). The larval period is ~2× the egg period in real
    *  Pogonomyrmex. */
   readonly larvaMatureTicks: number;
+  /** Ticks a pupa spends in the cocoon stage between LARVA and
+   *  adult worker. ~1-2 weeks for real Pogonomyrmex; we collapse
+   *  to a fixed window. Pupae don't feed and don't move. */
+  readonly pupaMatureTicks: number;
   /** Per-tick basal-metabolism drain for a larva. Higher than
    *  worker metabolism because larvae are growing tissue rapidly
    *  rather than maintaining mature soma. With no feeding, a
@@ -358,6 +362,7 @@ export const HARVESTER: AntSpecies = {
   // Real larva → adult: ~3 weeks → 100× compressed = 5.04 hr bio =
   // 151,200 ticks. Total brood time = 201,600 ticks ≈ 6.7 hr bio.
   larvaMatureTicks: 151200,
+  pupaMatureTicks: 100800, // ~14 days bio at 100× compression
   // Larvae burn ~15× faster than adult workers (growing tissue).
   // 100× compressed: 6.6e-6 × 15 ≈ 1.0e-4. A neglected larva at
   // 50% energy lasts ~5,000 ticks before starving; a fed one

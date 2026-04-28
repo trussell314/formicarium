@@ -68,10 +68,12 @@ describe('larva stage', () => {
     colony.energy[0] = 1.0;
     const fast: AntSpecies = {
       ...HARVESTER, eggMatureTicks: 9999, larvaMatureTicks: 50,
+      pupaMatureTicks: 20,
       larvaMetabolism: 0,
     };
     const { dig, build } = fields(w);
-    for (let t = 0; t < 80; t++) step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, fast);
+    // Run long enough to clear larva → pupa → adult.
+    for (let t = 0; t < 100; t++) step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, fast);
     expect(colony.state[0]).toBe(STATE_WANDER);
     // Slightly less than maxEnergy after a few adult-metabolism
     // ticks following maturation; close-to is fine.

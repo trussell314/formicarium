@@ -211,8 +211,9 @@ function buildSnapshot(includePheromones: boolean): RenderSnapshot {
   const { world, colony, particles, species } = bundle;
   // Aggregated HUD counters + 8-bucket histograms over alive
   // non-queen ants for age and energy distribution charts.
-  let alive = 0, dead = 0, eggs = 0, larvae = 0, queens = 0;
+  let alive = 0, dead = 0, eggs = 0, larvae = 0, pupae = 0, queens = 0;
   let wander = 0, carry = 0, rest = 0, forage = 0, carryFood = 0, necroCarry = 0;
+  let workerEnergySum = 0, workerEnergyN = 0;
   const ageBuckets = new Uint16Array(8);
   const energyBuckets = new Uint16Array(8);
   const ageCap = species.matureAge * 1.5;
@@ -221,6 +222,7 @@ function buildSnapshot(includePheromones: boolean): RenderSnapshot {
     if (s === STATE_DEAD) { dead++; continue; }
     if (s === STATE_EGG) { eggs++; continue; }
     if (s === STATE_LARVA) { larvae++; continue; }
+    if (s === 10 /* STATE_PUPA */) { pupae++; continue; }
     if (s === STATE_QUEEN) { queens++; continue; }
     // Adult worker breakdown.
     if (s === 0 /* WANDER */) wander++;
@@ -234,7 +236,10 @@ function buildSnapshot(includePheromones: boolean): RenderSnapshot {
     ageBuckets[ageBucket]!++;
     const energyBucket = Math.min(7, Math.max(0, Math.floor((colony.energy[i]! / species.maxEnergy) * 8)));
     energyBuckets[energyBucket]!++;
+    workerEnergySum += colony.energy[i]!;
+    workerEnergyN++;
   }
+  const meanWorkerEnergy = workerEnergyN > 0 ? workerEnergySum / workerEnergyN : 1;
   alive = colony.count - dead;
   if (alive === 0 && !extinct) extinct = true;
 
@@ -248,14 +253,51 @@ function buildSnapshot(includePheromones: boolean): RenderSnapshot {
   let nestVol = 0, maxDepth = 0;
   const wW = world.width;
   const wH = world.height;
+  // Chamber count: distinct AIR connected components below natural
+  // surface. A single 1-cell-wide passage from surface to a deep
+  // pocket counts as one chamber; a gallery with three lateral
+  // pockets counts as one (all connected). Useful as a colony-size
+  // / nest-architecture metric in the HUD: small numbers (1-3)
+  // imply a young or dysfunctional nest, larger (10+) imply a
+  // proper Pogonomyrmex-style branching gallery. Flood-fill is
+  // O(nestVol) per snapshot; cheap at default world dims.
+  let chambers = 0;
+  const visited = new Uint8Array(wW * wH);
+  // Reusable BFS queue. Sized at the max nest volume (whole world)
+  // so we never reallocate. Each entry is a packed (y * wW + x).
+  const queue = new Int32Array(wW * wH);
   for (let y = 0; y < wH; y++) {
     for (let x = 0; x < wW; x++) {
-      if (world.cells[y * wW + x] !== 0 /* AIR */) continue;
+      const idx = y * wW + x;
+      if (world.cells[idx] !== 0 /* AIR */) continue;
       const sy = world.naturalSurface[x]!;
       if (y < sy) continue;
       nestVol++;
       const d = y - sy;
       if (d > maxDepth) maxDepth = d;
+      // Flood-fill from any below-surface AIR cell that hasn't been
+      // visited yet. Each unvisited start is a new component.
+      if (!visited[idx]) {
+        chambers++;
+        let head = 0, tail = 0;
+        queue[tail++] = idx;
+        visited[idx] = 1;
+        while (head < tail) {
+          const p = queue[head++]!;
+          const py = (p / wW) | 0;
+          const px = p - py * wW;
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+            const nx = px + dx, ny = py + dy;
+            if (nx < 0 || ny < 0 || nx >= wW || ny >= wH) continue;
+            const nIdx = ny * wW + nx;
+            if (visited[nIdx] || world.cells[nIdx] !== 0) continue;
+            const nsy = world.naturalSurface[nx]!;
+            if (ny < nsy) continue;
+            visited[nIdx] = 1;
+            queue[tail++] = nIdx;
+          }
+        }
+      }
     }
   }
 
@@ -299,15 +341,16 @@ function buildSnapshot(includePheromones: boolean): RenderSnapshot {
       trunk: bundle.trunkField.current.slice(),
     } : null,
     hud: {
-      alive, dead, eggs, larvae, queens,
+      alive, dead, eggs, larvae, pupae, queens,
       wander, carry, rest, forage, carryFood, necroCarry,
-      grains, foodCount, nestVol, maxDepth,
+      grains, foodCount, nestVol, maxDepth, chambers,
       foodCap: world.foodCap,
       totalBorn: world.totalBorn,
       totalDied: world.totalDied,
       soilCount,
       ageBuckets,
       energyBuckets,
+      meanWorkerEnergy,
     },
     particles: particles.highWater > 0 ? {
       posX: particles.posX.slice(0, particles.highWater),

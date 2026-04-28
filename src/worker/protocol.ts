@@ -83,6 +83,7 @@ export type RenderSnapshot = {
     dead: number;
     eggs: number;
     larvae: number;
+    pupae: number;
     queens: number;
     // Per-state worker breakdown (W/C/R/F/CF/N — wander/carry/rest/
     // forage/carry-food/necro-carry). Counts are over alive ants
@@ -97,6 +98,9 @@ export type RenderSnapshot = {
     foodCount: number;
     nestVol: number;
     maxDepth: number;
+    /** Distinct connected-component count of below-surface AIR
+     *  cells. 1 = single chamber/shaft, larger = branching nest. */
+    chambers: number;
     foodCap: number;
     totalBorn: number;
     totalDied: number;
@@ -106,6 +110,10 @@ export type RenderSnapshot = {
     // energyBuckets bins across [0, maxEnergy].
     ageBuckets: Uint16Array;
     energyBuckets: Uint16Array;
+    /** Mean energy across alive worker-class ants (excludes queen,
+     *  eggs, larvae). Used by the HUD to surface a STARVING badge
+     *  before the colony tips into extinction. */
+    meanWorkerEnergy: number;
   };
   // Particles snapshot — small, copied verbatim. Renderer uses
   // these directly; null if the sim doesn't run particles.
