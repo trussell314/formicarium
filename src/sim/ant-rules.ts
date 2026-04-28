@@ -2323,9 +2323,24 @@ export function step(
       if (aboveSurface && groundIsIntact && cellIsAir) {
         pDeposit = 1; // surface-mound bootstrap (Tschinkel)
       } else if (!aboveSurface && supportedBelow && cellIsAir) {
-        const localBuild = buildField.sample(px, py);
-        if (localBuild > PILLAR_THRESHOLD) {
-          pDeposit = Math.min(1, localBuild); // Khuong pillar response
+        // Brood/queen exclusion. Real workers keep the queen's
+        // chamber and the broodpile clean — they don't backfill
+        // them with spoil. Without this guard the Khuong pillar-
+        // build feedback runs at the queen's cell whenever build
+        // pheromone happens to be high there, gradually walling
+        // her in. queenField and broodField are both permeable
+        // (diffuse through soil) so they reach nearby tunnels;
+        // a 0.3 threshold matches active-attendance density and
+        // keeps the exclusion zone at roughly the chamber
+        // boundary, not way out into the galleries.
+        const queenHere = queenField ? queenField.sample(px, py) : 0;
+        const broodHere = broodField ? broodField.sample(px, py) : 0;
+        const inSanctum = queenHere > 0.3 || broodHere > 0.3;
+        if (!inSanctum) {
+          const localBuild = buildField.sample(px, py);
+          if (localBuild > PILLAR_THRESHOLD) {
+            pDeposit = Math.min(1, localBuild); // Khuong pillar response
+          }
         }
       }
       if (pDeposit > 0 && rng.next() < pDeposit) {
