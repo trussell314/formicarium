@@ -70,6 +70,49 @@ function main(): void {
 
   const canvas = document.getElementById('screen') as HTMLCanvasElement;
   const hud = document.getElementById('hud') as HTMLDivElement;
+  // Build the static HUD scaffold once. Rows are addressed by id
+  // (.v elements) and updated each render frame by writing
+  // textContent — much cheaper than re-parsing the whole HUD HTML
+  // every 250 ms, and it preserves the minimise toggle state across
+  // updates.
+  hud.innerHTML = `
+    <button id="hud-min" title="minimise / restore">−</button>
+    <div class="row hdr"><span>FORMICARIUM</span><span class="v" id="h-seed"></span></div>
+    <div class="row"><span>colony</span><span class="v" id="h-colony"></span></div>
+    <div class="row"><span>brood</span><span class="v" id="h-brood"></span></div>
+    <div class="row"><span>nest</span><span class="v" id="h-nest"></span></div>
+    <div class="row"><span>resources</span><span class="v" id="h-res"></span></div>
+    <div class="row"><span>time</span><span class="v" id="h-time"></span></div>
+    <div class="row"><span>speed</span><span class="v" id="h-speed"></span></div>
+    <div class="row dim"><span>render</span><span class="v" id="h-fps"></span></div>
+    <div class="legend" id="h-legend">
+      <div><span class="swatch" style="background:#00dcdc"></span>dig</div>
+      <div><span class="swatch" style="background:#dc00dc"></span>build</div>
+      <div><span class="swatch" style="background:#f0dc3c"></span>trail</div>
+      <div><span class="swatch" style="background:#ff1e1e"></span>alarm</div>
+      <div><span class="swatch" style="background:#6e46c8"></span>queen</div>
+      <div><span class="swatch" style="background:#ffb4b4"></span>brood</div>
+      <div><span class="swatch" style="background:#8c8232"></span>necromone</div>
+      <div><span class="swatch" style="background:#8c96aa"></span>no-entry</div>
+      <div><span class="swatch" style="background:#ffa03c"></span>granary</div>
+      <div><span class="swatch" style="background:#c8aa1e"></span>trunk</div>
+    </div>
+  `;
+  const hudEls = {
+    seed: document.getElementById('h-seed')!,
+    colony: document.getElementById('h-colony')!,
+    brood: document.getElementById('h-brood')!,
+    nest: document.getElementById('h-nest')!,
+    res: document.getElementById('h-res')!,
+    time: document.getElementById('h-time')!,
+    speed: document.getElementById('h-speed')!,
+    fps: document.getElementById('h-fps')!,
+  };
+  const hudMinBtn = document.getElementById('hud-min')!;
+  hudMinBtn.addEventListener('click', () => {
+    hud.classList.toggle('minimized');
+    hudMinBtn.textContent = hud.classList.contains('minimized') ? '+' : '−';
+  });
   const help = document.getElementById('help') as HTMLDivElement;
   const renderer = new Renderer(canvas, makePlaceholderWorld(settings));
 
@@ -376,16 +419,21 @@ function main(): void {
         }
         return `${fmt(requestedSpeed)}× (effective ${fmt(effective)}×)`;
       })();
-      hud.textContent =
-        `formicarium · red harvester ant · seed 0x${settings.seed.toString(16)}` +
-        `  ·  ${snap.width}×${snap.height}` +
-        `  ·  ants ${snap.hud.alive} (start ${start}, +${snap.hud.totalBorn} born, −${snap.hud.totalDied} died)` +
-        `  ·  Q ${snap.hud.queens} eggs ${snap.hud.eggs} larvae ${snap.hud.larvae}` +
-        `  ·  t=${snap.tick.toLocaleString()} (${bioTime}, ${phaseLabel})` +
-        `  ·  dug ${dugTotal}  grains ${snap.hud.grains}  food ${snap.hud.foodCount}` +
-        `  ·  nest ${snap.hud.nestVol} (depth ${snap.hud.maxDepth})` +
-        `  ·  speed ${speedDisplay}${paused ? '  ·  PAUSED' : ''}${extinct ? '  ·  EXTINCT — press r to reseed' : ''}` +
-        `  ·  ${renderFps} fps`;
+      hudEls.seed.textContent =
+        `0x${settings.seed.toString(16)} · ${snap.width}×${snap.height}`;
+      hudEls.colony.textContent =
+        `${snap.hud.alive} alive (start ${start}, +${snap.hud.totalBorn} −${snap.hud.totalDied})`;
+      hudEls.brood.textContent =
+        `Q ${snap.hud.queens} · ${snap.hud.eggs} eggs · ${snap.hud.larvae} larvae`;
+      hudEls.nest.textContent =
+        `${snap.hud.nestVol} cells · depth ${snap.hud.maxDepth} · dug ${dugTotal}`;
+      hudEls.res.textContent =
+        `${snap.hud.grains} grains · ${snap.hud.foodCount} seeds`;
+      hudEls.time.textContent =
+        `t=${snap.tick.toLocaleString()} · ${bioTime} · ${phaseLabel}`;
+      const flag = paused ? ' · PAUSED' : extinct ? ' · EXTINCT — press r' : '';
+      hudEls.speed.textContent = speedDisplay + flag;
+      hudEls.fps.textContent = `${renderFps} fps`;
     }
   };
   requestAnimationFrame(frame);

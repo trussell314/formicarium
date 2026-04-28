@@ -9,12 +9,55 @@
       body { font-family: ui-sans-serif, system-ui, sans-serif; color: #d8c8a8; }
       canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; image-rendering: crisp-edges; touch-action: none; }
       html, body { touch-action: none; overscroll-behavior: none; }
+      /* HUD — top-left fixed panel, monospace, dimmable. One stat
+         group per row; minimise toggle keeps it out of the way. */
       #hud {
         position: fixed; top: 8px; left: 8px;
-        font-size: 12px; line-height: 1.4; opacity: 0.7;
+        font: 11px / 1.55 ui-monospace, "SFMono-Regular", "Menlo", monospace;
+        color: #d8c8a8;
+        background: rgba(10, 6, 6, 0.72);
+        border: 1px solid rgba(216, 200, 168, 0.18);
+        border-radius: 6px;
+        padding: 8px 10px 6px 10px;
+        max-width: 360px;
         text-shadow: 0 1px 2px #000;
-        pointer-events: none;
+        z-index: 9;
+        transition: opacity 200ms ease;
+        pointer-events: auto;
       }
+      #hud .row { display: flex; justify-content: space-between; gap: 12px; white-space: nowrap; }
+      #hud .row.hdr { color: #f0e2c4; font-weight: 600; letter-spacing: 0.04em; margin-bottom: 4px; padding-right: 22px; }
+      #hud .row .v { color: #f0e2c4; }
+      #hud .row.dim { opacity: 0.66; }
+      #hud .legend {
+        margin-top: 6px;
+        padding-top: 6px;
+        border-top: 1px solid rgba(216, 200, 168, 0.15);
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        column-gap: 10px;
+        row-gap: 2px;
+      }
+      #hud .legend .swatch {
+        display: inline-block;
+        width: 8px; height: 8px;
+        border-radius: 2px;
+        margin-right: 6px;
+        vertical-align: middle;
+      }
+      #hud-min {
+        position: absolute; top: 4px; right: 4px;
+        appearance: none; background: transparent;
+        border: 1px solid rgba(216, 200, 168, 0.22);
+        border-radius: 3px;
+        color: #d8c8a8; font: 11px ui-monospace, monospace;
+        width: 18px; height: 18px; line-height: 1;
+        cursor: pointer;
+        padding: 0;
+      }
+      #hud-min:hover { background: rgba(216, 200, 168, 0.10); }
+      #hud.minimized .row:not(.hdr), #hud.minimized .legend { display: none; }
+      #hud.minimized { padding: 4px 10px; }
       #help {
         position: fixed; right: 12px; bottom: 12px;
         background: rgba(10, 6, 6, 0.78);
