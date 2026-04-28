@@ -2516,7 +2516,22 @@ export function step(
         const queenHere = queenField ? queenField.sample(px, py) : 0;
         const broodHere = broodField ? broodField.sample(px, py) : 0;
         const inSanctum = queenHere > 0.3 || broodHere > 0.3;
-        if (!inSanctum) {
+        // Choke-point exclusion. A 1-cell-wide vertical passage
+        // (both lateral neighbours are SOIL/GRAIN, vertical
+        // neighbours are AIR) is a gallery shaft connecting
+        // chambers — depositing here pinches the colony's lifeline
+        // and over time can seal the queen's chamber off from the
+        // surface. Real ants keep galleries clear of spoil. Skip
+        // deposit if the cell is shaft-shaped: lateral both
+        // non-AIR AND at least one vertical neighbour AIR (so we're
+        // in a passage, not a corner pocket).
+        const wW3 = world.width;
+        const leftNonAir = px > 0 && world.cells[py * wW3 + (px - 1)] !== CELL_AIR;
+        const rightNonAir = px < wW3 - 1 && world.cells[py * wW3 + (px + 1)] !== CELL_AIR;
+        const aboveAir = py > 0 && world.cells[(py - 1) * wW3 + px] === CELL_AIR;
+        const belowAir = py < world.height - 1 && world.cells[(py + 1) * wW3 + px] === CELL_AIR;
+        const isVerticalShaft = leftNonAir && rightNonAir && (aboveAir || belowAir);
+        if (!inSanctum && !isVerticalShaft) {
           const localBuild = buildField.sample(px, py);
           if (localBuild > PILLAR_THRESHOLD) {
             pDeposit = Math.min(1, localBuild * cornerBoost); // Khuong + corner
@@ -2542,8 +2557,17 @@ export function step(
       // the dig side (which throttles the inflow).
       let depositedViaDeadlock = false;
       if (pDeposit === 0 && supportedBelow && cellIsAir) {
+        // Same choke-point check as above: a deadlock-fallback
+        // dump in a 1-cell shaft pinches the gallery, eventually
+        // sealing the queen off. Carriers wait longer instead.
+        const wW4 = world.width;
+        const leftNonAir = px > 0 && world.cells[py * wW4 + (px - 1)] !== CELL_AIR;
+        const rightNonAir = px < wW4 - 1 && world.cells[py * wW4 + (px + 1)] !== CELL_AIR;
+        const aboveAir = py > 0 && world.cells[(py - 1) * wW4 + px] === CELL_AIR;
+        const belowAir = py < world.height - 1 && world.cells[(py + 1) * wW4 + px] === CELL_AIR;
+        const isVerticalShaft = leftNonAir && rightNonAir && (aboveAir || belowAir);
         const overdue = colony.stateTicks[i]!;
-        if (overdue >= 500) {
+        if (!isVerticalShaft && overdue >= 500) {
           const ramp = Math.min(1, (overdue - 500) / 1500);
           pDeposit = ramp * 0.5;
           depositedViaDeadlock = true;

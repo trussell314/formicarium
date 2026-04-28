@@ -570,8 +570,8 @@ function main(): void {
       if (snap.hud.carryFood) stateParts.push(`Cf${snap.hud.carryFood}`);
       if (snap.hud.necroCarry) stateParts.push(`N${snap.hud.necroCarry}`);
       hudEls.states.textContent = stateParts.join(' ') || '—';
-      hudEls.age.textContent = `${renderBars(snap.hud.ageBuckets)} (young → old)`;
-      hudEls.energy.textContent = `${renderBars(snap.hud.energyBuckets)} (low → full)`;
+      hudEls.age.textContent = `young → old ${renderBars(snap.hud.ageBuckets)}`;
+      hudEls.energy.textContent = `low → full ${renderBars(snap.hud.energyBuckets)}`;
       // Selected-ant inspector. Hidden when no ant is selected; pins
       // id, role, position, energy, heading. State is shown by code
       // matching the diag glossary (W/C/R/F/Cf/N/Q/E/L) so the row
