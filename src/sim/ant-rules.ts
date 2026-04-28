@@ -554,15 +554,37 @@ export function step(
   // alone. Counting is O(N) per tick but N is small at the regime
   // where this matters.
   let aliveWorkers = 0;
+  let carriers = 0;
   for (let i = 0; i < colony.count; i++) {
     const s = colony.state[i]!;
     if (s !== STATE_DEAD && s !== STATE_EGG && s !== STATE_LARVA
         && s !== STATE_PUPA && s !== STATE_QUEEN) {
       aliveWorkers++;
+      if (s === STATE_CARRY || s === STATE_CARRY_FOOD || s === STATE_NECRO_CARRY) carriers++;
     }
   }
   const SMALL_COLONY = 30;
   const isSmallColony = aliveWorkers < SMALL_COLONY;
+  // Carry-saturation suppression. When most workers are already
+  // carrying spoil and can't find a deposit site, additional
+  // digging just makes the problem worse — every fresh dig adds
+  // another CARRY ant that has nowhere to deposit. Real colonies
+  // self-pace this via local crowding feedback (workers brushing
+  // mandibles with other carriers reduce their own dig roll). We
+  // approximate with a colony-level multiplier on dig probability:
+  //   ratio < 0.3:  full dig rate (1.0)
+  //   0.3 → 0.5:    linear taper 1.0 → 0
+  //   ≥ 0.5:        0.0 — no more digs until the queue clears
+  // Empirical: a soft taper at higher ratios lets equilibrium
+  // settle around 80% carriers because each deposit is matched by
+  // a fresh dig at the still-permitted rate. A hard cliff at 50%
+  // forces the equilibrium down to 50% — the colony can resume
+  // digging only after enough deposits have cleared the queue.
+  const carryRatio = aliveWorkers > 0 ? carriers / aliveWorkers : 0;
+  let carrySaturation: number;
+  if (carryRatio >= 0.5) carrySaturation = 0;
+  else if (carryRatio <= 0.3) carrySaturation = 1;
+  else carrySaturation = 1 - (carryRatio - 0.3) / 0.2;
 
   // Collision pass — Aguilar et al. 2018 / Aina et al. 2023 "agitation"
   // model. Each ant's collisionCount decays each tick and is bumped
@@ -2225,7 +2247,7 @@ export function step(
         // colony is below SMALL_COLONY so the chamber opens up
         // before workers age into foragers and abandon excavation.
         const foundingBoost = isSmallColony ? 3.0 : 1.0;
-        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus * dirBonus * digMult * alarmBoost * strandedMult * foundingBoost) {
+        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus * dirBonus * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation) {
           if (digCell(world, target.x, target.y, rng)) {
             // Track dig direction relative to the digger's cell, so
             // the diag can surface a vertical-vs-lateral histogram.
@@ -2480,16 +2502,31 @@ export function step(
           }
         }
       }
-      // Carry-deadlock fallback. A worker who's been carrying spoil
-      // for >2000 ticks (~4 min wall at 1× speed) without finding
-      // a deposit site drops the load anywhere it can. Without
-      // this the colony jams — every WANDER ant who digs becomes a
-      // CARRY ant, walks toward unreachable surface or never-meets-
-      // threshold chamber, and stays CARRY indefinitely. Real ants
-      // don't pace forever with a load.
-      if (pDeposit === 0 && supportedBelow && cellIsAir
-          && colony.stateTicks[i]! > 2000) {
-        pDeposit = 0.5;
+      // Carry-deadlock relief. A worker who's been carrying spoil
+      // for a while without finding a deposit site drops the load
+      // anywhere it can. Probability ramps with overdue time so
+      // a barely-overdue carrier is unlikely to drop on the floor
+      // randomly, but a very-overdue one almost certainly will.
+      //   stateTicks <  500: pDeposit unchanged (use the normal
+      //                       Khuong/surface paths only)
+      //   500 → 2000: linear ramp 0 → 0.5
+      //   ≥ 2000:     pDeposit = 0.5 floor (50% per tick)
+      // Lowered from the previous flat 2000-tick gate because the
+      // colony was tipping into starvation before the relief
+      // fired — long-run scenarios showed CARRY accumulating to
+      // 90%+ of the workforce, energy crashing, then ~20% of
+      // workers dying off before the system rebalanced. The ramp
+      // gives carriers an exit valve early enough that the
+      // workforce stays balanced, paired with carry-saturation on
+      // the dig side (which throttles the inflow).
+      let depositedViaDeadlock = false;
+      if (pDeposit === 0 && supportedBelow && cellIsAir) {
+        const overdue = colony.stateTicks[i]!;
+        if (overdue >= 500) {
+          const ramp = Math.min(1, (overdue - 500) / 1500);
+          pDeposit = ramp * 0.5;
+          depositedViaDeadlock = true;
+        }
       }
       if (pDeposit > 0 && rng.next() < pDeposit) {
         // The grain has now been moved one more time. Stamp the
@@ -2498,7 +2535,12 @@ export function step(
         const newMoves = colony.carryMoves[i]! + 1;
         const placed = placeGrain(world, px, py, rng, newMoves);
         if (placed !== null) {
-          colony.setState(i, STATE_WANDER);
+          // Deadlock-fallback drops route to REST so the worker
+          // takes a forced cool-off before being eligible to dig
+          // again. Without this, ants who exit via the fallback
+          // immediately re-dig in the next tick and re-fill the
+          // CARRY queue — the saturation never breaks.
+          colony.setState(i, depositedViaDeadlock ? STATE_REST : STATE_WANDER);
           colony.carryMoves[i] = 0;
           // Khuong 2016 wall-pillar feedback: a build site's local
           // pheromone concentration AMPLIFIES the deposit left by the
