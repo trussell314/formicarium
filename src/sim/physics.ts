@@ -262,15 +262,26 @@ export function digCell(world: World, x: number, y: number, rng: RNG): boolean {
   // "freshly excavated." renderer.ts:163 reads digTick — without
   // this write the highlight never appears.
   world.digTick[idx] = world.tick;
-  // A grain directly above might fall into the void. If the
-  // cascade slides it sideways, mound[] for both columns needs to
-  // be refreshed; otherwise the deposit search uses stale heights.
+  // Grains directly above OR diagonally above the dug cell may now
+  // be unsupported. settleGrain cascades each one into a stable
+  // position. If the cascade slides a grain sideways, mound[] for
+  // both columns needs to be refreshed; otherwise the deposit
+  // search uses stale heights. Without the diagonal-above check
+  // a lateral dig can leave grains hanging in mid-air (a grain at
+  // (x+1, y-1) supported on the soil at (x+1, y) is unaffected,
+  // but a grain at (x-1, y-1) sitting on (x-1, y) AIR with
+  // diagonal support from (x, y) loses that support when (x, y)
+  // becomes AIR).
   if (y > 0) {
-    const aboveIdx = idx - world.width;
-    if (world.cells[aboveIdx] === CELL_GRAIN) {
-      const final = settleGrain(world, x, y - 1, rng);
-      recomputeMound(world, x);
-      if (final.x !== x) recomputeMound(world, final.x);
+    for (const dx of [0, -1, 1] as const) {
+      const cx = x + dx;
+      if (cx < 0 || cx >= world.width) continue;
+      const cIdx = (y - 1) * world.width + cx;
+      if (world.cells[cIdx] === CELL_GRAIN) {
+        const final = settleGrain(world, cx, y - 1, rng);
+        recomputeMound(world, cx);
+        if (final.x !== cx) recomputeMound(world, final.x);
+      }
     }
   }
   return true;

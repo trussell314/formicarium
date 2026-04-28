@@ -937,16 +937,20 @@ export function step(
           else if (qyNow > targetY) dy = -1;
           if (dy !== 0) {
             const newY = qyNow + dy;
-            const wW = world.width;
-            const leftIsSoil =
-              qx > 0 && world.cells[newY * wW + (qx - 1)] === CELL_SOIL;
-            const rightIsSoil =
-              qx < wW - 1 && world.cells[newY * wW + (qx + 1)] === CELL_SOIL;
-            const isChamber = !leftIsSoil && !rightIsSoil;
+            // Queen passes through narrower spaces than the brood —
+            // attendants jostle her through 1-cell connectors all
+            // the time in lab observation. Drop the both-laterals
+            // requirement to "destination is AIR and floor is
+            // supported (not freefall)". Real queens DO move
+            // through the access shaft, just slowly. Without this
+            // relaxation the migration timer fires but every step
+            // is rejected because the shaft is 1 cell wide.
+            const supportedAtNew = newY + 1 >= world.height
+              || world.cells[world.index(qx, newY + 1)] !== CELL_AIR;
             if (
               newY >= 0 && newY < world.height &&
               world.cells[world.index(qx, newY)] === CELL_AIR &&
-              isChamber
+              supportedAtNew
             ) {
               colony.posY[i] = qyNow + dy + 0.5;
             }
@@ -1305,20 +1309,31 @@ export function step(
         }
         colony.posX[i] = nx;
         colony.posY[i] = ny;
-        // Food contact: any cardinal-or-self food cell triggers a
-        // pickup. Discrete grab — no probability, foragers actively
-        // collect on contact (Gordon 2010, Ch. 4).
+        // Food contact: any food cell within 2-cell radius triggers
+        // a pickup. Discrete grab — no probability, foragers
+        // actively collect on contact (Gordon 2010, Ch. 4). The
+        // generous radius matches real harvester foraging — they
+        // don't have to land exactly on the seed; they smell it
+        // and walk over. Without it, foragers regularly fail to
+        // notice piles of seeds 1-2 cells off their random-walk
+        // path.
         const fx = nx | 0;
         const fy = ny | 0;
         const wW = world.width;
         let fIdx = -1;
-        if (fx >= 0 && fy >= 0 && fx < wW && fy < world.height && world.food[fy * wW + fx]! > 0) {
-          fIdx = fy * wW + fx;
-        } else {
-          if (fx > 0 && world.food[fy * wW + (fx - 1)]! > 0) fIdx = fy * wW + (fx - 1);
-          else if (fx < wW - 1 && world.food[fy * wW + (fx + 1)]! > 0) fIdx = fy * wW + (fx + 1);
-          else if (fy > 0 && world.food[(fy - 1) * wW + fx]! > 0) fIdx = (fy - 1) * wW + fx;
-          else if (fy < world.height - 1 && world.food[(fy + 1) * wW + fx]! > 0) fIdx = (fy + 1) * wW + fx;
+        let bestD2 = 9; // max 2-cell radius (3² for safety)
+        for (let dy = -2; dy <= 2 && fIdx < 0; dy++) {
+          for (let dx = -2; dx <= 2; dx++) {
+            const cx = fx + dx, cy = fy + dy;
+            if (cx < 0 || cy < 0 || cx >= wW || cy >= world.height) continue;
+            const d2 = dx * dx + dy * dy;
+            if (d2 > 5) continue; // Euclidean radius ~2.24
+            if (world.food[cy * wW + cx]! > 0 && d2 < bestD2) {
+              fIdx = cy * wW + cx;
+              bestD2 = d2;
+              if (d2 === 0) break; // can't beat zero distance
+            }
+          }
         }
         if (fIdx >= 0) {
           colony.carryMoves[i] = world.foodMoves[fIdx]!;
@@ -1665,8 +1680,17 @@ export function step(
     const smallForageMult = isSmallColony
       ? Math.max(0.05, aliveWorkers / SMALL_COLONY)
       : 1.0;
+    // Food-visible recruitment. When seeds are sitting on the
+    // surface (or in granaries) the colony "knows" food is around
+    // — successful returners' trail pheromone, granary-pheromone
+    // halos, antennation between nestmates. Boost the per-tick
+    // forage roll 5× when standing inventory is positive. Without
+    // this, base forageProb at 8.3e-4/tick gates so few WANDERers
+    // (most workers are stuck in CARRY) into FORAGE that the
+    // colony can starve while sitting on a pile of seeds.
+    const foodVisibleBoost = world.foodCountCached > 0 ? 5.0 : 1.0;
     if (stateIn === STATE_WANDER && iy >= world.naturalSurface[ix]! &&
-        rng.next() < species.forageProb * forageActivity * forageMult * smallForageMult) {
+        rng.next() < species.forageProb * forageActivity * forageMult * smallForageMult * foodVisibleBoost) {
       colony.setState(i, STATE_FORAGE);
       colony.collisionCount[i] = 0;
       // Heading reset toward the surface so the trip starts in the
@@ -2093,7 +2117,17 @@ export function step(
         // chambers and lateral connections actually develop, and the
         // Khuong boost on build-pheromone-marked walls amplifies
         // chamber growth into proper lobes once one starts.
-        const dirBonus = vAir > lAir ? 1.5 : (lAir > vAir ? 0.7 : 1.0);
+        // Depth-modulated lateral bonus. Surface and shallow tunnels
+        // should stay vertical-biased (gallery shaft, no chambers
+        // near surface where they'd weaken the entrance). Past
+        // ~15 cells below surface the lateral penalty lifts to
+        // 1.0 so chambers can grow at depth — which is where
+        // Tschinkel 2004 mapped Pogonomyrmex chambers (regularly
+        // spaced lobes off a vertical gallery, mostly between
+        // 15-50 cells deep).
+        const dirDepth = Math.max(0, ay - world.naturalSurface[ax]!);
+        const lateralPenalty = dirDepth >= 15 ? 1.0 : (0.7 + 0.3 * dirDepth / 15);
+        const dirBonus = vAir > lAir ? 1.5 : (lAir > vAir ? lateralPenalty : 1.0);
         // Alarm boost. Strong local alarm pheromone signals "dig
         // here, fast" — multiplies the dig roll by up to 3× when
         // saturated. This is what produces the visible mass
@@ -2315,10 +2349,30 @@ export function step(
         }
       }
 
-      const PILLAR_THRESHOLD = 0.30;
+      // Khuong threshold dropped 0.30 → 0.10 so fresh chambers can
+      // bootstrap pillar-building from cold without needing path-1
+      // (above-surface) deposits to seed the field first. Combined
+      // with the corner-targeting bonus below, in-chamber deposits
+      // now self-start at modest pheromone levels, which means
+      // CARRY ants can offload spoil at chamber walls instead of
+      // queueing for the surface.
+      const PILLAR_THRESHOLD = 0.10;
       const supportedBelow =
         py + 1 < world.height &&
         world.cells[world.index(px, py + 1)] !== CELL_AIR;
+      // Corner bonus. A cell with 2+ SOIL cardinal neighbours sits
+      // at a chamber-wall corner — exactly where real workers
+      // place reinforcement (Tschinkel 2004 mapped Pogonomyrmex
+      // chambers as predominantly corner-thickened, not centre-
+      // filled). Boost the deposit probability there so chambers
+      // grow walls before they grow pillars.
+      const wW2 = world.width;
+      let cornerSoil = 0;
+      if (px > 0 && world.cells[py * wW2 + (px - 1)] === CELL_SOIL) cornerSoil++;
+      if (px < wW2 - 1 && world.cells[py * wW2 + (px + 1)] === CELL_SOIL) cornerSoil++;
+      if (py > 0 && world.cells[(py - 1) * wW2 + px] === CELL_SOIL) cornerSoil++;
+      if (py < world.height - 1 && world.cells[(py + 1) * wW2 + px] === CELL_SOIL) cornerSoil++;
+      const cornerBoost = cornerSoil >= 2 ? 2.0 : 1.0;
       let pDeposit = 0;
       if (aboveSurface && groundIsIntact && cellIsAir) {
         pDeposit = 1; // surface-mound bootstrap (Tschinkel)
@@ -2339,9 +2393,20 @@ export function step(
         if (!inSanctum) {
           const localBuild = buildField.sample(px, py);
           if (localBuild > PILLAR_THRESHOLD) {
-            pDeposit = Math.min(1, localBuild); // Khuong pillar response
+            pDeposit = Math.min(1, localBuild * cornerBoost); // Khuong + corner
           }
         }
+      }
+      // Carry-deadlock fallback. A worker who's been carrying spoil
+      // for >2000 ticks (~4 min wall at 1× speed) without finding
+      // a deposit site drops the load anywhere it can. Without
+      // this the colony jams — every WANDER ant who digs becomes a
+      // CARRY ant, walks toward unreachable surface or never-meets-
+      // threshold chamber, and stays CARRY indefinitely. Real ants
+      // don't pace forever with a load.
+      if (pDeposit === 0 && supportedBelow && cellIsAir
+          && colony.stateTicks[i]! > 2000) {
+        pDeposit = 0.5;
       }
       if (pDeposit > 0 && rng.next() < pDeposit) {
         // The grain has now been moved one more time. Stamp the
