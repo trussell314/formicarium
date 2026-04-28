@@ -43,7 +43,7 @@ import {
   STATE_REST, STATE_WANDER, type AntState,
 } from './colony';
 import type { ParticleSystem } from './particles';
-import { Pheromone } from './pheromone';
+import { Pheromone, uploadPheromoneCells } from './pheromone';
 import { digCell, pickGrain, placeGrain, settle, tryStep } from './physics';
 import type { RNG } from './rng';
 import { type AntSpecies, HARVESTER } from './species';
@@ -356,7 +356,11 @@ export function step(
   // Each step receives world.cells so diffusion is gated to AIR —
   // volatile pheromones live in the carved-out air column, not
   // through soil walls. See pheromone.ts step() for the full note.
+  // The WASM kernel keeps its own copy of cells; upload once per
+  // tick before stepping any field. No-op when running on the JS
+  // path (tests / unsupported environments).
   const cells = world.cells;
+  uploadPheromoneCells(cells);
   digField.step(cells);
   buildField.step(cells);
   if (trailField) trailField.step(cells);

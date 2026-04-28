@@ -19,5 +19,6 @@
     "useDefineForClassFields": true,
     "types": ["vitest/globals"]
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests"],
+  "exclude": ["src/wasm"]
 }

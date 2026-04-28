@@ -14,7 +14,8 @@
 import { Colony, STATE_DEAD, STATE_EGG, STATE_LARVA, STATE_QUEEN } from '../sim/colony';
 import { DEFAULT_PARAMS, step } from '../sim/ant-rules';
 import { ParticleSystem } from '../sim/particles';
-import { Pheromone } from '../sim/pheromone';
+import { Pheromone, attachPheromoneWasm } from '../sim/pheromone';
+import { initPheromoneWasm } from '../sim/pheromone-wasm';
 import {
   captureSnapshot, clearSavedSnapshot, restoreSnapshot,
 } from '../sim/persist';
@@ -22,6 +23,11 @@ import { RNG } from '../sim/rng';
 import { HARVESTER, type AntSpecies } from '../sim/species';
 import { CELL_AIR, daylight, World } from '../sim/world';
 import type { FromWorker, RenderSnapshot, SaveSettings, ToWorker } from './protocol';
+// WASM module URL — Vite resolves this at build time and serves the
+// compiled bytes at the resulting URL. Worker fetches the bytes
+// once at startup, instantiates, and attaches the runtime so all
+// Pheromone instances created afterwards run on the SIMD kernel.
+import wasmUrl from '../wasm/pheromone.wasm?url';
 
 interface SimBundle {
   rng: RNG;
@@ -305,17 +311,40 @@ function send(msg: FromWorker): void {
   (self as unknown as Worker).postMessage(msg);
 }
 
+// Async WASM bootstrap. Started immediately on worker load so it
+// races with the main thread sending 'init'. If the kernel loads
+// before init arrives, all subsequent Pheromone allocations use
+// the SIMD path. If WASM/SIMD is unsupported the runtime is null
+// and Pheromone falls back to the JS path transparently.
+let wasmReady: Promise<void> = (async () => {
+  try {
+    const rt = await initPheromoneWasm(async () => {
+      const r = await fetch(wasmUrl);
+      return r.arrayBuffer();
+    });
+    attachPheromoneWasm(rt);
+  } catch (err) {
+    console.warn('pheromone-wasm init failed; using JS fallback', err);
+    attachPheromoneWasm(null);
+  }
+})();
+
 self.onmessage = (e: MessageEvent<ToWorker>) => {
   const msg = e.data;
   switch (msg.kind) {
     case 'init': {
       settings = msg.settings;
-      bundle = buildBundle(msg.settings, msg.restoreBlob);
-      paused = false;
-      extinct = false;
-      bioAccum = 0;
-      lastDriveMs = performance.now();
-      send({ kind: 'ready' });
+      // Wait for the WASM module before constructing any Pheromone
+      // instances. The await is one-shot — wasmReady resolves once
+      // and then all subsequent ticks proceed synchronously.
+      wasmReady.then(() => {
+        bundle = buildBundle(msg.settings, msg.restoreBlob);
+        paused = false;
+        extinct = false;
+        bioAccum = 0;
+        lastDriveMs = performance.now();
+        send({ kind: 'ready' });
+      });
       break;
     }
     case 'pause':
@@ -331,11 +360,28 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     case 'reseed':
       clearSavedSnapshot();
       settings = msg.settings;
-      bundle = buildBundle(msg.settings, null);
-      extinct = false;
-      bioAccum = 0;
-      lastDriveMs = performance.now();
-      send({ kind: 'ready' });
+      // Detach the previous Pheromone field handles before rebuilding —
+      // a fresh WASM runtime gives us a clean slab allocator and
+      // avoids leaking the old fields' memory in the WASM heap.
+      // Easiest way is to rebuild the runtime from scratch.
+      wasmReady = (async () => {
+        try {
+          const rt = await initPheromoneWasm(async () => {
+            const r = await fetch(wasmUrl);
+            return r.arrayBuffer();
+          });
+          attachPheromoneWasm(rt);
+        } catch {
+          attachPheromoneWasm(null);
+        }
+      })();
+      wasmReady.then(() => {
+        bundle = buildBundle(msg.settings, null);
+        extinct = false;
+        bioAccum = 0;
+        lastDriveMs = performance.now();
+        send({ kind: 'ready' });
+      });
       break;
     case 'requestSnapshot': {
       drive(performance.now());

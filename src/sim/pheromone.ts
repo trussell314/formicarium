@@ -17,6 +17,25 @@
 // ping-pong of two arrays is the standard way to avoid sampling and
 // writing the same texture in one pass.
 
+import type { PheromoneWasm, WasmFieldHandle } from './pheromone-wasm';
+
+/** Module-level WASM runtime. When attached via attachPheromoneWasm,
+ *  newly-constructed Pheromone instances allocate their buffers in
+ *  WASM linear memory and route step() through the SIMD kernel.
+ *  Tests don't attach a runtime and exercise the JS path. Both
+ *  paths are bit-exact (same op order, same IEEE-754 rounding). */
+let wasmRuntime: PheromoneWasm | null = null;
+export function attachPheromoneWasm(rt: PheromoneWasm | null): void {
+  wasmRuntime = rt;
+}
+/** Upload the current cells snapshot to the WASM kernel once per
+ *  tick, before any pheromone step() call. No-op if WASM isn't
+ *  attached. The kernel reads cells by pointer; without this call
+ *  it would diffuse against a stale snapshot. */
+export function uploadPheromoneCells(cells: Uint8Array): void {
+  if (wasmRuntime !== null) wasmRuntime.uploadCells(cells);
+}
+
 export class Pheromone {
   readonly width: number;
   readonly height: number;
@@ -30,14 +49,25 @@ export class Pheromone {
   /** Multiplier applied per cell per tick. evap ∈ (0, 1). 0.99 gives
    *  a half-life of ~69 ticks. */
   readonly evaporate: number;
+  /** WASM kernel handle when this instance is using the SIMD path,
+   *  null otherwise. step() consults this to pick a backend. */
+  private wasmHandle: WasmFieldHandle | null;
 
   constructor(width: number, height: number, diffuse: number, evaporate: number) {
     this.width = width;
     this.height = height;
-    this.current = new Float32Array(width * height);
-    this.scratch = new Float32Array(width * height);
     this.diffuse = diffuse;
     this.evaporate = evaporate;
+    if (wasmRuntime !== null) {
+      const handle = wasmRuntime.allocField(width, height);
+      this.wasmHandle = handle;
+      this.current = handle.current;
+      this.scratch = handle.scratch;
+    } else {
+      this.wasmHandle = null;
+      this.current = new Float32Array(width * height);
+      this.scratch = new Float32Array(width * height);
+    }
   }
 
   /**
@@ -60,6 +90,17 @@ export class Pheromone {
    * and avoid denormal-float drag.
    */
   step(cells?: Uint8Array): void {
+    // WASM path: kernel reads cells from its own copy (uploaded once
+    // per tick by the worker via PheromoneWasm.uploadCells) and
+    // operates directly on the Float32Array views backing this
+    // instance. After it runs, current/scratch refer to the swapped
+    // buffers, identical semantics to the JS path.
+    if (this.wasmHandle !== null && wasmRuntime !== null) {
+      wasmRuntime.step(this.wasmHandle, this.diffuse, this.evaporate, 1000);
+      this.current = this.wasmHandle.current;
+      this.scratch = this.wasmHandle.scratch;
+      return;
+    }
     const w = this.width;
     const h = this.height;
     const src = this.current;
