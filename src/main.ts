@@ -122,15 +122,13 @@ function main(): void {
     fps: document.getElementById('h-fps')!,
   };
   // Unicode block-character bar chart from a small bucket array.
-  // Each bucket maps to one of 9 levels (▏ + 8 block heights). The
-  // empty-bucket character is the very-thin block ▏ rather than
-  // a regular space, because HTML collapses runs of regular spaces
-  // and the histogram width visibly jumped between frames as
-  // adjacent zeros got merged. ▏ is full-cell-width in monospace
-  // and renders consistently. Caller passes the array; the bar
-  // magnitudes are scaled to the in-frame max so a flat-zero
-  // histogram still shows 8 thin lines.
-  const BLOCKS = '▏▁▂▃▄▅▆▇█';
+  // Each bucket maps to one of 9 levels: NBSP for empty (preserves
+  // width in HTML — runs of regular spaces collapse and the histogram
+  // jumps between frames as adjacent zeros merge), then ▁..█ for
+  // increasing fill. Caller passes the array; the bar magnitudes are
+  // scaled to the in-frame max so a flat-zero histogram still has a
+  // stable width.
+  const BLOCKS = ' ▁▂▃▄▅▆▇█';
   const renderBars = (buckets: ArrayLike<number>): string => {
     let max = 1;
     for (let i = 0; i < buckets.length; i++) {
