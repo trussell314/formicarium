@@ -251,6 +251,19 @@ export function step(
   // recent successful trips ramps up outflow, and a colony with no
   // returns in the last few minutes cools down again.
   world.foragerReturnRate *= 0.998;
+  // Brood-starving flag (FIX H precomputation). Scanned once per
+  // tick so CARRY_FOOD ants can route food directly to a starving
+  // brood pile rather than always going to the granary. Threshold
+  // is "any larva below trophallaxisRecipientThreshold" — even one
+  // hungry larva is enough to redirect a delivery.
+  let broodStarving = false;
+  for (let i = 0; i < colony.count; i++) {
+    if (colony.state[i]! === STATE_LARVA &&
+        colony.energy[i]! < species.trophallaxisRecipientThreshold) {
+      broodStarving = true;
+      break;
+    }
+  }
   // Open-shaft count refresh. O(W × 5) once every ~100 ticks.
   // Each column counts as "open" if any of the natural-surface
   // row or the four cells immediately below it is AIR — i.e. the
@@ -1410,8 +1423,24 @@ export function step(
       // ~0 we send them back. We use 0.05 not 0 so the threshold
       // crosses cleanly through the dawn/dusk shoulder rather
       // than flipping a tick before the daylight curve does.
+      //
+      // Scout-mode duration extension (FIX G). When the colony has
+      // no trail pheromone yet (foragerReturnRate near zero), the
+      // standard 100-tick trip is barely enough to get from the
+      // chamber to the surface (10 cells × 10 ticks/cell at walk
+      // speed). The forager exits, takes a few steps, and is
+      // recalled before searching properly. Real Pogonomyrmex
+      // foundress colonies do "scout" trips that last 10–30 min
+      // (Gordon 2010 Ch. 4) — much longer than the steady-state
+      // patrol cadence. Extend forageDuration by 5× while the
+      // return-rate is sub-bootstrap; once trips are succeeding,
+      // the standard short cadence resumes.
+      const scoutMode = world.foragerReturnRate < 0.05;
+      const effectiveForageDuration = scoutMode
+        ? species.forageDuration * 5
+        : species.forageDuration;
       if (
-        colony.stateTicks[i]! >= species.forageDuration ||
+        colony.stateTicks[i]! >= effectiveForageDuration ||
         forageActivity < 0.05
       ) {
         colony.setState(i, STATE_WANDER);
@@ -1434,6 +1463,39 @@ export function step(
         if (iy >= world.naturalSurface[ix]!) {
           h += wrapAngle(-Math.PI / 2 - h) * geotaxis;
         } else {
+          // Direct food-sensing (FIX F). Real Pogonomyrmex foragers
+          // detect seeds via volatile chemicals at ~3–5 cm distance
+          // (Gordon 2010, Ch. 4 on harvester olfactory foraging). At
+          // our 3 mm/cell scale that's ~10–17 cells of sniff radius.
+          // Without this, foragers above-ground rely entirely on
+          // trail pheromone to find food — but the first trip has
+          // no trail to follow, so the bootstrap fails: trips abort
+          // at forageDuration without locating sparse food. Scan a
+          // 10-cell box for the nearest food cell and bias heading
+          // toward it; combine with trail/trunk biases below for the
+          // typical multi-source compass average. Cheap: 21×21 = 441
+          // cell-reads per forager per tick is fine for the small
+          // forager subset.
+          let sniffX = 0, sniffY = 0, sniffD = 121; // 11² = max
+          const sniffR = 10;
+          const wWf = world.width;
+          for (let dy2 = -sniffR; dy2 <= sniffR; dy2++) {
+            for (let dx2 = -sniffR; dx2 <= sniffR; dx2++) {
+              const cx2 = ix + dx2;
+              const cy2 = iy + dy2;
+              if (cx2 < 0 || cy2 < 0 || cx2 >= wWf || cy2 >= world.height) continue;
+              if (world.food[cy2 * wWf + cx2]! === 0) continue;
+              const d2 = dx2 * dx2 + dy2 * dy2;
+              if (d2 < sniffD) { sniffD = d2; sniffX = dx2; sniffY = dy2; }
+            }
+          }
+          if (sniffD < 121 && sniffD > 0) {
+            const want = Math.atan2(sniffY, sniffX);
+            // Strong bias — the food is right there. Stigmergy weight
+            // matches the alarm-pheromone urgency (1.8) since a hungry
+            // colony in bootstrap mode treats finding food as critical.
+            h += wrapAngle(want - h) * Math.min(1, colony.stigmergy[i]! * 1.5);
+          }
           if (trailField) {
             const grad = trailField.gradient(ix, iy);
             const gMag = Math.hypot(grad.dx, grad.dy);
@@ -1539,11 +1601,36 @@ export function step(
       h += rng.gauss() * colony.turnNoise[i]!;
       // Below or above surface, bias DOWN (positive geotaxis).
       h += wrapAngle(Math.PI / 2 - h) * geotaxis;
-      // Granary attraction. Once the ant is below the surface,
-      // bias toward the granary-marker gradient — established
-      // granaries pull subsequent deposits toward them, producing
-      // the consistent-depth seed caches Tschinkel observed.
-      if (granaryField && iy >= world.naturalSurface[ix]!) {
+      // Brood emergency rerouting (FIX H). Standard CARRY_FOOD
+      // behaviour heads down via geotaxis and biases toward
+      // granaryField for storage. But a colony with starving
+      // larvae needs food delivered to the BROOD PILE first,
+      // not stored in the granary. Real nurses prioritise direct
+      // larva-feeding over storage when brood is hungry (Cassill
+      // 2002 on S. invicta brood-care allocation). When at least
+      // one larva is below trophallaxisRecipientThreshold, swap
+      // the granary bias for a brood-pheromone bias: the carrier
+      // goes to the broodpile, deposits food there (the granary
+      // emerges naturally around the broodpile via positive
+      // feedback from later deposits), and walks past hungry
+      // larvae who then trophallax it. This couples the foraging
+      // pipeline directly to brood feeding instead of going via
+      // a separate granary chamber that may be far from larvae.
+      if (broodStarving && broodField && iy >= world.naturalSurface[ix]!) {
+        const bGrad = broodField.gradient(ix, iy);
+        const bMag = Math.hypot(bGrad.dx, bGrad.dy);
+        if (bMag > 1e-5) {
+          const want = Math.atan2(bGrad.dy, bGrad.dx);
+          // Stronger weight than granary (0.4×) because the
+          // emergency response is urgent. 0.7 brings carriers
+          // toward the brood pile reliably.
+          h += wrapAngle(want - h) * colony.stigmergy[i]! * 0.7;
+        }
+      } else if (granaryField && iy >= world.naturalSurface[ix]!) {
+        // Granary attraction. Once the ant is below the surface,
+        // bias toward the granary-marker gradient — established
+        // granaries pull subsequent deposits toward them, producing
+        // the consistent-depth seed caches Tschinkel observed.
         const gGrad = granaryField.gradient(ix, iy);
         const gMag = Math.hypot(gGrad.dx, gGrad.dy);
         if (gMag > 1e-5) {
