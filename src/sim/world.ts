@@ -141,6 +141,23 @@ export class World {
    *  pinhole was the only shaft. */
   openShaftCount = 0;
   openShaftTick = -1;
+  /** Decaying counter of recent successful CARRY_FOOD → granary
+   *  deposits, used to model the Greene & Gordon (2007, PNAS 104(19):
+   *  7973–7976) forager-rate feedback. Returning foragers antennate
+   *  outgoing-bound workers at the entrance; the rate of antennations
+   *  regulates the rate of new forager departures. Greene & Gordon
+   *  showed experimentally that adding fake "returner" stimulation
+   *  raised forager outflow even with no actual food. We model it
+   *  globally rather than locally because (a) the colony-level effect
+   *  is what dominates the literature and (b) a permeable global
+   *  scalar is much cheaper than a contact-pheromone field.
+   *
+   *  Each successful food deposit pulses by +1; decay per tick is
+   *  multiplicative so the EMA half-life is around a biological
+   *  minute. The forage-roll multiplier in ant-rules saturates so a
+   *  busy colony doesn't blow past the per-tick base rate by orders
+   *  of magnitude. */
+  foragerReturnRate = 0;
 
   constructor(width: number, height: number) {
     this.width = width;

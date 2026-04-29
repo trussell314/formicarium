@@ -242,6 +242,15 @@ export function step(
   trunkField?: Pheromone,
 ): void {
   world.tick++;
+  // Decay the forager-return-rate counter (Greene & Gordon 2007
+  // antennation-feedback model). Multiplicative decay 0.998 per tick
+  // gives a half-life of ~350 ticks (~7 sec biological at 100×
+  // compression, or ~12 min real time at the original biological
+  // rate). Successful CARRY_FOOD deposits pulse this back up; the
+  // forage roll uses the running value as a boost so a colony with
+  // recent successful trips ramps up outflow, and a colony with no
+  // returns in the last few minutes cools down again.
+  world.foragerReturnRate *= 0.998;
   // Open-shaft count refresh. O(W × 5) once every ~100 ticks.
   // Each column counts as "open" if any of the natural-surface
   // row or the four cells immediately below it is AIR — i.e. the
@@ -1622,6 +1631,11 @@ export function step(
         // cell builds the gradient that biases the next CARRY_FOOD
         // ant toward this column.
         if (granaryField) granaryField.deposit(dxIdx, dyIdx, 1.0);
+        // Greene & Gordon 2007 antennation feedback. A successful
+        // round trip is the signal that activates the next forager
+        // departure. Pulse the global counter; the forage roll
+        // higher up the loop reads it as a multiplicative boost.
+        world.foragerReturnRate += 1;
         colony.carryMoves[i] = 0;
         colony.setState(i, STATE_WANDER);
         colony.heading[i] = rng.range(0, Math.PI * 2);
@@ -1825,8 +1839,18 @@ export function step(
     }
     const avgEnergy = energyN > 0 ? totalEnergy / energyN : 1;
     const starvationBoost = avgEnergy < 0.4 ? 3.0 : 1.0;
+    // Greene & Gordon 2007 antennation-rate boost. Each recent
+    // successful CARRY_FOOD return increments world.foragerReturnRate;
+    // it decays multiplicatively each tick. A single recent return
+    // gives ~2× boost, a busy session with several returns per
+    // biological-second saturates around 5×. The signal is what
+    // sustains forager outflow during an active patch — and lets
+    // foraging cool down naturally when trips stop succeeding (the
+    // colony "knows" the patch is depleted without anyone tracking
+    // it explicitly).
+    const inboundBoost = 1 + Math.min(4, world.foragerReturnRate * 0.5);
     if (stateIn === STATE_WANDER && iy >= world.naturalSurface[ix]! &&
-        rng.next() < species.forageProb * forageActivity * forageMult * smallForageMult * foodVisibleBoost * starvationBoost) {
+        rng.next() < species.forageProb * forageActivity * forageMult * smallForageMult * foodVisibleBoost * starvationBoost * inboundBoost) {
       colony.setState(i, STATE_FORAGE);
       colony.collisionCount[i] = 0;
       // Heading reset toward the surface so the trip starts in the
