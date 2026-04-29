@@ -210,6 +210,24 @@ export class Renderer {
    *  the viewport indicator gives the user a "you are here" cue. */
   showMinimap = true;
 
+  /** Burn-in-prevention mode for actual screensaver / always-on
+   *  desktop-background use. When enabled, the entire rendered
+   *  canvas drifts on a slow Lissajous trajectory so every screen
+   *  pixel cycles through a band of scene values over ~2-minute
+   *  periods. Without drift, even a slowly-evolving sim can leave
+   *  static-bright pixels (HUD, sky-near-top, deep-soil-bottom)
+   *  imprinted on OLED panels over many hours. The day/night cycle
+   *  already exercises most pixels through a wide colour range
+   *  every 14 wall-minutes (at default 8× speed) — drift handles
+   *  the residual. Off by default for normal viewing; enable with
+   *  ?screensaver=1 URL param.
+   *
+   *  HUD burn-in is handled separately in main.ts (the screensaver
+   *  flag hides the HUD entirely). */
+  screensaver = false;
+  /** Wall-time anchor for the screensaver drift. */
+  private screensaverStartMs = performance.now();
+
   /** User zoom factor (1.0 = fit-to-screen). Mutated by main's pinch /
    *  wheel handlers. */
   zoom = 1;
@@ -298,6 +316,24 @@ export class Renderer {
       if (d2 < bestDist) { bestDist = d2; bestIdx = i; }
     }
     return bestIdx;
+  }
+
+  /** Burn-in prevention drift. Returns a (dx, dy) offset in CSS
+   *  pixels that the renderer applies via ctx.translate() at the
+   *  start of render(). Lissajous with two prime-period axes so
+   *  the pattern doesn't visibly repeat. Amplitude 24 px on x,
+   *  16 px on y — large enough that any static bright pixel
+   *  cycles through 32-48 different scene positions, well past
+   *  the imprint threshold for OLED panels. */
+  private screensaverDrift(): { dx: number; dy: number } {
+    if (!this.screensaver) return { dx: 0, dy: 0 };
+    const t = (performance.now() - this.screensaverStartMs) / 1000;
+    // Periods 137 s and 89 s. Both prime, so the LCM is ~3.4 hours
+    // before the trajectory repeats — burn-in protection across
+    // overnight idle.
+    const dx = Math.cos(t * 2 * Math.PI / 137) * 24;
+    const dy = Math.sin(t * 2 * Math.PI / 89) * 16;
+    return { dx, dy };
   }
 
   render(
@@ -569,6 +605,23 @@ export class Renderer {
     // the offscreen Canvas2D buffer that just received putImageData.
     const terrainSource = useGL ? this.gltr!.canvas : this.off;
 
+    // Burn-in-prevention drift. Applied as a uniform translate to
+    // the visible canvas so terrain, ants, celestial, AND the
+    // minimap all shift together. The black fill behind the
+    // letterbox covers any newly-exposed canvas pixels at the drift
+    // edges. Off when screensaver mode is disabled (drift returns
+    // 0,0). Done as ctx.translate rather than offset arithmetic so
+    // every subsequent draw call inherits the shift without
+    // touching individual position math.
+    this.ctx.fillStyle = '#000';
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    const drift = this.screensaverDrift();
+    this.ctx.save();
+    if (drift.dx !== 0 || drift.dy !== 0) {
+      const dprForDrift = this.canvas.width / parseFloat(this.canvas.style.width || `${this.canvas.width}`);
+      this.ctx.translate(drift.dx * dprForDrift, drift.dy * dprForDrift);
+    }
+
     // Scale to viewport. Letterbox if aspect mismatch — the world has a
     // canonical aspect ratio (e.g. 12:7) we don't want to distort.
     const cw = this.canvas.width;
@@ -583,8 +636,9 @@ export class Renderer {
     const oh = h * scale;
     const ox = (cw - ow) * 0.5 + this.panX * dpr;
     const oy = (ch - oh) * 0.5 + this.panY * dpr;
-    this.ctx.fillStyle = '#000';
-    this.ctx.fillRect(0, 0, cw, ch);
+    // Black-fill happens before the screensaver-drift translate; see
+    // the fillRect call earlier in render(). Translate is in effect
+    // now, so all subsequent draws drift uniformly.
     this.ctx.imageSmoothingEnabled = false;
     this.ctx.drawImage(terrainSource, 0, 0, w * this.SUB, h * this.SUB, ox, oy, ow, oh);
 
@@ -1243,6 +1297,8 @@ export class Renderer {
         this.ctx.fillRect(dxm - r, dym - r, r * 2, r * 2);
       }
     }
+    // Pair the screensaver-drift translate at the top of render().
+    this.ctx.restore();
   }
 }
 

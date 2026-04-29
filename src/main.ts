@@ -25,6 +25,11 @@ interface Settings {
   ants: number;
   /** Realtime speed multiplier — 1× = wall:bio identity. */
   speedMul: number;
+  /** When true, enable burn-in-prevention drift in the renderer
+   *  AND hide the HUD/controls/help overlays so the visible canvas
+   *  is just the simulation. Intended for use as a screensaver or
+   *  always-on desktop background. URL param: ?screensaver=1. */
+  screensaver: boolean;
 }
 
 function readSettings(): Settings {
@@ -41,6 +46,7 @@ function readSettings(): Settings {
     height: Math.max(30, num('height', 140) | 0),
     ants: Math.max(0, num('ants', 0) | 0),
     speedMul: Math.max(0.125, num('speed', 8)),
+    screensaver: p.get('screensaver') === '1',
   };
 }
 
@@ -149,6 +155,18 @@ function main(): void {
   });
   const help = document.getElementById('help') as HTMLDivElement;
   const renderer = new Renderer(canvas, makePlaceholderWorld(settings));
+  renderer.screensaver = settings.screensaver;
+  // Screensaver mode: hide the static HUD and controls so the canvas
+  // is the only thing on screen. The HUD is the highest burn-in risk
+  // (small high-contrast text in the top-left corner that doesn't
+  // change for hours). Hiding it AND drifting the canvas covers both
+  // the static-pixel and stuck-text failure modes for OLED panels in
+  // always-on use.
+  if (settings.screensaver) {
+    hud.style.display = 'none';
+    help.style.display = 'none';
+    document.body.style.cursor = 'none';
+  }
 
   let helpHideTimer: number | undefined = window.setTimeout(() => {
     help.classList.add('hidden');
@@ -421,6 +439,7 @@ function main(): void {
   });
 
   const ctrls = document.getElementById('ctrls') as HTMLDivElement | null;
+  if (ctrls && settings.screensaver) ctrls.style.display = 'none';
   if (ctrls) {
     ctrls.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
