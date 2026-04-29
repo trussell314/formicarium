@@ -2501,7 +2501,24 @@ export function step(
       // be directly below the ant (see target override). Without
       // both, hitSoil rarely fires on the surface AND the gate
       // would block the roll even when it does.
-      if (neighbourSoil < 2 && !alarmBypass && !stranded) {
+      //
+      // Intact-ground surface guard. A worker who happens to be
+      // standing at the natural-surface row in a column that has
+      // never been excavated shouldn't trigger Sudd — the wave
+      // perturbation in the surface row can leave such workers
+      // with neighbourSoil ≥ 2 (one below + one lateral wave step),
+      // passing the enclosure gate and producing the "ants venture
+      // far away and dig random pits" behaviour. Skip dig unless
+      // there's an actual reason (alarm signal, stranded trigger,
+      // or worker is below the surface — i.e. inside an existing
+      // chamber / tunnel).
+      const intactGroundSurface =
+        ay <= world.naturalSurface[ax]! &&
+        world.cells[world.naturalSurface[ax]! * world.width + ax] !== CELL_AIR;
+      if (
+        (neighbourSoil < 2 || intactGroundSurface) &&
+        !alarmBypass && !stranded
+      ) {
         // Not enclosed — skip dig (and the Khuong roll). Grain
         // pickup is still allowed below; that's a different
         // behaviour and works fine on open ground.
@@ -2981,6 +2998,19 @@ export function step(
         if (!isVerticalShaft && !inSanctum && overdue >= 500) {
           const ramp = Math.min(1, (overdue - 500) / 1500);
           pDeposit = ramp * 0.5;
+          // Apply the same above-surface mound taper that gates the
+          // routine deposit path — without it, overdue carriers
+          // bypass the height cap entirely and pile grain into a
+          // single column until it spires 15+ cells high. Multiplied
+          // (not replaced) so the deadlock-relief intent still holds:
+          // even at height 4 the carrier can drop at 0.5 × 0.02 = 1%
+          // per tick, which clears the queue eventually without
+          // building a tower.
+          if (aboveSurface) {
+            const m = world.mound[px]!;
+            const taper = Math.max(0.02, 1 - m * 0.3);
+            pDeposit *= taper;
+          }
           depositedViaDeadlock = true;
         }
       }
