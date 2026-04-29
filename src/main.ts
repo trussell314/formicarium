@@ -40,10 +40,35 @@ function readSettings(): Settings {
     const n = Number(v);
     return Number.isFinite(n) ? n : d;
   };
+  // Auto-restore on start. If localStorage has a saved snapshot AND
+  // the user didn't explicitly override seed/width/height via URL
+  // params, adopt those fields from the save so the worker's
+  // settings-match check in restoreSnapshot accepts the blob and
+  // resumes from where the last session left off. Without this, every
+  // fresh page load re-randomises the seed → the saved blob's seed
+  // mismatches → restore is silently rejected → user always sees a
+  // brand-new colony despite the auto-save running.
+  let savedSeed: number | null = null;
+  let savedWidth: number | null = null;
+  let savedHeight: number | null = null;
+  try {
+    const blob = localStorage.getItem('formicarium:save');
+    if (blob !== null) {
+      const parsed = JSON.parse(blob) as { seed?: number; width?: number; height?: number };
+      if (typeof parsed.seed === 'number') savedSeed = parsed.seed >>> 0;
+      if (typeof parsed.width === 'number') savedWidth = parsed.width | 0;
+      if (typeof parsed.height === 'number') savedHeight = parsed.height | 0;
+    }
+  } catch {
+    // Corrupt save — ignore, fall through to fresh start.
+  }
+  const seedDefault = savedSeed ?? ((Date.now() & 0xffffffff) >>> 0);
+  const widthDefault = savedWidth ?? 280;
+  const heightDefault = savedHeight ?? 140;
   return {
-    seed: num('seed', (Date.now() & 0xffffffff) >>> 0),
-    width: Math.max(40, num('width', 280) | 0),
-    height: Math.max(30, num('height', 140) | 0),
+    seed: num('seed', seedDefault),
+    width: Math.max(40, num('width', widthDefault) | 0),
+    height: Math.max(30, num('height', heightDefault) | 0),
     ants: Math.max(0, num('ants', 0) | 0),
     speedMul: Math.max(0.125, num('speed', 8)),
     screensaver: p.get('screensaver') === '1',
