@@ -738,6 +738,35 @@ export function step(
               const recipE = colony.energy[recip]!;
               const donorState = colony.state[donor]!;
               const recipState = colony.state[recip]!;
+              // Larva-priority trophallaxis (FIX D). Larvae starve
+              // faster than workers (15× metabolism in real biology,
+              // 5× in our compressed model) and are the colony's
+              // most precious investment — losing one wastes the
+              // queen-feeding + worker-feeding effort that produced
+              // it. Real nurses prioritise larva feeding over their
+              // own consumption (Cassill 2002 measured S. invicta
+              // nurses voluntarily down-feeding to keep brood at
+              // capacity). Override the donor-threshold gate when
+              // the recipient is a starving larva: workers donate
+              // even with sub-threshold crops, but the donor retains
+              // a survival floor of 0.3 — below that they need their
+              // own food and refuse the donation. Without the floor
+              // a worker walking through a chamber with 5 starving
+              // larvae burns through 0.025 energy/tick from
+              // trophallaxis alone (5 pairs × 0.005) and dies in ~30
+              // ticks. Monitoring run with no floor showed 6 worker
+              // deaths by t=120k from this exact mechanism.
+              const recipIsStarvingLarva =
+                recipState === STATE_LARVA &&
+                recipE < species.trophallaxisRecipientThreshold;
+              // Floor below which donors don't volunteer for priority
+              // trophallaxis. Above the standard donorThreshold (0.5)
+              // the standard gate fires anyway; below 0.3 the worker
+              // is too lean to give. The 0.3-0.5 band is the priority
+              // zone where workers lower their own threshold to feed
+              // brood — but they still keep enough reserve to walk to
+              // food if needed.
+              const PRIORITY_DONOR_FLOOR = 0.3;
               const donorOk =
                 donorState !== STATE_DEAD &&
                 donorState !== STATE_EGG &&
@@ -750,14 +779,25 @@ export function step(
                 // reserves and trophallactic exchange. Allow queen
                 // donation when the recipient is a larva.
                 (donorState !== STATE_QUEEN || recipState === STATE_LARVA) &&
-                donorE > species.trophallaxisDonorThreshold;
+                // Standard donor gate: must have surplus above the
+                // threshold. Priority path lowers the gate to
+                // PRIORITY_DONOR_FLOOR for starving larvae.
+                (recipIsStarvingLarva
+                  ? donorE > PRIORITY_DONOR_FLOOR
+                  : donorE > species.trophallaxisDonorThreshold);
               const recipOk =
                 recipState !== STATE_DEAD &&
                 recipState !== STATE_EGG &&
                 recipE < species.trophallaxisRecipientThreshold;
               if (donorOk && recipOk) {
                 const want = species.maxEnergy - recipE;
-                const surplus = donorE - species.trophallaxisDonorThreshold;
+                // Surplus calculation: standard path uses (donorE −
+                // donorThreshold). Priority path uses (donorE −
+                // PRIORITY_DONOR_FLOOR) — donor never goes below the
+                // floor.
+                const surplus = recipIsStarvingLarva
+                  ? Math.max(0, donorE - PRIORITY_DONOR_FLOOR)
+                  : donorE - species.trophallaxisDonorThreshold;
                 const give = Math.min(species.trophallaxisAmount, want, surplus);
                 if (give > 0) {
                   colony.energy[recip] = recipE + give;
@@ -1849,8 +1889,45 @@ export function step(
     // colony "knows" the patch is depleted without anyone tracking
     // it explicitly).
     const inboundBoost = 1 + Math.min(4, world.foragerReturnRate * 0.5);
+    // Founding-phase forage override (FIX A). The Greene & Gordon
+    // antennation feedback loop bootstraps from successful returns —
+    // but a colony with no returns yet (foragerReturnRate ≈ 0) gets
+    // no boost from it. Combined with CARRY-state lock-in (workers
+    // emerge → hit chamber wall → become CARRY → stay CARRY for
+    // hundreds of ticks → never reach the surface to roll FORAGE),
+    // the bootstrap NEVER happens. Headless monitoring showed zero
+    // successful trips for 270k ticks despite 28 workers and visible
+    // surface seeds. Force the issue: when the colony has workers
+    // and food is in sight but no returns have succeeded, boost the
+    // forage roll so SOMEONE leaves. The override goes away as soon
+    // as the first trip lands — the inboundBoost takes over.
+    //
+    // Boost magnitude tuned at 10×: a follow-up monitoring run at
+    // 50× sent every adult worker outside at once and 6 of the
+    // first 9 emergents died on the surface before the queen could
+    // raise replacements. 10× still bootstraps within a few ticks
+    // of food becoming visible without depopulating the chamber.
+    const foundingOverride =
+      world.foragerReturnRate < 0.01 &&
+      world.foodCountCached > 0 &&
+      aliveWorkers > 0
+        ? 10
+        : 1;
+    // Founding patroller bias (FIX E). In small colonies (<30
+    // workers), everyone is a generalist — there's no nurse-vs-
+    // forager caste yet (Wilson 1971 polyethism review). The
+    // existing smallForageMult was a DAMPENER (0.05 at 5 workers)
+    // that kept founding colonies from sending too many workers
+    // outside. But in practice this stacks with CARRY-saturation
+    // and produces the bootstrap deadlock from FIX A. Replace the
+    // dampener: in small colonies, KEEP the base rate but add a
+    // mild boost (×2) so freshly-emerged workers reliably reach
+    // the surface before the dig pheromone routes them back. The
+    // damper survives in the foundingPatrollerBoost cap (no infinite
+    // amplification) and is bounded by smallForageMult itself.
+    const foundingPatrollerBoost = isSmallColony ? 2 : 1;
     if (stateIn === STATE_WANDER && iy >= world.naturalSurface[ix]! &&
-        rng.next() < species.forageProb * forageActivity * forageMult * smallForageMult * foodVisibleBoost * starvationBoost * inboundBoost) {
+        rng.next() < species.forageProb * forageActivity * forageMult * smallForageMult * foodVisibleBoost * starvationBoost * inboundBoost * foundingOverride * foundingPatrollerBoost) {
       colony.setState(i, STATE_FORAGE);
       colony.collisionCount[i] = 0;
       // Heading reset toward the surface so the trip starts in the
@@ -2449,7 +2526,31 @@ export function step(
         // colony is below SMALL_COLONY so the chamber opens up
         // before workers age into foragers and abandon excavation.
         const foundingBoost = isSmallColony ? 3.0 : 1.0;
-        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus * dirBonus * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation) {
+        // Hungry-colony dig suppression (FIX B). When average worker
+        // energy is low, real ants down-regulate excavation and re-
+        // allocate effort to foraging — chambers can wait, food
+        // can't (Gordon 2010, Ch. 5: "task allocation responds to
+        // need"). Without this, the existing dig-pheromone gradient
+        // routes every WANDER ant to dig before they can reach the
+        // surface to forage. Multiplier ramps from 1.0 at avgEnergy
+        // ≥ 0.4 down to 0.1 at avgEnergy ≤ 0.2; below that, dig is
+        // effectively suspended so the workforce frees up for
+        // emergency foraging.
+        //
+        // EXCEPTION: ants that are entombed or stranded NEED to
+        // dig — they're buried/stuck and dig is their only escape.
+        // Without this exception, hungry buried workers can't break
+        // out of the chambers they got walled into; they just
+        // starve underground. The post-fix monitoring run showed
+        // 4/12 workers trapped in buried chambers after the
+        // dig-suppression went into effect.
+        const hungerDigMul = (entombed || stranded) ? 1.0
+          : avgEnergy >= 0.4
+            ? 1.0
+            : avgEnergy <= 0.2
+              ? 0.1
+              : 0.1 + 0.9 * ((avgEnergy - 0.2) / 0.2);
+        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus * dirBonus * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation * hungerDigMul) {
           if (digCell(world, target.x, target.y, rng)) {
             // Track dig direction relative to the digger's cell, so
             // the diag can surface a vertical-vs-lateral histogram.
@@ -2698,10 +2799,19 @@ export function step(
         // Use a linear taper instead so short columns are strongly
         // preferred, tall columns still accept grain at low
         // probability, and the colony self-organises into a wide
-        // hump rather than a needle. Floor at 0.05 prevents the
+        // hump rather than a needle. Floor at 0.02 prevents the
         // total-saturation deadlock.
+        //
+        // Taper steepened from `1 − m × 0.2` (floor 0.05) to
+        // `1 − m × 0.3` (floor 0.02) after monitoring showed
+        // mounds still climbed to height 12 — at the prior taper,
+        // height 4 still accepted grain at 20% per tick which let
+        // the Khuong gradient outpace the spread mechanic. New
+        // values: height 0=1.0, height 2=0.4, height 3=0.1,
+        // height 4=0.02 (floored). 5× drop in deposit rate at the
+        // peak vs the prior taper.
         const m = world.mound[px]!;
-        pDeposit = Math.max(0.05, 1 - m * 0.2);
+        pDeposit = Math.max(0.02, 1 - m * 0.3);
       } else if (!aboveSurface && supportedBelow && cellIsAir) {
         // Brood/queen exclusion. Real workers keep the queen's
         // chamber and the broodpile clean — they don't backfill
