@@ -1,18 +1,17 @@
 // Population-driven clump rain. Each tick drops 110% of the live
-// colony's metabolic demand (in seed-equivalent units), capped at
-// 10× the original-population's worker metabolism. The rate is
+// colony's metabolic demand (in seed-equivalent units). The rate is
 // realised through an accumulator that fires one clump every time
 // it crosses species.clumpSize.
 //
 // Verify:
 //   1. Rate scales with population — a many-ant colony gets clearly
-//      more food per unit time than a few-ant colony at the same
-//      foodCap.
-//   2. The cap kicks in at high pop — colonies far above foodCap
-//      receive the SAME food rate as colonies at foodCap.
+//      more food per unit time than a few-ant colony.
+//   2. The supply rate has no upper cap — population scaling is
+//      proportional all the way up; the only throttle is the 150%
+//      standing-inventory hard stop further along.
 //   3. Non-granivorous species don't drop clumps.
-//   4. foodCap = 0 disables the rain (defensive default before
-//      main.ts initialises it).
+//   4. foodCap = 0 disables the rain entirely (used as a feature
+//      toggle / defensive default before main.ts enables it).
 
 import { describe, expect, it } from 'vitest';
 import { Colony } from '../src/sim/colony';
@@ -113,34 +112,37 @@ describe('population-driven clump rain', () => {
     expect(big).toBeGreaterThan(small * 3);
   });
 
-  it('cap saturates at world.foodCap workers', () => {
-    function run(workers: number, foodCap: number): number {
+  it('rate scales with population without an upper cap', () => {
+    // Previously the food rate hit a ceiling at world.foodCap × the
+    // species metabolism, so a 40-worker colony at foodCap=10 saw
+    // the same supply as a 10-worker colony. That made larger
+    // colonies starve as they grew. The cap was removed; the only
+    // throttle now is the 150%-of-population standing-inventory
+    // hard stop, which gates drops based on visible surplus, not
+    // population size. Two colonies should now produce supply rates
+    // proportional to their population.
+    function run(workers: number): number {
       const rng = new RNG(2);
       const w = flatWorld();
-      w.foodCap = foodCap;
+      w.foodCap = 1; // any non-zero value enables the rain
       const colony = new Colony(workers + 4);
       seedWorkers(colony, workers, w);
       const f = fields(w);
-      // 500 ticks rather than 5000 so we measure the supply RATE
-      // before the population-aware saturation throttle (hard stop
-      // at 1.5× population standing inventory) starts capping the
-      // smaller colony at a different inventory plateau than the
-      // larger one. In the early-supply window both colonies are
-      // bounded by foodCap and produce the same rate.
+      // 500 ticks measures the early supply rate before the
+      // standing-inventory saturation throttle plateaus the
+      // colonies at different absolute inventory levels.
       for (let t = 0; t < 500; t++) {
         step(w, colony, f.dig, f.build, rng, DEFAULT_PARAMS, undefined, FAST);
       }
       return countFood(w);
     }
-    const atCap = run(10, 10);
-    const overCap = run(40, 10);
-    // Both colonies are at or above foodCap; the cap dominates the
-    // rate so the food count should be the same up to RNG-driven
-    // surface-collision losses (each clump might spawn into an
-    // already-occupied column and lose a seed).
-    const ratio = overCap / Math.max(1, atCap);
-    expect(ratio).toBeGreaterThan(0.7);
-    expect(ratio).toBeLessThan(1.3);
+    const small = run(10);
+    const big = run(40);
+    // 4× population → roughly 4× supply rate (with some RNG-driven
+    // surface-collision loss). Permissive bounds to allow for the
+    // throttle starting to nibble at the 40-worker colony first.
+    const ratio = big / Math.max(1, small);
+    expect(ratio).toBeGreaterThan(2.5);
   });
 
   it('non-granivorous species do not drop clumps', () => {

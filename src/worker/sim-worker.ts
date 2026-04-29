@@ -67,7 +67,11 @@ const TICK_BUDGET_MS = 12;
 function buildBundle(s: SaveSettings, restoreBlob: string | null): SimBundle {
   const rng = new RNG(s.seed);
   const world = new World(s.width, s.height);
-  world.foodCap = Math.max(50, s.ants * 10);
+  // Enable the food rain. The numeric value used to act as a rate
+  // cap; that cap was removed, so any non-zero value just toggles
+  // the rain on. (Zero would disable food entirely — used by tests
+  // that need a no-food world.)
+  world.foodCap = 1;
   const surfaceRow = Math.floor(s.height * 0.30);
   const halfW = Math.max(6, Math.floor(s.width * 0.06));
   const depth = Math.max(4, Math.floor(s.height * 0.05));

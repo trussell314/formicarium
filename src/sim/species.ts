@@ -45,8 +45,9 @@ export interface AntSpecies {
   /** Legacy field retained so existing species literals still type-
    *  check; the population-driven clump scheduler in step() ignores
    *  it. The actual rate is computed from current colony demand
-   *  (×1.10) capped at world.foodCap × species.metabolism, with the
-   *  accumulator firing one clump per `clumpSize` accumulated seeds. */
+   *  (×1.10) with no upper cap, throttled only by the 150%-of-
+   *  population standing-inventory hard stop. The accumulator
+   *  fires one clump per `clumpSize` accumulated seeds. */
   readonly clumpInterval: number;
   /** Seeds per clump event. */
   readonly clumpSize: number;

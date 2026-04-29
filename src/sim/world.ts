@@ -108,13 +108,15 @@ export class World {
    *  digs than lateral digs, or whether some unrelated bottleneck
    *  is keeping the architecture horizontal. Order: [N, S, E, W]. */
   readonly digsByDir = new Int32Array(4);
-  /** Hard cap on the population-driven seed-clump rate, expressed
-   *  as a count of equivalent worker ants. Each tick the colony's
-   *  metabolic demand is computed live; the food rate is set to
-   *  deliver 1.10× that demand, but no higher than `foodCap`
-   *  workers' worth of demand. Initialised in main.ts to 10× the
-   *  starting population. The user-facing knob is the original
-   *  population (?ants= URL param). */
+  /** Feature toggle for the population-driven seed-clump rain.
+   *  Non-zero enables the rain; zero disables it (used as the
+   *  defensive default before sim-worker.ts initialises the world,
+   *  and by tests that need a no-food environment). Previously this
+   *  also acted as a hard rate cap (food supply was bounded at
+   *  `foodCap × species.metabolism` per tick, max), but the rate
+   *  cap was removed — supply now scales proportionally with live
+   *  colony demand. The only throttle is the 150%-of-population
+   *  standing-inventory hard stop in ant-rules. */
   foodCap = 0;
   /** Running fractional-seed accumulator for the clump rain. Each
    *  tick adds the dynamic target rate; whenever the total exceeds

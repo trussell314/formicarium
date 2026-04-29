@@ -324,18 +324,20 @@ export function step(
   if (species.granivorous && species.clumpSize > 0 && world.foodCap > 0) {
     // Population-driven food rate. Each tick we add to a fractional
     // seed accumulator at a rate equal to 110% of the colony's
-    // current metabolic demand (in seed-equivalent units), capped at
-    // 10× the original-population's worker demand (world.foodCap is
-    // the cap expressed in equivalent worker count). Whenever the
-    // accumulator crosses the clumpSize threshold a clump fires.
+    // current metabolic demand (in seed-equivalent units). The
+    // accumulator fires a clump whenever it crosses the clumpSize
+    // threshold.
     //
-    // The cap prevents the food rate from running away as the colony
-    // grows toward maxColonySize; with the cap, a fully-populated
-    // (1000-ant) colony still receives the same drop rate as a
-    // 10×-original-pop "saturated" colony rather than scaling
-    // unboundedly. Outside the cap, smaller colonies get
-    // proportionally less so 10 starter ants don't see a windfall
-    // they can't possibly process.
+    // No upper rate cap: a 1000-ant colony gets 100× the supply of
+    // a 10-ant colony. Larger colonies need proportionally more
+    // food and would starve under a flat cap. Smaller colonies
+    // still get a small rate (proportional to their demand) so
+    // founding queens can sustain themselves and first nanitics.
+    //
+    // The standing-inventory throttle below (150%-of-population
+    // hard cap) is what keeps the surface from drowning in seeds
+    // when nobody is foraging fast enough — it gates new drops
+    // without rate-limiting the colony as it grows.
     let demand = 0;
     for (let i = 0; i < colony.count; i++) {
       const s = colony.state[i];
@@ -348,7 +350,6 @@ export function step(
         demand += species.metabolism;
       }
     }
-    const capDemand = world.foodCap * species.metabolism;
     // Saturation throttle. Without this, supply matches demand
     // exactly so any unconsumed seed accumulates indefinitely —
     // foragers can't pick up perfectly-balanced supply, surplus
@@ -407,7 +408,7 @@ export function step(
     if (satMult === 0 && world.clumpAccum >= species.clumpSize) {
       world.clumpAccum = 0;
     }
-    const targetEnergyPerTick = Math.min(demand * 1.10, capDemand) * satMult;
+    const targetEnergyPerTick = demand * 1.10 * satMult;
     const targetSeedsPerTick = targetEnergyPerTick / species.foodValue;
     world.clumpAccum += targetSeedsPerTick;
     // Fire as many clumps as the accumulator can pay for. Typically
