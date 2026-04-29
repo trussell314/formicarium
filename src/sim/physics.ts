@@ -300,7 +300,24 @@ export function digCell(world: World, x: number, y: number, rng: RNG): boolean {
       if (world.cells[cIdx] === CELL_GRAIN) {
         const final = settleGrain(world, cx, y - 1, rng);
         recomputeMound(world, cx);
-        if (final.x !== cx) recomputeMound(world, final.x);
+        if (final.x !== cx) {
+          recomputeMound(world, final.x);
+          // The settling grain slid sideways out of cx, so any
+          // grains that were stacked on top of it (at cx, y-2 and
+          // higher) just lost their support. Walk up the source
+          // column and re-cascade each remaining grain. pickGrain
+          // already does this for the same reason; digCell only
+          // re-cascaded the directly-above cell and left taller
+          // stacks floating mid-air whenever a lateral dig pulled
+          // the bottom grain out diagonally.
+          let above = y - 2;
+          while (above >= 0 && world.cells[above * world.width + cx] === CELL_GRAIN) {
+            const f = settleGrain(world, cx, above, rng);
+            if (f.x !== cx) recomputeMound(world, f.x);
+            above--;
+          }
+          recomputeMound(world, cx);
+        }
       }
     }
   }

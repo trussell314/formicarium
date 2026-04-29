@@ -2658,7 +2658,19 @@ export function step(
       const cornerBoost = cornerSoil >= 2 ? 2.0 : 1.0;
       let pDeposit = 0;
       if (aboveSurface && groundIsIntact && cellIsAir) {
-        pDeposit = 1; // surface-mound bootstrap (Tschinkel)
+        // Mound height cap. Real Pogonomyrmex spoil mounds are
+        // BROAD humps (Tschinkel 2004 measured P. badius nests at
+        // 5–15 cm tall × 30–50 cm wide), but our renderer was
+        // showing thin 8–10 cell vertical pillars at active
+        // entrances because the build-pheromone gradient pulls
+        // every CARRY worker to the existing peak and pDeposit=1
+        // fires unconditionally. Cap the per-column height at 4
+        // cells (~12 mm) to force lateral spreading; workers who
+        // hit a capped column walk further before depositing.
+        const MAX_MOUND_HEIGHT = 4;
+        if (world.mound[px]! < MAX_MOUND_HEIGHT) {
+          pDeposit = 1; // surface-mound bootstrap (Tschinkel)
+        }
       } else if (!aboveSurface && supportedBelow && cellIsAir) {
         // Brood/queen exclusion. Real workers keep the queen's
         // chamber and the broodpile clean — they don't backfill
