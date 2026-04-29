@@ -2714,25 +2714,48 @@ export function step(
             // Fresh material — never moved before. The next deposit
             // will set the placed cell's grainMoves to 1.
             colony.carryMoves[i] = 0;
-            // Asymmetric dig-pheromone deposit: bulk of the recruitment
-            // signal is laid ONE ROW BELOW the actual dug cell, so the
-            // gradient pulls subsequent diggers DOWN into virgin soil
-            // rather than along the row that was just dug. Without
-            // this, every dig laterally lays pheromone at the same
-            // depth, the gradient pulls the next ant the same direction,
-            // and chambers drift into long horizontal galleries (the
-            // opposite of the vertical-gallery + horizontal-chamber
-            // architecture Tschinkel 2004 mapped in Pogonomyrmex
-            // badius). Real ant alarm/recruitment pheromones do show
-            // directional persistence — convection at the surface
-            // disperses them faster than the still air at depth, so
-            // the equivalent biological phenomenon (deeper-pheromone-
-            // lasts-longer) maps onto the same gradient asymmetry.
-            // 80% of the signal goes below the dug cell, 20% at the
-            // dug cell itself for in-place recruitment continuity.
-            digField.deposit(target.x, target.y, digDeposit * 0.2);
-            if (target.y + 1 < world.height) {
-              digField.deposit(target.x, target.y + 1, digDeposit * 0.8);
+            // Direction-of-extension dig-pheromone deposit. The bulk of
+            // the recruitment signal is laid ONE CELL BEYOND the dug
+            // cell, in the direction the digger was reaching — so the
+            // gradient pulls subsequent diggers ALONG THE GROWING
+            // EDGE rather than always downward.
+            //
+            // Depth-modulated:
+            //   above ~15 cells deep: pure vertical bias (80% below
+            //     the dug cell, 20% at-cell). Surface and shallow
+            //     trunks should stay as straight gallery shafts.
+            //   at chamber depth (≥15): bias along the digger's
+            //     direction of extension (60% in the continuation
+            //     cell, 20% directly below as a residual trunk-pull,
+            //     20% at-cell). A laterally-extending chamber edge
+            //     pulls the next dig laterally; a downward-extending
+            //     trunk tip keeps pulling down. This is the same
+            //     "deeper-pheromone-lasts-longer" directional
+            //     persistence Tschinkel 2004 ascribed to the
+            //     vertical-gallery-with-lateral-chambers architecture
+            //     of Pogonomyrmex badius.
+            const depositDepth = Math.max(0, target.y - world.naturalSurface[target.x]!);
+            if (depositDepth < 15) {
+              digField.deposit(target.x, target.y, digDeposit * 0.2);
+              if (target.y + 1 < world.height) {
+                digField.deposit(target.x, target.y + 1, digDeposit * 0.8);
+              }
+            } else {
+              // Continuation cell = one beyond the dug cell, in the
+              // direction the digger was reaching. Falls back to
+              // straight-down for fresh-ground digs (ddx=ddy=0 is
+              // impossible since target is adjacent to source, but
+              // a vertical-down dig has ddy=+1 → continuation is
+              // target.y+1, identical to the surface branch).
+              const cx = target.x + ddx;
+              const cy = target.y + ddy;
+              digField.deposit(target.x, target.y, digDeposit * 0.2);
+              if (cx >= 0 && cx < world.width && cy >= 0 && cy < world.height) {
+                digField.deposit(cx, cy, digDeposit * 0.6);
+              }
+              if (target.y + 1 < world.height) {
+                digField.deposit(target.x, target.y + 1, digDeposit * 0.2);
+              }
             }
             // Stranded surface beacon. The deposits above are deep
             // in the new shaft and barely reach surface ants by
