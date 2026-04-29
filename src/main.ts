@@ -88,6 +88,7 @@ function main(): void {
   hud.innerHTML = `
     <button id="hud-min" title="minimise / restore">−</button>
     <div class="row hdr"><span>FORMICARIUM</span><span class="v" id="h-seed"></span></div>
+    <div class="row hdr-mini"><span class="v" id="h-mini"></span></div>
     <div class="row"><span>colony</span><span class="v" id="h-colony"></span></div>
     <div class="row"><span>brood</span><span class="v" id="h-brood"></span></div>
     <div class="row"><span>nest</span><span class="v" id="h-nest"></span></div>
@@ -114,6 +115,7 @@ function main(): void {
   `;
   const hudEls = {
     seed: document.getElementById('h-seed')!,
+    mini: document.getElementById('h-mini')!,
     colony: document.getElementById('h-colony')!,
     brood: document.getElementById('h-brood')!,
     nest: document.getElementById('h-nest')!,
@@ -585,6 +587,11 @@ function main(): void {
         `${snap.hud.grains} grains · ${snap.hud.foodCount} seeds`);
       hudEls.time.textContent =
         `t=${snap.tick.toLocaleString()} · ${bioTime} · ${phaseLabel}`;
+      // Minimised-bar text: visible even when the user collapses the
+      // HUD, so the colony's basic vitals (population + clock) remain
+      // on screen at a glance.
+      hudEls.mini.textContent =
+        `${snap.hud.alive}/${snap.hud.alive + snap.hud.eggs + snap.hud.larvae + snap.hud.pupae} · ${bioTime} · t=${snap.tick.toLocaleString()}`;
       // Status flag. Priority: PAUSED > EXTINCT > STARVING. Below
       // 0.4 mean worker energy the colony is in real trouble — half
       // the workers are running on fumes and trophallaxis can't
