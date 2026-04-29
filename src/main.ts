@@ -448,11 +448,11 @@ function main(): void {
     });
   }
 
-  // Auto-save every 30 sec wall (and on visibility-hidden /
+  // Auto-save every 5 min wall (and on visibility-hidden /
   // beforeunload). The worker captures the snapshot; we hand off
   // to localStorage. Captures are async (cross-thread) so we don't
   // get a synchronous answer on beforeunload — best-effort.
-  const AUTO_SAVE_MS = 30_000;
+  const AUTO_SAVE_MS = 5 * 60_000;
   window.setInterval(() => {
     send({ kind: 'captureForSave' });
   }, AUTO_SAVE_MS);
