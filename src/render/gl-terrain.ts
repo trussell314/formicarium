@@ -255,11 +255,16 @@ void main() {
   }
 
   // Per-sub-cell luminance variation. Hash uses subOff packed into
-  // a single index that's stable across SUB values.
-  int subI = subOff.y * uSub + subOff.x;
-  int subBase = (noiseByte + subI * 67) & 0xff;
-  float subN = float(subBase) / 255.0 - 0.5;
-  col *= (1.0 + subN * 0.10);
+  // a single index that's stable across SUB values. Only applied to
+  // SOIL/GRAIN — on AIR (sky and tunnel) the perturbation has no
+  // material to texture and shows up as a paper-grain speckle that's
+  // particularly visible against the bright daytime sky.
+  if (k != 0) {
+    int subI = subOff.y * uSub + subOff.x;
+    int subBase = (noiseByte + subI * 67) & 0xff;
+    float subN = float(subBase) / 255.0 - 0.5;
+    col *= (1.0 + subN * 0.10);
+  }
 
   // Pheromone overlay (additive composition).
   if (uShowPhero > 0.5) {

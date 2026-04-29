@@ -450,28 +450,29 @@ export class Renderer {
           const t = Math.min(1, Math.max(0.4, age / 1000));
           r = 70 * t; g = 230 * t; b = 50 * t;
         }
-        // Write SUB×SUB sub-pixels for this sim cell. Each sub-pixel
-        // gets a different small luminance perturbation derived from
-        // the per-cell soilNoise plus the sub-cell index — gives an
-        // intra-cell texture that breaks up the blocky look without
-        // changing sim resolution. The four perturbation values are
-        // [-0.06, +0.04, +0.02, -0.04] of luminance scale; fine
-        // enough to read as natural variation, coarse enough to
-        // visibly add detail. Sub-cell ordering: row-major
-        // (sy=0,sx=0), (sy=0,sx=1), (sy=1,sx=0), (sy=1,sx=1).
+        // Write SUB×SUB sub-pixels for this sim cell. SOIL/GRAIN get
+        // a per-sub-cell luminance perturbation derived from the
+        // per-cell soilNoise plus the sub-cell index — adds intra-
+        // cell texture that breaks up the blocky look without
+        // changing sim resolution. AIR cells (sky and tunnel) skip
+        // the perturbation: they have no material to texture and the
+        // hash showed up as a paper-grain speckle on the daytime sky.
         const SUB = this.SUB;
         const subBase = noise[idx]!;
+        const isAir = k === CELL_AIR;
         for (let sy = 0; sy < SUB; sy++) {
           for (let sx = 0; sx < SUB; sx++) {
-            const subI = sy * SUB + sx;
-            // Per-sub-cell variation. Hashing the cell noise with
-            // the sub-index gives a stable, cheap pattern that's
-            // different for each of the 4 sub-cells of every cell.
-            const subN = ((subBase + subI * 67) & 0xff) / 255 - 0.5;
-            const k = 0.10; // luminance perturbation scale
-            const sr = r * (1 + subN * k);
-            const sg = g * (1 + subN * k);
-            const sb = b * (1 + subN * k);
+            let sr: number, sg: number, sb: number;
+            if (isAir) {
+              sr = r; sg = g; sb = b;
+            } else {
+              const subI = sy * SUB + sx;
+              const subN = ((subBase + subI * 67) & 0xff) / 255 - 0.5;
+              const PERT = 0.10;
+              sr = r * (1 + subN * PERT);
+              sg = g * (1 + subN * PERT);
+              sb = b * (1 + subN * PERT);
+            }
             const so = ((y * SUB + sy) * (w * SUB) + (x * SUB + sx)) * 4;
             data[so] = sr < 0 ? 0 : sr > 255 ? 255 : sr;
             data[so + 1] = sg < 0 ? 0 : sg > 255 ? 255 : sg;
