@@ -632,62 +632,135 @@ export class Renderer {
         }
       }
 
-      // Sun and moon arc across the sky in opposing half-cycles.
-      // Sun visible during the daylight half (phase in [0.25, 0.75]);
-      // moon visible during the night half. Both follow a parabolic
-      // arc from east horizon (x=0) up to overhead (x=cw/2) and
-      // down to west horizon (x=cw). t01 ∈ [0,1] across the rise→set.
+      // Sun and moon as celestial bodies on a virtual sphere, mapped
+      // to a parabolic-style arc. The sun's angular position drives
+      // both the diel cycle and (with a 28-day offset) the moon's
+      // position. Lunar phase emerges geometrically from the angle
+      // between sun and moon as seen from the viewer:
+      //   - new moon: ΔL ≈ 0     → sun and moon co-located, lit
+      //                             face away from us, fully dark.
+      //   - first quarter: ΔL = π/2 → 50% lit, rises at noon.
+      //   - full moon: ΔL = π     → 180° apart, lit face toward us,
+      //                             100% lit, rises at sunset.
+      //   - last quarter: ΔL = 3π/2 → rises at midnight.
+      //
+      // Angular convention: θ = 0 → body overhead, θ = ±π/2 → on the
+      // horizon (-π/2 east/rising, +π/2 west/setting), |θ| > π/2 →
+      // below horizon. screen-x increases with sin(θ) (rising on
+      // left, setting on right); screen-y is high near apex via
+      // cos(θ).
       const skyTop = oy;
       const skyBottom = oy + skyHeightPx;
-      const peakY = skyTop + skyHeightPx * 0.15; // arc apex
+      const peakY = skyTop + skyHeightPx * 0.15;
       const horizonY = skyBottom - skyHeightPx * 0.05;
       const bodyR = Math.max(6, Math.min(skyHeightPx * 0.07, ow * 0.025));
-      const drawArcBody = (t01: number, isSun: boolean): void => {
-        // Parabolic arc: y = horizonY at t=0 and t=1, peakY at t=0.5.
-        const arc = Math.sin(t01 * Math.PI); // 0..1..0
-        const bx = ox + ow * t01;
-        const by = horizonY + (peakY - horizonY) * arc;
-        if (isSun) {
-          // Soft halo + bright disc. The halo is a radial gradient
-          // that fades the warm tint into transparency over 3× the
-          // disc radius — sells the "atmospheric scatter" without
-          // costing per-pixel work.
-          const g = this.ctx.createRadialGradient(bx, by, 0, bx, by, bodyR * 3.5);
-          g.addColorStop(0, 'rgba(255, 230, 160, 0.55)');
-          g.addColorStop(0.5, 'rgba(255, 200, 120, 0.18)');
-          g.addColorStop(1, 'rgba(255, 200, 120, 0)');
-          this.ctx.fillStyle = g;
-          this.ctx.beginPath();
-          this.ctx.arc(bx, by, bodyR * 3.5, 0, Math.PI * 2);
-          this.ctx.fill();
-          this.ctx.fillStyle = 'rgb(255, 240, 190)';
-          this.ctx.beginPath();
-          this.ctx.arc(bx, by, bodyR, 0, Math.PI * 2);
-          this.ctx.fill();
-        } else {
-          // Pale disc with a faint shadow crescent for moon-ness.
-          // The shadow offset rotates slowly through the lunar month
-          // (here: a synthetic 28-day cycle keyed off the tick) so
-          // the moon waxes and wanes over many sim days.
-          const lunar = ((tick / DAY_TICKS) % 28) / 28; // 0..1
-          const shadowDx = Math.cos(lunar * Math.PI * 2) * bodyR * 0.6;
-          this.ctx.fillStyle = 'rgba(225, 225, 235, 0.95)';
-          this.ctx.beginPath();
-          this.ctx.arc(bx, by, bodyR, 0, Math.PI * 2);
-          this.ctx.fill();
-          this.ctx.fillStyle = 'rgba(20, 22, 35, 0.55)';
-          this.ctx.beginPath();
-          this.ctx.arc(bx + shadowDx, by, bodyR * 0.95, 0, Math.PI * 2);
-          this.ctx.fill();
-        }
+      // Lunar cycle: 28 sim days. Uses world.tick directly (rather
+      // than the daily-mod phase) so the offset accumulates across
+      // days rather than resetting each midnight. dL ∈ [0, 2π).
+      const LUNAR_DAYS = 28;
+      const dL = ((tick / DAY_TICKS / LUNAR_DAYS) % 1) * Math.PI * 2;
+      // Sun's angular position. phase=0 is solar midnight, so
+      // θ_sun = (phase − 0.5) · 2π puts noon at θ=0 (overhead),
+      // sunrise at θ=−π/2 (east), sunset at θ=+π/2 (west), midnight
+      // at θ=±π (directly below).
+      const thetaSun = (phase - 0.5) * Math.PI * 2;
+      // Moon lags the sun in the daily arc — real moon orbits in the
+      // same direction Earth rotates, but slower, so each day the
+      // moon's azimuth falls ~13° behind the sun's (rises ~50 min
+      // later). θ_moon = θ_sun − dL gives the correct rise/set
+      // timing across the lunar cycle:
+      //   day 0 (new, dL=0):    moon co-located with sun.
+      //   day 7 (dL=π/2):       at noon, moon at east horizon →
+      //                          first quarter rises at noon. ✓
+      //   day 14 (dL=π):        at sunset, moon at east horizon →
+      //                          full moon rises at sunset. ✓
+      //   day 21 (dL=3π/2):     at midnight, moon at east horizon →
+      //                          last quarter rises at midnight. ✓
+      const thetaMoon = thetaSun - dL;
+      // Mapping from angular position θ to screen coords. Used both
+      // for the visible-bodies path and to compute the sun's virtual
+      // position when below the horizon (needed for moon-shadow
+      // direction).
+      const bodyScreenPos = (theta: number): { x: number; y: number; visible: boolean } => {
+        const tn = Math.atan2(Math.sin(theta), Math.cos(theta)); // wrap to [-π, π]
+        const altitude = Math.cos(tn); // +1 overhead, -1 below
+        // Linear horizontal sweep east→overhead→west, scaled to ow.
+        // Use sin for the screen-x so apex sits at ow/2 and limbs at
+        // 0 / ow regardless of altitude sign.
+        const x = ox + ow * (Math.sin(tn) * 0.5 + 0.5);
+        // Parabolic-ish y: at altitude 0 → horizonY, at altitude 1 →
+        // peakY. Negative altitudes extend below horizon for the
+        // virtual-sun calculation.
+        const y = horizonY + (peakY - horizonY) * altitude;
+        return { x, y, visible: altitude > 0 };
       };
-      if (phase >= 0.25 && phase <= 0.75) {
-        const t = (phase - 0.25) * 2; // 0..1
-        drawArcBody(t, true);
-      } else {
-        // Night. phase in [0, 0.25) ∪ (0.75, 1] — map to [0,1] across night.
-        const t = phase < 0.25 ? (phase + 0.25) * 2 : (phase - 0.75) * 2;
-        drawArcBody(t, false);
+      const sunPos = bodyScreenPos(thetaSun);
+      const moonPos = bodyScreenPos(thetaMoon);
+      if (sunPos.visible) {
+        // Soft halo + bright disc. The halo is a radial gradient that
+        // fades the warm tint into transparency over 3× the disc
+        // radius — sells the "atmospheric scatter" without costing
+        // per-pixel work.
+        const g = this.ctx.createRadialGradient(sunPos.x, sunPos.y, 0, sunPos.x, sunPos.y, bodyR * 3.5);
+        g.addColorStop(0, 'rgba(255, 230, 160, 0.55)');
+        g.addColorStop(0.5, 'rgba(255, 200, 120, 0.18)');
+        g.addColorStop(1, 'rgba(255, 200, 120, 0)');
+        this.ctx.fillStyle = g;
+        this.ctx.beginPath();
+        this.ctx.arc(sunPos.x, sunPos.y, bodyR * 3.5, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.fillStyle = 'rgb(255, 240, 190)';
+        this.ctx.beginPath();
+        this.ctx.arc(sunPos.x, sunPos.y, bodyR, 0, Math.PI * 2);
+        this.ctx.fill();
+      }
+      if (moonPos.visible) {
+        // Moon disc + correctly-oriented shadow crescent.
+        //
+        // Lit fraction k = (1 − cos ΔL) / 2 (0 at new, 1 at full).
+        // Shadow disc is the same radius as the moon, offset along
+        // the unit vector pointing AWAY from the sun. Offset
+        // magnitude m = 2·bodyR · (1 − k) = bodyR · (1 + cos ΔL):
+        //   ΔL = 0   → m = 2·bodyR  → shadow fully OFF moon → all dark? No —
+        // Actually: at d=0 the shadow disc fully overlaps the moon →
+        // 0% lit (new moon). At d=2·bodyR, shadow is gone → 100% lit
+        // (full). So d = 2·bodyR · k = bodyR · (1 − cos ΔL):
+        //   new (ΔL=0):    d = 0          → fully shadowed
+        //   quarter (π/2): d = bodyR      → half shadowed
+        //   full (π):      d = 2·bodyR    → no shadow
+        // Direction = unit(moon − sun): away from the sun, which is
+        // where the unlit hemisphere faces from our viewpoint.
+        const dxToSun = sunPos.x - moonPos.x;
+        const dyToSun = sunPos.y - moonPos.y;
+        const dist = Math.hypot(dxToSun, dyToSun);
+        // Fall back to horizontal if degenerate (shouldn't happen
+        // unless sun and moon overlap exactly, i.e., new moon at the
+        // exact moment of conjunction).
+        const ux = dist > 1e-3 ? -dxToSun / dist : 1;
+        const uy = dist > 1e-3 ? -dyToSun / dist : 0;
+        const k = (1 - Math.cos(dL)) / 2; // lit fraction
+        const offsetMag = bodyR * 2 * k;
+        // Faint daytime moon: moon disc is dimmer when the sun is up
+        // and the sky is bright. We don't fully suppress it — real
+        // half-moons ARE visible in afternoon — just lower contrast.
+        const moonAlpha = 0.95 - 0.6 * Math.max(0, Math.cos(thetaSun));
+        this.ctx.fillStyle = `rgba(225, 225, 235, ${moonAlpha.toFixed(3)})`;
+        this.ctx.beginPath();
+        this.ctx.arc(moonPos.x, moonPos.y, bodyR, 0, Math.PI * 2);
+        this.ctx.fill();
+        // Shadow disc, slightly smaller so a thin rim of light always
+        // remains. Colour matches the night-sky bottom so the shadow
+        // reads as "the moon's dark side", not a black spot pasted on.
+        const shadowAlpha = 0.55 + 0.4 * Math.max(0, Math.cos(thetaSun));
+        this.ctx.fillStyle = `rgba(20, 22, 35, ${shadowAlpha.toFixed(3)})`;
+        this.ctx.beginPath();
+        this.ctx.arc(
+          moonPos.x + ux * offsetMag,
+          moonPos.y + uy * offsetMag,
+          bodyR * 0.96,
+          0, Math.PI * 2,
+        );
+        this.ctx.fill();
       }
       this.ctx.restore();
     }
