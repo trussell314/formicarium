@@ -715,52 +715,67 @@ export class Renderer {
         this.ctx.fill();
       }
       if (moonPos.visible) {
-        // Moon disc + correctly-oriented shadow crescent.
+        // One sphere lit from the side. Drawn as a moon disc with a
+        // shadow disc on top, both clipped to the moon's outline so
+        // the shadow can never render outside the lit body. Without
+        // the clip, at higher offsetMag the shadow disc renders next
+        // to the moon as a separate circle, giving the bug the user
+        // pointed out — "two circles next to each other, not one
+        // sphere lit from the side."
         //
         // Lit fraction k = (1 − cos ΔL) / 2 (0 at new, 1 at full).
-        // Shadow disc is the same radius as the moon, offset along
-        // the unit vector pointing AWAY from the sun. Offset
-        // magnitude m = 2·bodyR · (1 − k) = bodyR · (1 + cos ΔL):
-        //   ΔL = 0   → m = 2·bodyR  → shadow fully OFF moon → all dark? No —
-        // Actually: at d=0 the shadow disc fully overlaps the moon →
-        // 0% lit (new moon). At d=2·bodyR, shadow is gone → 100% lit
-        // (full). So d = 2·bodyR · k = bodyR · (1 − cos ΔL):
-        //   new (ΔL=0):    d = 0          → fully shadowed
-        //   quarter (π/2): d = bodyR      → half shadowed
-        //   full (π):      d = 2·bodyR    → no shadow
-        // Direction = unit(moon − sun): away from the sun, which is
-        // where the unlit hemisphere faces from our viewpoint.
+        // Shadow disc is offset along the unit vector pointing AWAY
+        // from the sun. Offset magnitude m = 2·bodyR · k:
+        //   new (ΔL=0):    m = 0          → shadow covers whole moon
+        //   quarter (π/2): m = bodyR      → terminator at moon centre
+        //   full (π):      m = 2·bodyR    → shadow entirely outside,
+        //                                    clip discards it → fully lit
         const dxToSun = sunPos.x - moonPos.x;
         const dyToSun = sunPos.y - moonPos.y;
         const dist = Math.hypot(dxToSun, dyToSun);
-        // Fall back to horizontal if degenerate (shouldn't happen
-        // unless sun and moon overlap exactly, i.e., new moon at the
-        // exact moment of conjunction).
         const ux = dist > 1e-3 ? -dxToSun / dist : 1;
         const uy = dist > 1e-3 ? -dyToSun / dist : 0;
-        const k = (1 - Math.cos(dL)) / 2; // lit fraction
+        const k = (1 - Math.cos(dL)) / 2;
         const offsetMag = bodyR * 2 * k;
         // Faint daytime moon: moon disc is dimmer when the sun is up
-        // and the sky is bright. We don't fully suppress it — real
-        // half-moons ARE visible in afternoon — just lower contrast.
-        const moonAlpha = 0.95 - 0.6 * Math.max(0, Math.cos(thetaSun));
-        this.ctx.fillStyle = `rgba(225, 225, 235, ${moonAlpha.toFixed(3)})`;
+        // and the sky is bright. Real half-moons ARE visible in
+        // afternoon — we don't fully suppress, just lower contrast.
+        const dayLight = Math.max(0, Math.cos(thetaSun));
+        const moonAlpha = 0.95 - 0.6 * dayLight;
+        // Shadow colour lerps between night-sky [22,22,36] and a
+        // daytime sky-blue [100,130,170] based on the sun's altitude.
+        // Real daytime moons read as faintly blue-on-blue — the unlit
+        // hemisphere is slightly darker than the sky from
+        // atmospheric scatter, never the deep night-sky tone.
+        const shR = 22 + (100 - 22) * dayLight;
+        const shG = 22 + (130 - 22) * dayLight;
+        const shB = 36 + (170 - 36) * dayLight;
+        const shadowAlpha = 0.92;
+        this.ctx.save();
+        // Clip path = moon's circular outline. Anything drawn after
+        // this only renders within that disc.
         this.ctx.beginPath();
         this.ctx.arc(moonPos.x, moonPos.y, bodyR, 0, Math.PI * 2);
-        this.ctx.fill();
-        // Shadow disc, slightly smaller so a thin rim of light always
-        // remains. Colour matches the night-sky bottom so the shadow
-        // reads as "the moon's dark side", not a black spot pasted on.
-        const shadowAlpha = 0.55 + 0.4 * Math.max(0, Math.cos(thetaSun));
-        this.ctx.fillStyle = `rgba(20, 22, 35, ${shadowAlpha.toFixed(3)})`;
+        this.ctx.clip();
+        // Lit moon fills the entire clip region.
+        this.ctx.fillStyle = `rgba(225, 225, 235, ${moonAlpha.toFixed(3)})`;
+        this.ctx.fillRect(
+          moonPos.x - bodyR, moonPos.y - bodyR,
+          bodyR * 2, bodyR * 2,
+        );
+        // Shadow disc on top. With clipping, only the part that
+        // overlaps the moon disc is visible — produces a true
+        // crescent at small k, half-disc at k=0.5, nothing at k=1.
+        this.ctx.fillStyle = `rgba(${shR | 0}, ${shG | 0}, ${shB | 0}, ${shadowAlpha.toFixed(3)})`;
         this.ctx.beginPath();
         this.ctx.arc(
           moonPos.x + ux * offsetMag,
           moonPos.y + uy * offsetMag,
-          bodyR * 0.96,
+          bodyR,
           0, Math.PI * 2,
         );
         this.ctx.fill();
+        this.ctx.restore();
       }
       this.ctx.restore();
     }
