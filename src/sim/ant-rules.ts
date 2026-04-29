@@ -1679,7 +1679,17 @@ export function step(
       // alarm-pheromone responders piling up around her can then
       // actually relieve the obstruction instead of compounding it.
       const STUCK_GIVE_UP_TICKS = 60;
-      if (colony.stuckTicks[i]! >= STUCK_GIVE_UP_TICKS) {
+      // Long-CARRY bail (FIX I). The stuckTicks accumulator only
+      // bumps on hitSoil+no-cell-change ticks; a worker walking back
+      // and forth in a narrow shaft section can stay in CARRY for
+      // thousands of ticks without ever accumulating stuckTicks.
+      // Headless monitoring at t=180k showed 11/13 CARRY workers
+      // stuck >2000 ticks unable to deposit. Extra bail on
+      // stateTicks: 4000 ticks in CARRY (~50 sim-minutes biological
+      // at 100× compression) → drop cargo at the first available
+      // neighbour, bail to WANDER. Releases the workforce so it can
+      // forage / re-dig instead of treadmilling.
+      if (colony.stuckTicks[i]! >= STUCK_GIVE_UP_TICKS || colony.stateTicks[i]! >= 4000) {
         const wW = world.width;
         const cargoMoves = colony.carryMoves[i]!;
         const offsetsCF: ReadonlyArray<readonly [number, number]> = [
@@ -2014,13 +2024,29 @@ export function step(
     // damper survives in the foundingPatrollerBoost cap (no infinite
     // amplification) and is bounded by smallForageMult itself.
     const foundingPatrollerBoost = isSmallColony ? 2 : 1;
-    if (stateIn === STATE_WANDER && iy >= world.naturalSurface[ix]! &&
+    // Forage roll fires for both below-surface AND above-surface
+    // WANDER ants (FIX J). Previously the gate required iy >=
+    // naturalSurface (worker at or below the surface row), which
+    // excluded any worker who'd already exited the chamber to drop
+    // spoil. Headless monitoring showed surface workers in WANDER
+    // permanently stuck above-ground — they couldn't roll forage,
+    // had no food-sniff bias, and just random-walked indefinitely
+    // far from the entrance. Above-surface workers ARE in foraging
+    // position; let them commit to a search by transitioning to
+    // FORAGE, where the food-sniff bias kicks in and pulls them
+    // toward visible seeds. Foragers who started above-ground keep
+    // the same heading (no need to reset to "head up" — they're
+    // already up).
+    if (stateIn === STATE_WANDER &&
         rng.next() < species.forageProb * forageActivity * forageMult * smallForageMult * foodVisibleBoost * starvationBoost * inboundBoost * foundingOverride * foundingPatrollerBoost) {
       colony.setState(i, STATE_FORAGE);
       colony.collisionCount[i] = 0;
-      // Heading reset toward the surface so the trip starts in the
-      // right direction.
-      colony.heading[i] = -Math.PI / 2 + rng.range(-0.3, 0.3);
+      // Heading: if below surface, head UP to start the trip; if
+      // already above, keep the current heading and let the food-
+      // sniff bias steer the search.
+      if (iy >= world.naturalSurface[ix]!) {
+        colony.heading[i] = -Math.PI / 2 + rng.range(-0.3, 0.3);
+      }
       continue;
     }
 
@@ -2230,7 +2256,17 @@ export function step(
         colony.stuckTicks[i]!--;
       }
       const STUCK_GIVE_UP_TICKS = 60;
-      if (colony.stuckTicks[i]! >= STUCK_GIVE_UP_TICKS) {
+      // Long-CARRY bail (FIX I). The stuckTicks accumulator only
+      // bumps on hitSoil+no-cell-change ticks; a worker walking back
+      // and forth in a narrow shaft section can stay in CARRY for
+      // thousands of ticks without ever accumulating stuckTicks.
+      // Headless monitoring at t=180k showed 11/13 CARRY workers
+      // stuck >2000 ticks unable to deposit. Extra bail on
+      // stateTicks: 4000 ticks in CARRY (~50 sim-minutes biological
+      // at 100× compression) → drop cargo at the first available
+      // neighbour, bail to WANDER. Releases the workforce so it can
+      // forage / re-dig instead of treadmilling.
+      if (colony.stuckTicks[i]! >= STUCK_GIVE_UP_TICKS || colony.stateTicks[i]! >= 4000) {
         const wW = world.width;
         const cargoMoves = colony.carryMoves[i]!;
         const offsetsC: ReadonlyArray<readonly [number, number]> = [
