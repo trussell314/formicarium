@@ -34,6 +34,7 @@ export interface RenderableWorld {
   digTick: Int32Array;
   plant: Uint8Array;
   plantHeight: Uint16Array;
+  root: Uint8Array;
 }
 
 export interface RenderableColony {

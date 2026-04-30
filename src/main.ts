@@ -59,6 +59,7 @@ function makePlaceholderWorld(s: Settings): {
   digTick: Int32Array;
   plant: Uint8Array;
   plantHeight: Uint16Array;
+  root: Uint8Array;
 } {
   // Renderer needs SOMETHING at construction time, before the
   // worker has produced its first snapshot. Empty arrays of the
@@ -76,6 +77,7 @@ function makePlaceholderWorld(s: Settings): {
     digTick: new Int32Array(sz),
     plant: new Uint8Array(s.width),
     plantHeight: new Uint16Array(s.width),
+    root: new Uint8Array(sz),
   };
 }
 

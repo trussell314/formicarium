@@ -54,6 +54,7 @@ export type RenderSnapshot = {
   digTick: Int32Array;
   plant: Uint8Array;
   plantHeight: Uint16Array;
+  root: Uint8Array;
   // Colony fields
   count: number;
   posX: Float32Array;

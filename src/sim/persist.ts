@@ -29,8 +29,9 @@ const SAVE_KEY = 'formicarium:save';
 // and trunk-trail pheromones; v9 added per-column surface plant;
 // v10 added per-column plant height (split from immutable kind);
 // v11 widened plantHeight to Uint16 for real-scale plants
-// (mature trees up to ~1500 cells at 3 mm/cell).
-const SAVE_VERSION = 11;
+// (mature trees up to ~1500 cells at 3 mm/cell);
+// v12 added per-cell root marker (taproots block dig in physics).
+const SAVE_VERSION = 12;
 
 // Chunked btoa to avoid argument-list length limits on very large arrays.
 function bytesToB64(view: ArrayBufferView): string {
@@ -50,8 +51,8 @@ function b64ToBytes(s: string): Uint8Array {
   return out;
 }
 
-interface SaveStateV11 {
-  v: 11;
+interface SaveStateV12 {
+  v: 12;
   foodCap: number;
   clumpAccum: number;
   // Settings — needed to validate that a save matches the requested run.
@@ -82,6 +83,7 @@ interface SaveStateV11 {
   digTick: string;
   plant: string;
   plantHeight: string;
+  root: string;
   // Colony scalars
   colonyCount: number;
   // Colony arrays (b64)
@@ -135,7 +137,7 @@ export function captureSnapshot(
   granaryField: Pheromone, trunkField: Pheromone,
   rng: RNG, settings: SaveSettings,
 ): string | null {
-  const state: SaveStateV11 = {
+  const state: SaveStateV12 = {
     v: SAVE_VERSION,
     seed: settings.seed,
     width: settings.width,
@@ -163,6 +165,7 @@ export function captureSnapshot(
     digTick: bytesToB64(world.digTick),
     plant: bytesToB64(world.plant),
     plantHeight: bytesToB64(world.plantHeight),
+    root: bytesToB64(world.root),
     colonyCount: colony.count,
     posX: bytesToB64(colony.posX),
     posY: bytesToB64(colony.posY),
@@ -251,7 +254,7 @@ export function restoreSnapshot(
 ): boolean {
   let raw: unknown;
   try { raw = JSON.parse(blob); } catch { return false; }
-  const s = raw as Partial<SaveStateV11>;
+  const s = raw as Partial<SaveStateV12>;
   if (
     !s ||
     s.v !== SAVE_VERSION ||
@@ -302,6 +305,7 @@ export function restoreSnapshot(
     copyBytes(s.digTick!, world.digTick);
     copyBytes(s.plant!, world.plant);
     copyBytes(s.plantHeight!, world.plantHeight);
+    copyBytes(s.root!, world.root);
     colony.count = s.colonyCount!;
     copyBytes(s.posX!, colony.posX);
     copyBytes(s.posY!, colony.posY);
