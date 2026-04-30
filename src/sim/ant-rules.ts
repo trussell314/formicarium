@@ -1171,31 +1171,60 @@ export function step(
         continue;
       }
       colony.stateTicks[i]!++;
-      // Egg-laying: requires positive timer threshold + energy above
-      // threshold + colony has slot capacity left. Egg appears at
-      // queen's cell with stateTicks=0; the maturation handler above
-      // will tick it through to adulthood.
+      // Energy-paced oviposition + oosorption (Tschinkel 1988 on
+      // *P. barbatus*; Cassill & Tschinkel 1995, 1999 on *S.
+      // invicta*). Queen oogenesis is gated by trophallactic
+      // protein input from worker attendants — vitellogenin
+      // synthesis tracks her crop content. When colony food intake
+      // drops, attendants stop topping her up, her energy falls,
+      // and oviposition slows. Below a critical threshold she
+      // *re-absorbs* developing eggs (oosorption, Hölldobler &
+      // Wilson 1990 Ch. 5) to recover the protein.
+      //
+      // Modelled in two pieces:
+      //   1. Probabilistic lay gate: when the cycle timer is
+      //      ready, lay only with probability ∝ (energy − 0.2),
+      //      so a starving queen waits longer between lays even
+      //      though her body's "ready". At full energy = always
+      //      lay; at energy 0.2 = never lay.
+      //   2. Oosorption: at energy < 0.2 the cycle regresses —
+      //      the developing oocyte gets absorbed and the timer
+      //      ticks backward. Models real ovary regression in
+      //      starved queens.
+      const queenE = colony.energy[i]!;
+      const OOSORPTION_THRESHOLD = 0.2;
+      if (queenE < OOSORPTION_THRESHOLD && colony.stateTicks[i]! > 0) {
+        // Regress timer at the same rate stateTicks normally
+        // advances; net effect is the queen makes no progress on
+        // a new oocyte while starving and gradually unwinds an
+        // already-developed one.
+        colony.stateTicks[i] = Math.max(0, colony.stateTicks[i]! - 2);
+      }
       if (
         colony.stateTicks[i]! >= species.eggLayInterval &&
-        // Lower threshold (0.2 vs the original 0.4) so a queen who's
-        // had a long drought between trophallaxis bouts still keeps
-        // brood production ticking. She uses ~10% energy per egg-
-        // laying interval at the new metabolism, so 0.2 leaves room
-        // for several lays before she'd actually starve.
-        colony.energy[i]! > 0.2 &&
+        queenE > OOSORPTION_THRESHOLD &&
         colony.count < colony.capacity &&
         colony.count < species.maxColonySize
       ) {
-        colony.stateTicks[i] = 0;
-        const eggIdx = colony.spawn(
-          colony.posX[i]!, colony.posY[i]!,
-          rng.range(0, Math.PI * 2), rng,
-          DEFAULT_PARAMS,
-        );
-        if (eggIdx >= 0) {
-          colony.state[eggIdx] = STATE_EGG;
-          colony.stateTicks[eggIdx] = 0;
-          colony.age[eggIdx] = 0;
+        // Probability scales 0 → 1 across queen energy 0.2 → 1.0.
+        // The queen's energy IS the colony's nutrition signal —
+        // workers feed her via trophallaxis, so when foraging
+        // returns drop her crop drains and lay rate falls
+        // automatically without a back-channel to colony-level
+        // brood metrics.
+        const layProb = Math.min(1, (queenE - OOSORPTION_THRESHOLD) / 0.8);
+        if (rng.next() < layProb) {
+          colony.stateTicks[i] = 0;
+          const eggIdx = colony.spawn(
+            colony.posX[i]!, colony.posY[i]!,
+            rng.range(0, Math.PI * 2), rng,
+            DEFAULT_PARAMS,
+          );
+          if (eggIdx >= 0) {
+            colony.state[eggIdx] = STATE_EGG;
+            colony.stateTicks[eggIdx] = 0;
+            colony.age[eggIdx] = 0;
+          }
         }
       }
       continue;
