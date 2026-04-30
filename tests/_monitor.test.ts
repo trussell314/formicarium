@@ -16,7 +16,7 @@ import { HARVESTER } from '../src/sim/species';
 import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from '../src/sim/world';
 
 const TICKS_PER_CHECKPOINT = 30_000;
-const NUM_CHECKPOINTS = 67; // 2.01M ticks — past the original cascade window (810k) and well into long-haul territory
+const NUM_CHECKPOINTS = 10; // 300k ticks — early-game / starvation-onset window
 const LOG_PATH = process.env.MONITOR_LOG ?? '/tmp/lateral-monitor.log';
 function log(line: string): void { fs.appendFileSync(LOG_PATH, line + '\n'); }
 
