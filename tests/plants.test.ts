@@ -207,6 +207,47 @@ describe('surface plants', () => {
     expect(w.cells[idx]).toBe(CELL_AIR);
   });
 
+  it('saturated trunk-trail clears plants, food, and sprouts', () => {
+    // *P. barbatus* foragers maintain bare-earth trails by physically
+    // pushing aside any debris in their path. Stamp a strong trunk
+    // pheromone over a planted column and run a few ticks; the
+    // plant, any food, and any sprout there should be cleared while
+    // off-trail neighbours are untouched.
+    const rng = new RNG(43);
+    const w = flatWorld(80, 30, 12);
+    w.tick = 0;
+    // Plant + food + sprout at column 40.
+    w.plant[40] = 1;
+    w.plantHeight[40] = 2;
+    w.food[(12 - 1) * w.width + 40] = 1;
+    w.sprout[(12 - 1) * w.width + 40] = 1;
+    // Off-trail control at column 60.
+    w.plant[60] = 1;
+    w.plantHeight[60] = 2;
+    const colony = new Colony(0);
+    const { dig, build } = fields(w);
+    const trail = new Pheromone(w.width, w.height, 0.40, 0.999);
+    const alarm = new Pheromone(w.width, w.height, 0.50, 0.985);
+    const queen = new Pheromone(w.width, w.height, 0.10, 0.999, true);
+    const brood = new Pheromone(w.width, w.height, 0.20, 0.999, true);
+    const necro = new Pheromone(w.width, w.height, 0.30, 0.99);
+    const noEntry = new Pheromone(w.width, w.height, 0.05, 0.995);
+    const granary = new Pheromone(w.width, w.height, 0.10, 0.999);
+    const trunk = new Pheromone(w.width, w.height, 0.20, 0.9995);
+    // Saturate trunk pheromone above the surface at column 40.
+    for (let k = 0; k < 40; k++) trunk.deposit(40, 11, 1.0);
+    // Run enough ticks for the periodic sweep (every 64 ticks) to fire.
+    for (let t = 0; t < 200; t++) {
+      step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, QUIET,
+        trail, alarm, queen, brood, necro, noEntry, granary, trunk);
+    }
+    expect(w.plant[40]!).toBe(0);
+    expect(w.food[(12 - 1) * w.width + 40]!).toBe(0);
+    expect(w.sprout[(12 - 1) * w.width + 40]!).toBe(0);
+    // Off-trail plant unaffected.
+    expect(w.plant[60]!).toBe(1);
+  });
+
   it('a column with no plant never drops a plant-sourced seed', () => {
     // Same setup as above but with NO plants. Run for the same
     // duration as the drop test; food count must remain zero.

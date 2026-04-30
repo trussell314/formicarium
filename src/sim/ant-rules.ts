@@ -566,6 +566,41 @@ export function step(
   if (trunkField && slowStep) trunkField.step(cells);
   if (particles) particles.step();
 
+  // Surface trunk-trail clearing. *P. barbatus* maintains literal
+  // bare-earth foraging trails radiating from the mound — patrollers
+  // and foragers physically push aside seeds, debris, and surface
+  // vegetation as they walk the same route hundreds of times per
+  // day (Gordon 1991). Cells whose trunk pheromone has saturated
+  // through repeated traffic get any food / sprout / plant cleared,
+  // both at the cell itself and one column to either side (the
+  // trail body is wider than a single ant). Cheap: width-many
+  // reads per sweep; runs every 64 ticks so we don't pay it every
+  // step for a feature that visibly changes only over minutes.
+  const TRAIL_CLEAR_THRESHOLD = 0.30;
+  if (trunkField && (world.tick & 63) === 0) {
+    const wW = world.width;
+    for (let cx = 0; cx < wW; cx++) {
+      const sy = world.naturalSurface[cx]!;
+      if (sy < 1) continue;
+      if (trunkField.sample(cx, sy - 1) < TRAIL_CLEAR_THRESHOLD) continue;
+      // Clear food / sprout in this cell and ±1 lateral.
+      for (let dx = -1; dx <= 1; dx++) {
+        const x = cx + dx;
+        if (x < 0 || x >= wW) continue;
+        const sy2 = world.naturalSurface[x]!;
+        const aIdx = (sy2 - 1) * wW + x;
+        if (world.food[aIdx]! > 0) { world.food[aIdx] = 0; world.foodMoves[aIdx] = 0; }
+        if (world.sprout[aIdx]! > 0) world.sprout[aIdx] = 0;
+        // Plants in the trail get trampled. Keep their roots — soil
+        // structure under a busy trail still has live root residue.
+        if (world.plant[x]! > 0) {
+          world.plant[x] = 0;
+          world.plantHeight[x] = 0;
+        }
+      }
+    }
+  }
+
   // Necromone emission. Corpse cells evaporate oleic acid (Wilson,
   // Durlach & Roth 1958). Sparse — most cells have no corpse. We
   // sweep the world.corpse field every 10 ticks to amortise cost
