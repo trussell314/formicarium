@@ -1513,7 +1513,29 @@ export function step(
     // species.workerLifespan. Real Pogonomyrmex barbatus workers
     // average ~1 year (Hölldobler & Wilson 1990 Ch. 13); we
     // compress for observability.
-    if (colony.age[i]! >= species.workerLifespan) {
+    //
+    // Probabilistic mortality past 0.7 × lifespan. Earlier the
+    // gate was a hard `age >= lifespan` cutoff which made every
+    // worker die exactly on her birthday — cohorts emerged
+    // together, lived their lifespan, and crashed the colony as
+    // a wave. Real cohort die-off spreads over ~30% of the mean
+    // lifespan (Gordon 2010 *Ant Encounters* Ch. 4 on harvester
+    // demography). With pDie = (ageFrac - 0.7) × 16 / lifespan:
+    //   ageFrac=0.7  →  0%      survival from 0.7L: 100%
+    //   ageFrac=1.0  →  4.8/L   survival from 0.7L: ~49%
+    //   ageFrac=1.3  → 9.6/L    survival from 0.7L:  ~6%
+    //   ageFrac=1.5  →  12.8/L  survival from 0.7L:  ~0.2%
+    // Mean lifespan stays ≈ workerLifespan.
+    //
+    // RNG draw is gated on lifeFrac >= 0.7 to keep determinism for
+    // tests whose workers never reach old age.
+    let mortal = false;
+    const lifeFrac = colony.age[i]! / species.workerLifespan;
+    if (lifeFrac >= 0.7) {
+      const pDie = (lifeFrac - 0.7) * 16 / species.workerLifespan;
+      if (rng.next() < pDie) mortal = true;
+    }
+    if (mortal) {
       colony.energy[i] = 0;
       // Drop any cargo first (same logic as starvation death below).
       const wW = world.width;
