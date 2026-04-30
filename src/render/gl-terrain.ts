@@ -207,10 +207,14 @@ void main() {
         int nBase = nSurf - 1;
         int nTop = nSurf - nH;
         if (cell.y > nBase || cell.y < nTop) continue;
+        // Trunk cells per kind. Grass has no woody stem — green
+        // leaves spring directly from the soil. Shrubs have just
+        // a single basal cell of woody base; everything above is
+        // leafy canopy. Trees keep the substantial trunk.
         int trunkCells =
-          (nKind == 1) ? 1 :
-          ((nKind == 2) ? 3 : max(1, nH / 4));
-        bool inTrunk = (cell.y > nBase - trunkCells);
+          (nKind == 1) ? 0 :
+          ((nKind == 2) ? 1 : max(1, nH / 4));
+        bool inTrunk = trunkCells > 0 && (cell.y > nBase - trunkCells);
         float sqrtH = sqrt(float(nH));
         // Background widths are 1.6× foreground for the same
         // height — distant plants in a layered backdrop are drawn
@@ -292,10 +296,13 @@ void main() {
         int nBase = nSurf - 1;
         int nTop = nSurf - nH;
         if (cell.y > nBase || cell.y < nTop) continue;
+        // Trunk cells per kind. Grass = 0 (no woody stem), shrub = 1
+        // (small woody base), tree = nH / 4. Painting any "trunk"
+        // for grass made green tufts read brown at the bottom.
         int trunkCells =
-          (nKind == 1) ? 1 :
-          ((nKind == 2) ? 2 : max(1, nH / 4));
-        bool inTrunk = (cell.y > nBase - trunkCells);
+          (nKind == 1) ? 0 :
+          ((nKind == 2) ? 1 : max(1, nH / 4));
+        bool inTrunk = trunkCells > 0 && (cell.y > nBase - trunkCells);
         float sqrtH = sqrt(float(nH));
         int trunkRadius =
           (nKind == 1) ? 0 :
