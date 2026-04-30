@@ -122,12 +122,18 @@ export class Pheromone {
     // deposit and cleared at the end of any step() call where the
     // output is fully sub-floor.
     if (!this.nonZero) {
-      // Buffers are already all-zero; ping-pong the references so
-      // the swap-each-tick contract still sees a different
-      // `current` reference back.
-      const tmp = this.current;
-      this.current = this.scratch;
-      this.scratch = tmp;
+      // No work to do AND no swap. Both buffers were already
+      // all-zero; leaving `current` / `scratch` as-is keeps the
+      // JS-side references in sync with the WASM handle's internal
+      // pointers (the kernel only swaps its own pointers when we
+      // actually call wasmRuntime.step). An earlier version swapped
+      // JS refs unconditionally to satisfy a "current is a different
+      // reference after step" invariant; that desynced JS from the
+      // WASM handle on every empty-field bail, causing subsequent
+      // deposits to land in a buffer the kernel then overwrote
+      // with zeros — pheromone fields never accumulated and the
+      // overlay rendered against empty/garbage state, locking up
+      // the renderer that's expecting non-empty buffers.
       return;
     }
     // WASM path: kernel reads cells from its own copy (uploaded once

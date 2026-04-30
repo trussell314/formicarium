@@ -192,13 +192,37 @@ describe('Pheromone ping-pong (no double-mutation)', () => {
   });
 
   it('current is a different reference after step (the swap actually swapped)', () => {
-    // The cheap structural assertion that the buffer pointer rotated.
-    // If `current` and `scratch` ended up aliased we'd have undefined
-    // behaviour next tick.
+    // The cheap structural assertion that the buffer pointer rotated
+    // when the stencil actually runs. If `current` and `scratch`
+    // ended up aliased we'd have undefined behaviour next tick.
+    // Deposit first — an empty field skips the stencil (no work, no
+    // swap) and that's the documented behaviour, so we have to give
+    // it something to compute.
     const p = new Pheromone(8, 8, 0.2, 0.95);
+    p.deposit(4, 4, 1);
     const before = p.current;
     p.step();
     expect(p.current).not.toBe(before);
+  });
+
+  it('deposit after empty-field step lands in the right buffer (no JS↔WASM desync)', () => {
+    // Regression for an earlier version of step() that ping-pong'd
+    // JS-side `current` / `scratch` references on empty-field early-
+    // exit, while leaving the WASM kernel's internal pointers
+    // untouched. After enough empty steps, JS thought current was
+    // bufferB but the kernel's "current" was still bufferA; the next
+    // deposit landed in bufferB but the kernel then read from
+    // bufferA (zeros) and wrote diffused-from-zero into bufferB,
+    // overwriting the deposit. The pheromone field never accumulated.
+    // Sample stays >0 only if every deposit makes it through.
+    const p = new Pheromone(16, 16, 0.2, 0.99);
+    // Run several empty steps so any latent ping-pong de-syncs.
+    for (let t = 0; t < 5; t++) p.step();
+    p.deposit(8, 8, 100);
+    p.step();
+    expect(p.sample(8, 8)).toBeGreaterThan(0);
+    p.step();
+    expect(p.sample(8, 8)).toBeGreaterThan(0);
   });
 
   it('a single deposit then step puts (1-f)*c*e at the source, not 0', () => {
