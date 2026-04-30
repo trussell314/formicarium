@@ -112,6 +112,18 @@ export class World {
    *  far above any reasonable byte-sized cap. The renderer crops
    *  visible plants at the canvas top. */
   readonly plantHeight: Uint16Array;
+  /** Per-column BACKGROUND plant kind. Same encoding as `plant`
+   *  but represents a separate visual layer painted behind the
+   *  foreground plants with atmospheric-perspective haze. The
+   *  background layer is sparser (every 5+ columns) and drawn with
+   *  wider/taller silhouettes so it reads as a distant skyline of
+   *  trees behind the cross-section. Background plants don't drop
+   *  seeds and don't have roots — pure visual depth cue. */
+  readonly bgPlant: Uint8Array;
+  /** Per-column current background plant height. Always at full
+   *  maturity (random within the kind's max) since these don't
+   *  grow over time — they're decoration, not sim state. */
+  readonly bgPlantHeight: Uint16Array;
   /** Per-cell root marker. 0 = no root; 2 = shrub root; 3 = tree
    *  root (matches the plant kind that owns it). Roots block dig
    *  attempts in physics.digCell — *P. barbatus* nests route around
@@ -219,6 +231,8 @@ export class World {
     this.sproutTick.fill(-1_000_000);
     this.plant = new Uint8Array(width);
     this.plantHeight = new Uint16Array(width);
+    this.bgPlant = new Uint8Array(width);
+    this.bgPlantHeight = new Uint16Array(width);
     this.root = new Uint8Array(width * height);
     this.digTick = new Int32Array(width * height);
     this.digTick.fill(-1_000_000);
@@ -341,6 +355,32 @@ export class World {
       let h = 1 + ((ageRoll * maxH) | 0);
       if (h > maxH) h = maxH;
       this.plantHeight[x] = h;
+    }
+
+    // Background plant skyline. A sparser scatter of mature trees /
+    // shrubs painted *behind* the foreground plants for atmospheric
+    // depth (Tschinkel 2004 nest-site photos show *P. barbatus*
+    // colonies at the foot of mesquite stands — the trees frame the
+    // mound). These are visual decoration only: no roots, no seed
+    // drops, no growth. Heights are biased toward the upper half of
+    // the kind's range so the silhouette reads as imposing.
+    const BG_PLANT_DENSITY = 0.22;
+    for (let x = 0; x < this.width; x++) {
+      const r = rng.next();
+      const sizeRoll = rng.next();
+      const ageRoll = rng.next();
+      // Don't strip the background near the entrance — distant
+      // trees frame the nest from behind regardless of foreground
+      // clearing.
+      if (r >= BG_PLANT_DENSITY) continue;
+      // Bias toward trees (the dominant background silhouette).
+      const kind = sizeRoll < 0.20 ? 1 : (sizeRoll < 0.50 ? 2 : 3);
+      this.bgPlant[x] = kind;
+      const maxH = PLANT_MAX_HEIGHT[kind]!;
+      // Mature heights — at least 60% of max so background reads
+      // as established vegetation, not seedlings.
+      const h = Math.max(1, ((0.60 + 0.40 * ageRoll) * maxH) | 0);
+      this.bgPlantHeight[x] = h;
     }
 
     // Root systems for shrubs (kind 2) and trees (kind 3). Grass

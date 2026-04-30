@@ -59,6 +59,8 @@ function makePlaceholderWorld(s: Settings): {
   digTick: Int32Array;
   plant: Uint8Array;
   plantHeight: Uint16Array;
+  bgPlant: Uint8Array;
+  bgPlantHeight: Uint16Array;
   root: Uint8Array;
 } {
   // Renderer needs SOMETHING at construction time, before the
@@ -77,6 +79,8 @@ function makePlaceholderWorld(s: Settings): {
     digTick: new Int32Array(sz),
     plant: new Uint8Array(s.width),
     plantHeight: new Uint16Array(s.width),
+    bgPlant: new Uint8Array(s.width),
+    bgPlantHeight: new Uint16Array(s.width),
     root: new Uint8Array(sz),
   };
 }

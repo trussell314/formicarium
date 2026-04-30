@@ -34,6 +34,8 @@ export interface RenderableWorld {
   digTick: Int32Array;
   plant: Uint8Array;
   plantHeight: Uint16Array;
+  bgPlant: Uint8Array;
+  bgPlantHeight: Uint16Array;
   root: Uint8Array;
 }
 
@@ -100,6 +102,71 @@ function lerp3(a: [number, number, number], b: [number, number, number], t: numb
     a[1] + (b[1] - a[1]) * t,
     a[2] + (b[2] - a[2]) * t,
   ];
+}
+
+/** Returns true if the cell at (cellX, cellY) in world coords is
+ *  inside any plant's silhouette (foreground OR background skyline).
+ *  Mirrors the GL fragment shader's two plant-render scans so the
+ *  Canvas2D star-occlusion path picks the same pixels the shader
+ *  paints over. */
+function plantCovers(world: RenderableWorld, cellX: number, cellY: number): boolean {
+  const w = world.width;
+  // Foreground scan — same radii / formulas as the FG GL branch.
+  for (let dx = -6; dx <= 6; dx++) {
+    const nx = cellX + dx;
+    if (nx < 0 || nx >= w) continue;
+    const kind = world.plant[nx]!;
+    if (kind === 0) continue;
+    const h = world.plantHeight[nx]!;
+    if (h === 0) continue;
+    const surf = world.naturalSurface[nx]!;
+    const base = surf - 1;
+    const top = surf - h;
+    if (cellY > base || cellY < top) continue;
+    const trunkCells = kind === 1 ? 1 : kind === 2 ? 2 : Math.max(1, Math.floor(h / 4));
+    const inTrunk = cellY > base - trunkCells;
+    const sqrtH = Math.sqrt(h);
+    const trunkRadius =
+      kind === 1 ? 0
+      : kind === 2 ? Math.max(1, Math.min(2, Math.round(sqrtH / 8)))
+      : Math.max(1, Math.min(4, Math.round(sqrtH / 8)));
+    const canopyRadius =
+      kind === 1 ? 0
+      : kind === 2 ? Math.max(1, Math.min(3, Math.round(sqrtH / 6)))
+      : Math.max(2, Math.min(6, Math.round(sqrtH / 6)));
+    const reqRadius = inTrunk ? trunkRadius : canopyRadius;
+    const absDx = dx < 0 ? -dx : dx;
+    if (absDx <= reqRadius) return true;
+  }
+  // Background scan — wider radii, ±8 columns. Same formulas as the
+  // BG GL branch.
+  for (let dx = -8; dx <= 8; dx++) {
+    const nx = cellX + dx;
+    if (nx < 0 || nx >= w) continue;
+    const kind = world.bgPlant[nx]!;
+    if (kind === 0) continue;
+    const h = world.bgPlantHeight[nx]!;
+    if (h === 0) continue;
+    const surf = world.naturalSurface[nx]!;
+    const base = surf - 1;
+    const top = surf - h;
+    if (cellY > base || cellY < top) continue;
+    const trunkCells = kind === 1 ? 1 : kind === 2 ? 3 : Math.max(1, Math.floor(h / 4));
+    const inTrunk = cellY > base - trunkCells;
+    const sqrtH = Math.sqrt(h);
+    const trunkRadius =
+      kind === 1 ? 0
+      : kind === 2 ? Math.max(1, Math.min(4, Math.round(sqrtH / 5)))
+      : Math.max(2, Math.min(7, Math.round(sqrtH / 5)));
+    const canopyRadius =
+      kind === 1 ? 1
+      : kind === 2 ? Math.max(2, Math.min(5, Math.round(sqrtH / 4)))
+      : Math.max(3, Math.min(9, Math.round(sqrtH / 4)));
+    const reqRadius = inTrunk ? trunkRadius : canopyRadius;
+    const absDx = dx < 0 ? -dx : dx;
+    if (absDx <= reqRadius) return true;
+  }
+  return false;
 }
 
 export class Renderer {
@@ -701,6 +768,12 @@ export class Renderer {
           const s = this.stars[i]!;
           const sx = ox + s.x * tw;
           const sy = oy + s.y * th;
+          // Plant occlusion: skip stars that fall inside any plant's
+          // silhouette. The same scan-±N-columns logic the GL shader
+          // uses for plant rendering — keeps the two paths in sync.
+          const cellX = Math.floor((sx - ox) / scale);
+          const cellY = Math.floor((sy - oy) / scale);
+          if (plantCovers(this.world, cellX, cellY)) continue;
           // Slow per-star twinkle. Period ~5–8 s at 60 fps. The
           // 0.4..1.0 envelope keeps stars visible at the trough.
           const twk = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(tick * 0.06 + s.phase));

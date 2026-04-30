@@ -85,6 +85,8 @@ uniform isampler2D uSproutTick;  // R32I: per-cell sprout tick
 uniform isampler2D uDigTick;     // R32I: per-cell dig tick
 uniform sampler2D uPlant;        // R8: per-column plant kind (1..3)
 uniform usampler2D uPlantHeight; // R16UI: per-column current height in cells
+uniform sampler2D uBgPlant;      // R8: per-column background plant kind
+uniform usampler2D uBgPlantHeight; // R16UI: per-column background plant height
 uniform sampler2D uRoot;         // R8: per-cell root marker (2=shrub, 3=tree)
 
 // Pheromone fields packed into 3 RGBA32F textures so the total
@@ -179,6 +181,86 @@ void main() {
       vec3 skyBot = mix(SKY_BOT_NIGHT, SKY_BOT_DAY, uDaylight);
       float skyT = clamp(float(cell.y) / max(1.0, uH * 0.5), 0.0, 1.0);
       col = mix(skyTop, skyBot, skyT);
+      // Background plant skyline. Drawn first (so foreground plants
+      // paint on top) with extra-wide silhouettes and atmospheric-
+      // perspective haze (mix toward the sky color). Real bg-skyline
+      // photos of *P. barbatus* sites show distant mesquite stands
+      // visibly larger and hazier than the immediate-foreground
+      // plants. Extra width multiplier 1.6× and a sky-blend of 0.45
+      // so the silhouette reads as misty rather than crisp.
+      int bgChosenKind = 0;
+      int bgChosenAnchor = -1;
+      int bgChosenAbsDx = 99;
+      int bgChosenSignDx = 0;
+      bool bgChosenInTrunk = false;
+      int bgChosenReqRadius = 0;
+      for (int dx = -8; dx <= 8; dx++) {
+        int sx = cell.x + dx;
+        if (sx < 0 || sx >= wi) continue;
+        int nKind = sampleU8(uBgPlant, ivec2(sx, 0));
+        if (nKind == 0) continue;
+        int nH = int(texelFetch(uBgPlantHeight, ivec2(sx, 0), 0).r);
+        if (nH == 0) continue;
+        int nSurf = sampleU16(uSurf, ivec2(sx, 0));
+        int nBase = nSurf - 1;
+        int nTop = nSurf - nH;
+        if (cell.y > nBase || cell.y < nTop) continue;
+        int trunkCells =
+          (nKind == 1) ? 1 :
+          ((nKind == 2) ? 3 : max(1, nH / 4));
+        bool inTrunk = (cell.y > nBase - trunkCells);
+        float sqrtH = sqrt(float(nH));
+        // Background widths are 1.6× foreground for the same
+        // height — distant plants in a layered backdrop are drawn
+        // bigger to pull them visually behind the foreground.
+        int trunkRadius =
+          (nKind == 1) ? 0 :
+          ((nKind == 2) ? clamp(int(sqrtH / 5.0 + 0.5), 1, 4)
+                        : clamp(int(sqrtH / 5.0 + 0.5), 2, 7));
+        int canopyRadius =
+          (nKind == 1) ? 1 :
+          ((nKind == 2) ? clamp(int(sqrtH / 4.0 + 0.5), 2, 5)
+                        : clamp(int(sqrtH / 4.0 + 0.5), 3, 9));
+        int reqRadius = inTrunk ? trunkRadius : canopyRadius;
+        int absDx = (dx < 0) ? -dx : dx;
+        if (absDx > reqRadius) continue;
+        if (bgChosenKind == 0 || absDx < bgChosenAbsDx) {
+          bgChosenKind = nKind;
+          bgChosenAnchor = sx;
+          bgChosenAbsDx = absDx;
+          bgChosenSignDx = dx;
+          bgChosenInTrunk = inTrunk;
+          bgChosenReqRadius = reqRadius;
+        }
+      }
+      if (bgChosenKind > 0) {
+        int hashB = sampleU8(uSoilNoise, ivec2(bgChosenAnchor, max(cell.y, 0)));
+        int subEdge = (uSub - 1);
+        bool inBgSilhouette = true;
+        if (bgChosenAbsDx == bgChosenReqRadius && bgChosenReqRadius > 0) {
+          if ((hashB & 3) < 2) {
+            int margin = subEdge / 2;
+            if (bgChosenSignDx > 0 && subOff.x > subEdge - margin) inBgSilhouette = false;
+            if (bgChosenSignDx < 0 && subOff.x < margin) inBgSilhouette = false;
+          }
+        }
+        if (inBgSilhouette) {
+          vec3 bgTrunkCol = vec3(64.0, 44.0, 22.0) / 255.0;
+          vec3 bgCanopyCol = vec3(46.0, 84.0, 42.0) / 255.0;
+          if (bgChosenKind >= 3) bgCanopyCol = vec3(38.0, 70.0, 38.0) / 255.0;
+          vec3 bgC = bgChosenInTrunk ? bgTrunkCol : bgCanopyCol;
+          // Atmospheric haze: blend toward the current sky colour so
+          // the silhouette fades into the distance. Stronger blend at
+          // higher daylight (haze is more visible against bright sky).
+          float hazeAmt = mix(0.30, 0.55, uDaylight);
+          bgC = mix(bgC, col, hazeAmt);
+          float vJitter = (float(hashB & 31) / 31.0 - 0.5) * 0.18;
+          bgC *= (1.0 + vJitter);
+          bgC *= mix(0.45, 1.0, uDaylight);
+          col = bgC;
+        }
+      }
+
       // Surface vegetation. Each plant column anchors a body whose
       // width scales (pre-crop) with the plant's height — bigger
       // plants are visibly wider. We scan ±5 columns and pick the
@@ -473,6 +555,8 @@ export interface GLTerrainState {
   digTick: Int32Array;
   plant: Uint8Array;
   plantHeight: Uint16Array;
+  bgPlant: Uint8Array;
+  bgPlantHeight: Uint16Array;
   root: Uint8Array;
   tick: number;
   width: number;
@@ -561,7 +645,8 @@ export class GLTerrainRenderer {
     for (const name of [
       'uW', 'uH', 'uTick', 'uSub', 'uShowPhero', 'uDaylight',
       'uCells', 'uSoilNoise', 'uSurf', 'uFood', 'uFoodMoves', 'uCorpse',
-      'uSprout', 'uSproutTick', 'uDigTick', 'uPlant', 'uPlantHeight', 'uRoot',
+      'uSprout', 'uSproutTick', 'uDigTick', 'uPlant', 'uPlantHeight',
+      'uBgPlant', 'uBgPlantHeight', 'uRoot',
       'uPPack0', 'uPPack1', 'uPPack2',
     ]) {
       this.uniforms[name] = gl.getUniformLocation(prog, name);
@@ -596,6 +681,8 @@ export class GLTerrainRenderer {
     addSlot('surf', gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT);
     addSlot('plant', gl.R8, gl.RED, gl.UNSIGNED_BYTE);
     addSlot('plantHeight', gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT);
+    addSlot('bgPlant', gl.R8, gl.RED, gl.UNSIGNED_BYTE);
+    addSlot('bgPlantHeight', gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT);
     addSlot('root', gl.R8, gl.RED, gl.UNSIGNED_BYTE);
     // Pheromone textures: 4 fields per RGBA32F texture, 3 textures
     // for 10 fields. Keeping 19 single-channel samplers exceeded
@@ -656,6 +743,8 @@ export class GLTerrainRenderer {
     this.uploadGrid('surf', world.naturalSurface, w, 1);
     this.uploadGrid('plant', world.plant, w, 1);
     this.uploadGrid('plantHeight', world.plantHeight, w, 1);
+    this.uploadGrid('bgPlant', world.bgPlant, w, 1);
+    this.uploadGrid('bgPlantHeight', world.bgPlantHeight, w, 1);
     this.uploadGrid('root', world.root, w, h);
     if (pheromones) {
       // Interleave 4 single-channel Float32 fields into an RGBA
@@ -705,6 +794,8 @@ export class GLTerrainRenderer {
     this.bindSampler('uDigTick', 'digTick');
     this.bindSampler('uPlant', 'plant');
     this.bindSampler('uPlantHeight', 'plantHeight');
+    this.bindSampler('uBgPlant', 'bgPlant');
+    this.bindSampler('uBgPlantHeight', 'bgPlantHeight');
     this.bindSampler('uRoot', 'root');
     this.bindSampler('uPPack0', 'pPack0');
     this.bindSampler('uPPack1', 'pPack1');
