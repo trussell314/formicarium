@@ -47,6 +47,19 @@ const FRAG_SRC = `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
+// Integer samplers (used below for the per-column natural-surface
+// row and the per-cell sprout/dig tick fields) MUST have an explicit
+// precision in GLSL ES 3.0 fragment shaders — there's no default.
+// On Chromium/V8 (Linux + headless variants, plus a number of mobile
+// and WebView environments) the shader compile fails with
+// "No precision specified" if these are omitted, the GLTerrainRenderer
+// constructor throws, the renderer catches it, and we fall back to the
+// CPU pixel-loop path. At 300×300 the CPU path with the pheromone
+// overlay on does ~50 ms / frame just on the terrain ImageData write
+// plus ~30 ms / frame on the overlay composite — slow enough to read
+// as "the sim locks the moment I click the overlay button".
+precision highp usampler2D;
+precision highp isampler2D;
 
 in vec2 vUv;
 out vec4 fragColor;

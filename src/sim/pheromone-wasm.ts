@@ -29,6 +29,14 @@ export interface PheromoneWasm {
    *  cells. Swaps current ↔ scratch on the handle so the new
    *  field is available via handle.current. */
   step(handle: WasmFieldHandle, diffuse: number, evaporate: number, cap: number): void;
+  /** Subscribe to the "WASM linear-memory grew, all TypedArray views
+   *  onto the old buffer are detached" event. The callback is
+   *  invoked once per existing handle whenever any subsequent
+   *  allocField / uploadCells call triggers a memory.grow. The
+   *  Pheromone class wires this up to re-cache its `.current` /
+   *  `.scratch` references — without it those cached refs keep
+   *  pointing at detached buffers and the next access throws. */
+  onBuffersRefreshed(cb: (handle: WasmFieldHandle) => void): void;
 }
 
 export interface WasmFieldHandle {
@@ -112,10 +120,18 @@ export async function initPheromoneWasm(
   let bumpPtr = -1;
   const handles: WasmFieldHandle[] = [];
 
+  const subscribers: Array<(h: WasmFieldHandle) => void> = [];
   const refreshViews = (): void => {
     for (const h of handles) {
       h.current = new Float32Array(memory.buffer, h._curPtr, h.width * h.height);
       h.scratch = new Float32Array(memory.buffer, h._scrPtr, h.width * h.height);
+      // Notify any owners (typically the Pheromone instance that
+      // wraps this handle) so they can re-cache their .current /
+      // .scratch references. Without this, the cached references
+      // continue to point at the now-detached old ArrayBuffer and
+      // any subsequent .slice() / read / write on them throws
+      // "detached or out-of-bounds ArrayBuffer".
+      for (const sub of subscribers) sub(h);
     }
   };
 
@@ -180,6 +196,9 @@ export async function initPheromoneWasm(
       const tmpView = handle.current;
       handle.current = handle.scratch;
       handle.scratch = tmpView;
+    },
+    onBuffersRefreshed(cb: (h: WasmFieldHandle) => void): void {
+      subscribers.push(cb);
     },
   };
   return runtime;

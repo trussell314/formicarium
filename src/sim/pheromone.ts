@@ -85,6 +85,18 @@ export class Pheromone {
       this.wasmHandle = handle;
       this.current = handle.current;
       this.scratch = handle.scratch;
+      // Subsequent allocField / uploadCells calls may trigger
+      // memory.grow(), which detaches every TypedArray view onto
+      // the old ArrayBuffer — including the .current / .scratch
+      // refs we just cached. The runtime rebuilds the handle's
+      // own views; this subscription mirrors those rebuilds back
+      // into our cached refs, so a deposit() / step() / .slice()
+      // for snapshot transfer never lands on a detached buffer.
+      wasmRuntime.onBuffersRefreshed((h) => {
+        if (h !== handle) return;
+        this.current = h.current;
+        this.scratch = h.scratch;
+      });
     } else {
       this.wasmHandle = null;
       this.current = new Float32Array(width * height);
