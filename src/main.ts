@@ -374,7 +374,7 @@ function main(): void {
       send({ kind: paused ? 'pause' : 'resume' });
     },
     faster: () => {
-      requestedSpeed = Math.min(1024, requestedSpeed * 2);
+      requestedSpeed = Math.min(8192, requestedSpeed * 2);
       send({ kind: 'setSpeed', speedMul: requestedSpeed });
     },
     slower: () => {
