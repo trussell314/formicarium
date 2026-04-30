@@ -79,6 +79,15 @@ export class World {
    *  then either decays naturally or gets cleared by an ant that
    *  walks through. */
   readonly sprout: Uint8Array;
+  /** Per-column surface plant. 0 = none, 1..3 = plant size class
+   *  (grass / shrub / small tree). Plants live in the AIR cell(s)
+   *  immediately above naturalSurface[col] and periodically drop
+   *  seeds onto the surface around themselves — modelling the
+   *  granivore food source: P. barbatus harvests seeds dropped by
+   *  the surrounding desert vegetation (MacMahon, Mull & Crist 2000,
+   *  "Harvester Ants and Their Role"). Plants die when buried by
+   *  the colony's spoil mound. */
+  readonly plant: Uint8Array;
   /** Tick at which each cell's sprout last germinated. Renderer
    *  uses (world.tick - sproutTick[idx]) for the age-driven visual
    *  ramp; the sim uses it for natural decay back to AIR after
@@ -175,6 +184,7 @@ export class World {
     this.sprout = new Uint8Array(width * height);
     this.sproutTick = new Int32Array(width * height);
     this.sproutTick.fill(-1_000_000);
+    this.plant = new Uint8Array(width);
     this.digTick = new Int32Array(width * height);
     this.digTick.fill(-1_000_000);
   }
@@ -268,6 +278,24 @@ export class World {
       this.soilNoise[i] = (rng.next() * 256) | 0;
     }
     this.initialSoilCells = soil;
+
+    // Scatter surface vegetation. Plant density and the per-column
+    // size-class roll are deterministic from the seeded RNG. We
+    // suppress plants in a band around the founding shaft so the
+    // colony's entrance reads visually clear — real ants clear
+    // vegetation around the nest mound (Hölldobler & Wilson 1990
+    // p. 411 on cleared discs around P. barbatus nests).
+    const PLANT_DENSITY = 0.12;
+    const NEST_CLEAR_HALF = Math.max(4, Math.floor(this.width * 0.04));
+    for (let x = 0; x < this.width; x++) {
+      const r = rng.next();
+      if (Math.abs(x - cx) < NEST_CLEAR_HALF) continue;
+      if (r >= PLANT_DENSITY) continue;
+      // Bias toward the smallest size class. Tall plants are rare.
+      const sizeRoll = rng.next();
+      const kind = sizeRoll < 0.65 ? 1 : (sizeRoll < 0.92 ? 2 : 3);
+      this.plant[x] = kind;
+    }
   }
 
   countSoil(): number {

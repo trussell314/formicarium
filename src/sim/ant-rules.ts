@@ -158,6 +158,14 @@ function getCollisionBins(cells: number, ants: number): { head: Int16Array; link
 
 const TWO_PI = Math.PI * 2;
 
+// Per-tick chance that the plant-seed-drop roll selects a column to
+// fertilise. With width=280 and ~12% planted columns (~33 plants)
+// this fires roughly once every 200 ticks, so each plant drops one
+// seed every ~6,600 ticks (~13 biological minutes at 100× compression
+// — plausible for a desert annual fruiting). The supply throttle
+// downstream caps total inventory regardless of source.
+const PLANT_SEED_RATE = 0.005;
+
 function wrapAngle(a: number): number {
   if (a > Math.PI) return a - TWO_PI;
   if (a < -Math.PI) return a + TWO_PI;
@@ -318,6 +326,46 @@ export function step(
         world.food[aboveIdx] = 1;
         world.foodMoves[aboveIdx] = 0;
         break;
+      }
+    }
+  }
+  // Plant seed drop. Three RNG draws per tick regardless of plant
+  // count (preserves test determinism — see the `seedsPerTick`
+  // comment above for why we never gate rng.next() on a config flag).
+  // On a hit we pick a random column; if there's a plant there and
+  // the cell hasn't been buried by mound, drop a seed within ±2
+  // columns of the plant's base. The supply throttle in the clump
+  // rain below counts plant drops too, so plants displace some of
+  // the random-clump rate rather than adding on top.
+  const plantDropRoll = rng.next();
+  const plantPickCol = (rng.next() * world.width) | 0;
+  const plantOffRoll = rng.next();
+  if (species.granivorous && plantDropRoll < PLANT_SEED_RATE) {
+    const pcol = plantPickCol;
+    if (world.plant[pcol]! > 0) {
+      const psurf = world.naturalSurface[pcol]!;
+      const pAbove = (psurf - 1) * world.width + pcol;
+      if (psurf >= 1 && world.cells[pAbove] !== CELL_AIR) {
+        // Plant cell got buried (mound stacked over it). Plant dies.
+        world.plant[pcol] = 0;
+      } else {
+        const dx = ((plantOffRoll * 5) | 0) - 2;
+        const sx = pcol + dx;
+        if (sx >= 0 && sx < world.width) {
+          const sy = world.naturalSurface[sx]!;
+          if (sy >= 1) {
+            for (let py = sy - 1; py >= 0; py--) {
+              const pIdx = py * world.width + sx;
+              const cell = world.cells[pIdx]!;
+              if (cell === CELL_AIR && world.food[pIdx] === 0) {
+                world.food[pIdx] = 1;
+                world.foodMoves[pIdx] = 0;
+                break;
+              }
+              if (cell === CELL_SOIL) break;
+            }
+          }
+        }
       }
     }
   }

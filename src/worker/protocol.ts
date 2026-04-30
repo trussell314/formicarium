@@ -52,6 +52,7 @@ export type RenderSnapshot = {
   sprout: Uint8Array;
   sproutTick: Int32Array;
   digTick: Int32Array;
+  plant: Uint8Array;
   // Colony fields
   count: number;
   posX: Float32Array;

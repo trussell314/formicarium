@@ -32,6 +32,7 @@ export interface RenderableWorld {
   sprout: Uint8Array;
   sproutTick: Int32Array;
   digTick: Int32Array;
+  plant: Uint8Array;
 }
 
 export interface RenderableColony {

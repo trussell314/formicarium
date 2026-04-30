@@ -26,8 +26,8 @@ const SAVE_KEY = 'formicarium:save';
 // alarm pheromone; v5 added the population-driven food rate
 // (foodCap, clumpAccum); v6 added per-ant stuckTicks; v7 added the
 // queen pheromone; v8 added brood, necromone, no-entry, granary,
-// and trunk-trail pheromones.
-const SAVE_VERSION = 8;
+// and trunk-trail pheromones; v9 added per-column surface plant.
+const SAVE_VERSION = 9;
 
 // Chunked btoa to avoid argument-list length limits on very large arrays.
 function bytesToB64(view: ArrayBufferView): string {
@@ -47,8 +47,8 @@ function b64ToBytes(s: string): Uint8Array {
   return out;
 }
 
-interface SaveStateV8 {
-  v: 8;
+interface SaveStateV9 {
+  v: 9;
   foodCap: number;
   clumpAccum: number;
   // Settings — needed to validate that a save matches the requested run.
@@ -77,6 +77,7 @@ interface SaveStateV8 {
   sprout: string;
   sproutTick: string;
   digTick: string;
+  plant: string;
   // Colony scalars
   colonyCount: number;
   // Colony arrays (b64)
@@ -130,7 +131,7 @@ export function captureSnapshot(
   granaryField: Pheromone, trunkField: Pheromone,
   rng: RNG, settings: SaveSettings,
 ): string | null {
-  const state: SaveStateV8 = {
+  const state: SaveStateV9 = {
     v: SAVE_VERSION,
     seed: settings.seed,
     width: settings.width,
@@ -156,6 +157,7 @@ export function captureSnapshot(
     sprout: bytesToB64(world.sprout),
     sproutTick: bytesToB64(world.sproutTick),
     digTick: bytesToB64(world.digTick),
+    plant: bytesToB64(world.plant),
     colonyCount: colony.count,
     posX: bytesToB64(colony.posX),
     posY: bytesToB64(colony.posY),
@@ -244,7 +246,7 @@ export function restoreSnapshot(
 ): boolean {
   let raw: unknown;
   try { raw = JSON.parse(blob); } catch { return false; }
-  const s = raw as Partial<SaveStateV8>;
+  const s = raw as Partial<SaveStateV9>;
   if (
     !s ||
     s.v !== SAVE_VERSION ||
@@ -293,6 +295,7 @@ export function restoreSnapshot(
     copyBytes(s.sprout!, world.sprout);
     copyBytes(s.sproutTick!, world.sproutTick);
     copyBytes(s.digTick!, world.digTick);
+    copyBytes(s.plant!, world.plant);
     colony.count = s.colonyCount!;
     copyBytes(s.posX!, colony.posX);
     copyBytes(s.posY!, colony.posY);
