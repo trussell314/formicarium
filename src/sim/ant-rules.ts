@@ -174,9 +174,9 @@ function wrapAngle(a: number): number {
  * for vertical-gallery formation. It paradoxically REDUCED depth
  * (chamber-floor ants all dug the cell below them, spreading the dig
  * effort laterally across the wide floor rather than concentrating
- * at any particular point). The asymmetric dig-pheromone deposit
- * (see step()) plus strong below-surface geotaxis on WANDER ants
- * give the right gradient pull without flattening the dig front.
+ * at any particular point). The strong below-surface geotaxis on
+ * WANDER ants gives the right gradient pull without flattening the
+ * dig front.
  */
 function adjacentSoil(world: World, ix: number, iy: number, h: number): { x: number; y: number } | null {
   const w = world.width;
@@ -2583,25 +2583,6 @@ export function step(
         species.compactionFloor,
         1 - depthBelowSurf / species.compactionDepth,
       );
-      // Tunnel-tip vs chamber-wall (geometric) AND direction-of-
-      // extension differentiation. Tschinkel (2004) mapped
-      // Pogonomyrmex nests as predominantly vertical galleries with
-      // chambers branching at intervals, so dig outcomes that
-      // EXTEND a vertical air structure should out-rate ones that
-      // EXTEND a lateral structure.
-      //
-      // tipBonus by cardinal-soil-count of the ant's CELL:
-      //   4 (entombed) or 3 (tunnel tip): 1.0
-      //   2 (chamber wall corner):        0.3
-      // The 0.3 doesn't apply to claustrophobia entombment (which
-      // has 4 soil neighbours by definition).
-      const tipBonus = neighbourSoil >= 3 ? 1.0 : 0.3;
-      // Direction-of-extension bonus: examine the dig target's
-      // OWN air-neighbour pattern. If the target sits below a
-      // single air cell (above), digging it extends DOWN — boost.
-      // If the target sits beside an air cell (left/right), digging
-      // it extends laterally — penalty.
-      //
       // For the surface-stranded bypass we force the target to be
       // directly below the ant: heading on the surface is usually
       // horizontal (random walk along the surface), so adjacentSoil
@@ -2612,40 +2593,6 @@ export function step(
         ? { x: ax, y: ay + 1 }
         : adjacentSoil(world, ax, ay, h);
       if (target !== null) {
-        const tW = world.width;
-        const tx = target.x;
-        const ty = target.y;
-        const airAbove = ty > 0 && world.cells[(ty - 1) * tW + tx] === CELL_AIR ? 1 : 0;
-        const airBelow = ty < world.height - 1 && world.cells[(ty + 1) * tW + tx] === CELL_AIR ? 1 : 0;
-        const airLeft = tx > 0 && world.cells[ty * tW + (tx - 1)] === CELL_AIR ? 1 : 0;
-        const airRight = tx < tW - 1 && world.cells[ty * tW + (tx + 1)] === CELL_AIR ? 1 : 0;
-        const vAir = airAbove + airBelow;
-        const lAir = airLeft + airRight;
-        // Direction-of-extension bonus.
-        //   vertical extension (target sits below an air cell):     1.5×
-        //   equal / fresh ground (no neighbouring air):              1.0×
-        //   lateral extension (target sits beside an air cell):      0.7×
-        // The lateral penalty was 0.3× originally — the stated goal
-        // was Tschinkel's "vertical galleries with chambers branching
-        // off" — but at 0.3× chambers never actually form. Long runs
-        // produced colonies of pencil-thin parallel shafts with the
-        // queen alone in one of them and no path to brood / food /
-        // workers in the others. 0.7× still favours vertical extension
-        // (galleries push down ~2× faster than they widen) but lets
-        // chambers and lateral connections actually develop, and the
-        // Khuong boost on build-pheromone-marked walls amplifies
-        // chamber growth into proper lobes once one starts.
-        // Depth-modulated lateral bonus. Surface and shallow tunnels
-        // should stay vertical-biased (gallery shaft, no chambers
-        // near surface where they'd weaken the entrance). Past
-        // ~15 cells below surface the lateral penalty lifts to
-        // 1.0 so chambers can grow at depth — which is where
-        // Tschinkel 2004 mapped Pogonomyrmex chambers (regularly
-        // spaced lobes off a vertical gallery, mostly between
-        // 15-50 cells deep).
-        const dirDepth = Math.max(0, ay - world.naturalSurface[ax]!);
-        const lateralPenalty = dirDepth >= 15 ? 1.0 : (0.7 + 0.3 * dirDepth / 15);
-        const dirBonus = vAir > lAir ? 1.5 : (lAir > vAir ? lateralPenalty : 1.0);
         // Alarm boost. Strong local alarm pheromone signals "dig
         // here, fast" — multiplies the dig roll by up to 3× when
         // saturated. This is what produces the visible mass
@@ -2691,7 +2638,7 @@ export function step(
             : avgEnergy <= 0.2
               ? 0.1
               : 0.1 + 0.9 * ((avgEnergy - 0.2) / 0.2);
-        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * tipBonus * dirBonus * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation * hungerDigMul) {
+        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation * hungerDigMul) {
           if (digCell(world, target.x, target.y, rng)) {
             // Track dig direction relative to the digger's cell, so
             // the diag can surface a vertical-vs-lateral histogram.
@@ -2714,36 +2661,20 @@ export function step(
             // Fresh material — never moved before. The next deposit
             // will set the placed cell's grainMoves to 1.
             colony.carryMoves[i] = 0;
-            // Asymmetric dig-pheromone deposit: bulk of the recruitment
-            // signal is laid ONE ROW BELOW the actual dug cell, so the
-            // gradient pulls subsequent diggers DOWN into virgin soil
-            // rather than along the row that was just dug. Without
-            // this, every dig laterally lays pheromone at the same
-            // depth, the gradient pulls the next ant the same direction,
-            // and chambers drift into long horizontal galleries (the
-            // opposite of the vertical-gallery + horizontal-chamber
-            // architecture Tschinkel 2004 mapped in Pogonomyrmex
-            // badius). Real ant alarm/recruitment pheromones do show
-            // directional persistence — convection at the surface
-            // disperses them faster than the still air at depth, so
-            // the equivalent biological phenomenon (deeper-pheromone-
-            // lasts-longer) maps onto the same gradient asymmetry.
-            // 80% of the signal goes below the dug cell, 20% at the
-            // dug cell itself for in-place recruitment continuity.
-            digField.deposit(target.x, target.y, digDeposit * 0.2);
-            if (target.y + 1 < world.height) {
-              digField.deposit(target.x, target.y + 1, digDeposit * 0.8);
-            }
-            // Stranded surface beacon. The deposits above are deep
-            // in the new shaft and barely reach surface ants by
-            // gradient diffusion — that's why a fresh stranded
-            // dig used to spawn parallel shafts. Drop a strong
-            // pulse of dig pheromone in the surface AIR cell where
-            // the ant stands so other surface ants laterally pulled
-            // toward this column instead of starting their own
-            // recovery shaft. Alarm too: alarmBypass triggers the
-            // dig roll for bystanders that arrive, so they actually
-            // help excavate rather than mill at the rim.
+            // Dig-recruitment pheromone deposit at the dug cell —
+            // where the ant actually is. The 5-point diffusion in
+            // Pheromone.step() handles spread to neighbours; the
+            // gradient ants follow emerges from that diffusion plus
+            // evaporation, with no per-deposit directional bias.
+            digField.deposit(target.x, target.y, digDeposit);
+            // Stranded-worker recruitment pulse. A surface-stranded
+            // ant breaking new ground releases an above-normal dig-
+            // recruitment signal plus alarm pheromone (Hölldobler &
+            // Wilson 1990 Ch. 7 — disturbed Pogonomyrmex foragers
+            // emit Dufour-gland alarm). Both are deposited at the
+            // ant's own cell, where the ant actually is. This pulls
+            // bystanders to help excavate the recovery shaft instead
+            // of each starting their own.
             if (stranded && alarmField) {
               digField.deposit(ax, ay, digDeposit * 2.0);
               alarmField.deposit(ax, ay, 0.3);

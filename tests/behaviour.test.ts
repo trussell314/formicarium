@@ -398,48 +398,6 @@ describe('substrate compaction with depth', () => {
   });
 });
 
-describe('asymmetric dig pheromone deposit', () => {
-  it('a successful dig lays more pheromone one row BELOW the dug cell than at it', () => {
-    const w = flatWorld(40, 30, 10);
-    // Carve a 1-cell pocket so the ant has ≥2 soil neighbours to
-    // pass the enclosure gate.
-    w.cells[w.index(20, 10)] = CELL_AIR;
-    w.initialSoilCells = w.countSoil();
-    // Snapshot original cells to detect which one got dug.
-    const originalSoil = new Set<number>();
-    for (let i = 0; i < w.cells.length; i++) {
-      if (w.cells[i] === CELL_SOIL) originalSoil.add(i);
-    }
-    // Override walkSpeed to the pre-resolution-change value so the
-    // ant doesn't drift out of the carved pocket before digging.
-    const params = { ...DEFAULT_PARAMS, digProb: 1.0, turnNoise: 0.001, walkSpeed: 0.5 };
-    const TRAITS_DIG = { ...TRAITS, digProb: 1.0, turnNoise: 0.001 };
-    const rng = new RNG(20);
-    const colony = new Colony(1);
-    colony.spawn(20.5, 10.5, Math.PI / 2, rng, TRAITS_DIG);
-    const { dig, build } = fields(w);
-    for (let t = 0; t < 50; t++) {
-      step(w, colony, dig, build, rng, params);
-      if (colony.state[0] === STATE_CARRY) break;
-    }
-    // Find the dug cell — exactly one was SOIL and is now AIR.
-    let dugX = -1, dugY = -1;
-    for (let y = 8; y < 14; y++) {
-      for (let x = 18; x < 23; x++) {
-        const idx = y * w.width + x;
-        if (originalSoil.has(idx) && w.cells[idx] === CELL_AIR) {
-          dugX = x; dugY = y;
-        }
-      }
-    }
-    expect(dugY).toBeGreaterThan(-1);
-    // Bulk of asymmetric pheromone is at (dugX, dugY + 1).
-    const phAtDug = dig.current[dugY * w.width + dugX]!;
-    const phBelow = dig.current[(dugY + 1) * w.width + dugX]!;
-    expect(phBelow).toBeGreaterThan(phAtDug);
-  });
-});
-
 // ─────────────────────────────────────────────────────────────────
 //   Khuong threshold deposit
 // ─────────────────────────────────────────────────────────────────

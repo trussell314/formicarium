@@ -121,7 +121,9 @@ describe('caste polyethism', () => {
   it('mid-age workers dig more than young or old workers', () => {
     // Three parallel colonies at different ages. Run them long
     // enough for a clear dig differential. We don't tightly bound
-    // the values — only the ordering matters.
+    // the values — only the ordering matters. Averaged across
+    // several seeds so the assertion isn't brittle to per-seed
+    // RNG drift when the per-roll dig probability changes.
     function digsAtAge(age: number, seed: number): number {
       const rng = new RNG(seed);
       const w = flatWorld(40, 30, 6);
@@ -144,9 +146,11 @@ describe('caste polyethism', () => {
       }
       return startSoil - w.countSoil();
     }
-    const young = digsAtAge(0, 7);
-    const mid = digsAtAge(HARVESTER.matureAge / 2, 7);
-    const old = digsAtAge(HARVESTER.matureAge * 2, 7);
+    const seeds = [3, 7, 11, 17, 23];
+    const sum = (xs: ReadonlyArray<number>): number => xs.reduce((a, b) => a + b, 0);
+    const young = sum(seeds.map((s) => digsAtAge(0, s)));
+    const mid = sum(seeds.map((s) => digsAtAge(HARVESTER.matureAge / 2, s)));
+    const old = sum(seeds.map((s) => digsAtAge(HARVESTER.matureAge * 2, s)));
     // Mid > young AND mid > old. Excavator caste peaks in the middle.
     expect(mid).toBeGreaterThan(young);
     expect(mid).toBeGreaterThan(old);
