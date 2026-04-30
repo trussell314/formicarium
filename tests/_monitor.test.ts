@@ -8,12 +8,12 @@ import {
   Colony, STATE_DEAD, STATE_QUEEN, STATE_EGG, STATE_LARVA, STATE_PUPA,
   STATE_WANDER, STATE_CARRY, STATE_REST, STATE_FORAGE,
   STATE_CARRY_FOOD, STATE_NECRO_CARRY,
-} from 'src/sim/colony';
-import { DEFAULT_PARAMS, step } from 'src/sim/ant-rules';
-import { Pheromone } from 'src/sim/pheromone';
-import { RNG } from 'src/sim/rng';
-import { HARVESTER } from 'src/sim/species';
-import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from 'src/sim/world';
+} from '../src/sim/colony';
+import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
+import { Pheromone } from '../src/sim/pheromone';
+import { RNG } from '../src/sim/rng';
+import { HARVESTER } from '../src/sim/species';
+import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from '../src/sim/world';
 
 const TICKS_PER_CHECKPOINT = 30_000;
 const NUM_CHECKPOINTS = 18; // 540k ticks — past peak healthy + into cascade window
@@ -194,7 +194,12 @@ describe('claustral monitoring (post-IJ)', () => {
       if (maxX >= 0) {
         const x0 = Math.max(0, minX - 4);
         const x1 = Math.min(world.width - 1, maxX + 4);
-        const y0 = Math.max(0, Math.min(...Array.from(world.naturalSurface).slice(x0, x1 + 1)) - 2);
+        let surfMin = world.height;
+        for (let xx = x0; xx <= x1; xx++) {
+          const sy = world.naturalSurface[xx]!;
+          if (sy < surfMin) surfMin = sy;
+        }
+        const y0 = Math.max(0, surfMin - 2);
         const y1 = Math.min(world.height - 1, maxY + 2);
         log(`\n=== nest cross-section (cols ${x0}-${x1}, rows ${y0}-${y1}) ===`);
         for (let y = y0; y <= y1; y++) {
