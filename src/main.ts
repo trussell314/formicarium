@@ -61,7 +61,6 @@ function makePlaceholderWorld(s: Settings): {
   plantHeight: Uint16Array;
   bgPlant: Uint8Array;
   bgPlantHeight: Uint16Array;
-  root: Uint8Array;
 } {
   // Renderer needs SOMETHING at construction time, before the
   // worker has produced its first snapshot. Empty arrays of the
@@ -81,7 +80,6 @@ function makePlaceholderWorld(s: Settings): {
     plantHeight: new Uint16Array(s.width),
     bgPlant: new Uint8Array(s.width),
     bgPlantHeight: new Uint16Array(s.width),
-    root: new Uint8Array(sz),
   };
 }
 

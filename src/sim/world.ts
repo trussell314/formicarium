@@ -125,15 +125,6 @@ export class World {
    *  maturity (random within the kind's max) since these don't
    *  grow over time — they're decoration, not sim state. */
   readonly bgPlantHeight: Uint16Array;
-  /** Per-cell root marker. 0 = no root; 2 = shrub root; 3 = tree
-   *  root (matches the plant kind that owns it). Roots block dig
-   *  attempts in physics.digCell — *P. barbatus* nests route around
-   *  woody taproots in the wild rather than chewing through them
-   *  (Tschinkel 2006 *The Fire Ants* on harvester nest casts;
-   *  MacMahon, Mull & Crist 2000 on root-soil interactions in
-   *  desert harvester habitat). Grass roots (kind 1) aren't tracked
-   *  — they're fine fibrous mats that ants ignore at this scale. */
-  readonly root: Uint8Array;
   /** Tick at which each cell's sprout last germinated. Renderer
    *  uses (world.tick - sproutTick[idx]) for the age-driven visual
    *  ramp; the sim uses it for natural decay back to AIR after
@@ -234,7 +225,6 @@ export class World {
     this.plantHeight = new Uint16Array(width);
     this.bgPlant = new Uint8Array(width);
     this.bgPlantHeight = new Uint16Array(width);
-    this.root = new Uint8Array(width * height);
     this.digTick = new Int32Array(width * height);
     this.digTick.fill(-1_000_000);
   }
@@ -384,63 +374,6 @@ export class World {
       this.bgPlantHeight[x] = h;
     }
 
-    // Root systems for shrubs (kind 2) and trees (kind 3). Grass
-    // roots (kind 1) are fine fibrous mats that don't impact digging
-    // and aren't tracked. Patterns calibrated to 3 mm/cell scale:
-    //   - shrub: ~30 cm taproot (10 cells) + a few short laterals
-    //   - tree:  ~1 m  taproot (33 cells) + lateral feeder roots
-    //            radiating from the trunk in the upper soil column
-    //
-    // The taproot drops vertically from the surface, with small
-    // hash-driven lateral kinks every few cells so each plant's
-    // root reads as an organic line rather than a ruler-straight
-    // bar. We bias the kinks deterministically off the column +
-    // depth so the layout is reproducible from the seed.
-    const TREE_TAP_DEPTH = 33;
-    const TREE_LATERAL_REACH = 6;
-    const SHRUB_TAP_DEPTH = 10;
-    const SHRUB_LATERAL_REACH = 2;
-    const writeRoot = (rx: number, ry: number, kind: number): void => {
-      if (rx < 0 || rx >= this.width || ry < 0 || ry >= this.height) return;
-      const idx = ry * this.width + rx;
-      if (this.cells[idx] !== CELL_SOIL) return;
-      this.root[idx] = kind;
-    };
-    for (let x = 0; x < this.width; x++) {
-      const kind = this.plant[x]!;
-      if (kind < 2) continue;
-      const baseY = this.naturalSurface[x]!;
-      const tapDepth = kind === 3 ? TREE_TAP_DEPTH : SHRUB_TAP_DEPTH;
-      const lateralReach = kind === 3 ? TREE_LATERAL_REACH : SHRUB_LATERAL_REACH;
-      // Vertical taproot with deterministic kinks. Hash mixes column
-      // x with depth so adjacent plants kink differently.
-      let kinkX = x;
-      for (let d = 0; d < tapDepth; d++) {
-        const ry = baseY + d;
-        if ((d > 0) && ((x * 31 + d * 7) & 7) === 0) {
-          kinkX += ((x + d) & 1) === 0 ? 1 : -1;
-        }
-        writeRoot(kinkX, ry, kind);
-      }
-      // Lateral feeder roots near the surface.
-      const lateralDepth = kind === 3 ? 2 : 1;
-      for (const dir of [-1, 1] as const) {
-        for (let i = 1; i <= lateralReach; i++) {
-          const ry = baseY + lateralDepth + ((i * dir + x) & 1);
-          writeRoot(x + dir * i, ry, kind);
-        }
-      }
-      // Trees also get one or two deeper laterals branching off the
-      // taproot, evoking the buttress / sinker root structure of
-      // mature mesquite. Branch points hashed off x for variety.
-      if (kind === 3) {
-        const branchDepth = 8 + ((x * 17) & 7);
-        const branchDir = (x & 1) === 0 ? 1 : -1;
-        for (let i = 1; i <= 4; i++) {
-          writeRoot(x + branchDir * i, baseY + branchDepth + ((i + x) & 1), kind);
-        }
-      }
-    }
   }
 
   countSoil(): number {

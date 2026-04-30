@@ -277,12 +277,6 @@ export function digCell(world: World, x: number, y: number, rng: RNG): boolean {
   if (x < 0 || y < 0 || x >= world.width || y >= world.height) return false;
   const idx = y * world.width + x;
   if (world.cells[idx] !== CELL_SOIL) return false;
-  // Roots block dig attempts. Real *Pogonomyrmex* nests route
-  // around woody taproots rather than chewing through them
-  // (Tschinkel 2006). Shrub (kind 2) and tree (kind 3) roots are
-  // recorded in world.root; grass roots (kind 1) aren't tracked
-  // because at 3 mm/cell their fibrous mat is too fine to obstruct.
-  if (world.root[idx]! >= 2) return false;
   world.cells[idx] = CELL_AIR;
   // Stamp the tick so the renderer can briefly glow this cell as
   // "freshly excavated." renderer.ts:163 reads digTick — without

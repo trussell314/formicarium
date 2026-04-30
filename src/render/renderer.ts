@@ -36,7 +36,6 @@ export interface RenderableWorld {
   plantHeight: Uint16Array;
   bgPlant: Uint8Array;
   bgPlantHeight: Uint16Array;
-  root: Uint8Array;
 }
 
 export interface RenderableColony {

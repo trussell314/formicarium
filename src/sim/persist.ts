@@ -31,8 +31,10 @@ const SAVE_KEY = 'formicarium:save';
 // v11 widened plantHeight to Uint16 for real-scale plants
 // (mature trees up to ~1500 cells at 3 mm/cell);
 // v12 added per-cell root marker (taproots block dig in physics);
-// v13 added per-column background plant skyline (visual depth).
-const SAVE_VERSION = 13;
+// v13 added per-column background plant skyline (visual depth);
+// v14 dropped the root marker — bg plants are intended to be
+// distant, so per-cell root state under them was inconsistent.
+const SAVE_VERSION = 14;
 
 // Chunked btoa to avoid argument-list length limits on very large arrays.
 function bytesToB64(view: ArrayBufferView): string {
@@ -52,8 +54,8 @@ function b64ToBytes(s: string): Uint8Array {
   return out;
 }
 
-interface SaveStateV13 {
-  v: 13;
+interface SaveStateV14 {
+  v: 14;
   foodCap: number;
   clumpAccum: number;
   // Settings — needed to validate that a save matches the requested run.
@@ -86,7 +88,6 @@ interface SaveStateV13 {
   plantHeight: string;
   bgPlant: string;
   bgPlantHeight: string;
-  root: string;
   // Colony scalars
   colonyCount: number;
   // Colony arrays (b64)
@@ -140,7 +141,7 @@ export function captureSnapshot(
   granaryField: Pheromone, trunkField: Pheromone,
   rng: RNG, settings: SaveSettings,
 ): string | null {
-  const state: SaveStateV13 = {
+  const state: SaveStateV14 = {
     v: SAVE_VERSION,
     seed: settings.seed,
     width: settings.width,
@@ -170,7 +171,6 @@ export function captureSnapshot(
     plantHeight: bytesToB64(world.plantHeight),
     bgPlant: bytesToB64(world.bgPlant),
     bgPlantHeight: bytesToB64(world.bgPlantHeight),
-    root: bytesToB64(world.root),
     colonyCount: colony.count,
     posX: bytesToB64(colony.posX),
     posY: bytesToB64(colony.posY),
@@ -259,7 +259,7 @@ export function restoreSnapshot(
 ): boolean {
   let raw: unknown;
   try { raw = JSON.parse(blob); } catch { return false; }
-  const s = raw as Partial<SaveStateV13>;
+  const s = raw as Partial<SaveStateV14>;
   if (
     !s ||
     s.v !== SAVE_VERSION ||
@@ -312,7 +312,6 @@ export function restoreSnapshot(
     copyBytes(s.plantHeight!, world.plantHeight);
     copyBytes(s.bgPlant!, world.bgPlant);
     copyBytes(s.bgPlantHeight!, world.bgPlantHeight);
-    copyBytes(s.root!, world.root);
     colony.count = s.colonyCount!;
     copyBytes(s.posX!, colony.posX);
     copyBytes(s.posY!, colony.posY);

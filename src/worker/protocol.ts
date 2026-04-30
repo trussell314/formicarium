@@ -56,7 +56,6 @@ export type RenderSnapshot = {
   plantHeight: Uint16Array;
   bgPlant: Uint8Array;
   bgPlantHeight: Uint16Array;
-  root: Uint8Array;
   // Colony fields
   count: number;
   posX: Float32Array;

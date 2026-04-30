@@ -16,7 +16,6 @@ import { describe, expect, it } from 'vitest';
 import { Colony } from '../src/sim/colony';
 import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { Pheromone } from '../src/sim/pheromone';
-import { digCell } from '../src/sim/physics';
 import { RNG } from '../src/sim/rng';
 import { type AntSpecies, HARVESTER } from '../src/sim/species';
 import {
@@ -159,52 +158,6 @@ describe('surface plants', () => {
       step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, QUIET);
     }
     expect(w.plantHeight[10]!).toBe(PLANT_MAX_HEIGHT[1]!);
-  });
-
-  it('world.generate stamps roots under shrubs and trees', () => {
-    const rng = new RNG(31);
-    const w = new World(280, 140);
-    w.generate(rng, 40, 12, 6);
-    let shrubRootCells = 0;
-    let treeRootCells = 0;
-    let grassRootCells = 0;
-    for (let i = 0; i < w.root.length; i++) {
-      const r = w.root[i]!;
-      if (r === 1) grassRootCells++;
-      else if (r === 2) shrubRootCells++;
-      else if (r === 3) treeRootCells++;
-    }
-    // Trees take ~33-cell taproot + laterals; even with one tree
-    // we'd expect dozens of cells. Shrubs are smaller but still
-    // present.
-    expect(treeRootCells + shrubRootCells).toBeGreaterThan(20);
-    // Grass roots aren't tracked at all.
-    expect(grassRootCells).toBe(0);
-  });
-
-  it('digCell refuses to excavate a tree-root cell', () => {
-    const rng = new RNG(37);
-    const w = flatWorld(40, 30, 12);
-    // Stamp a tree root at (20, 14).
-    const idx = 14 * w.width + 20;
-    expect(w.cells[idx]).toBe(CELL_SOIL);
-    w.root[idx] = 3;
-    // Use the dig primitive directly (matches all dig paths in
-    // ant-rules — every one calls digCell).
-    const ok = digCell(w,20, 14, rng);
-    expect(ok).toBe(false);
-    expect(w.cells[idx]).toBe(CELL_SOIL);
-  });
-
-  it('digCell still excavates a non-root soil cell', () => {
-    const rng = new RNG(41);
-    const w = flatWorld(40, 30, 12);
-    const idx = 14 * w.width + 20;
-    expect(w.cells[idx]).toBe(CELL_SOIL);
-    expect(w.root[idx]).toBe(0);
-    const ok = digCell(w,20, 14, rng);
-    expect(ok).toBe(true);
-    expect(w.cells[idx]).toBe(CELL_AIR);
   });
 
   it('saturated trunk-trail clears plants, food, and sprouts', () => {
