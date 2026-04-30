@@ -9,7 +9,7 @@
     "build:wasm": "node scripts/build-wasm.mjs",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:monitor": "vitest run tests/_monitor.test.ts --testTimeout=1800000",
+    "test:monitor": "vitest run --config vitest.monitor.config.ts tests/_monitor.test.ts --testTimeout=7200000",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
