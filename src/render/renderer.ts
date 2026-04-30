@@ -111,8 +111,8 @@ function lerp3(a: [number, number, number], b: [number, number, number], t: numb
  *  paints over. */
 function plantCovers(world: RenderableWorld, cellX: number, cellY: number): boolean {
   const w = world.width;
-  // Foreground scan — same radii / formulas as the FG GL branch.
-  for (let dx = -6; dx <= 6; dx++) {
+  // Foreground scan — kind-based radii, matches GL FG branch.
+  for (let dx = -5; dx <= 5; dx++) {
     const nx = cellX + dx;
     if (nx < 0 || nx >= w) continue;
     const kind = world.plant[nx]!;
@@ -123,23 +123,15 @@ function plantCovers(world: RenderableWorld, cellX: number, cellY: number): bool
     const base = surf - 1;
     const top = surf - h;
     if (cellY > base || cellY < top) continue;
-    const trunkCells = kind === 1 ? 1 : kind === 2 ? 2 : Math.max(1, Math.floor(h / 4));
-    const inTrunk = cellY > base - trunkCells;
-    const sqrtH = Math.sqrt(h);
-    const trunkRadius =
-      kind === 1 ? 0
-      : kind === 2 ? Math.max(1, Math.min(2, Math.round(sqrtH / 8)))
-      : Math.max(1, Math.min(4, Math.round(sqrtH / 8)));
-    const canopyRadius =
-      kind === 1 ? 0
-      : kind === 2 ? Math.max(1, Math.min(3, Math.round(sqrtH / 6)))
-      : Math.max(2, Math.min(6, Math.round(sqrtH / 6)));
+    const trunkCells = kind === 1 ? 0 : kind === 2 ? 1 : Math.max(1, Math.floor(h / 6));
+    const inTrunk = trunkCells > 0 && cellY > base - trunkCells;
+    const trunkRadius = kind === 1 ? 0 : kind === 2 ? 1 : 2;
+    const canopyRadius = kind === 1 ? 0 : kind === 2 ? 3 : 5;
     const reqRadius = inTrunk ? trunkRadius : canopyRadius;
     const absDx = dx < 0 ? -dx : dx;
     if (absDx <= reqRadius) return true;
   }
-  // Background scan — wider radii, ±8 columns. Same formulas as the
-  // BG GL branch.
+  // Background scan — wider radii, ±8 columns. Matches GL BG branch.
   for (let dx = -8; dx <= 8; dx++) {
     const nx = cellX + dx;
     if (nx < 0 || nx >= w) continue;
@@ -151,17 +143,10 @@ function plantCovers(world: RenderableWorld, cellX: number, cellY: number): bool
     const base = surf - 1;
     const top = surf - h;
     if (cellY > base || cellY < top) continue;
-    const trunkCells = kind === 1 ? 1 : kind === 2 ? 3 : Math.max(1, Math.floor(h / 4));
-    const inTrunk = cellY > base - trunkCells;
-    const sqrtH = Math.sqrt(h);
-    const trunkRadius =
-      kind === 1 ? 0
-      : kind === 2 ? Math.max(1, Math.min(4, Math.round(sqrtH / 5)))
-      : Math.max(2, Math.min(7, Math.round(sqrtH / 5)));
-    const canopyRadius =
-      kind === 1 ? 1
-      : kind === 2 ? Math.max(2, Math.min(5, Math.round(sqrtH / 4)))
-      : Math.max(3, Math.min(9, Math.round(sqrtH / 4)));
+    const trunkCells = kind === 1 ? 0 : kind === 2 ? 1 : Math.max(1, Math.floor(h / 6));
+    const inTrunk = trunkCells > 0 && cellY > base - trunkCells;
+    const trunkRadius = kind === 1 ? 0 : kind === 2 ? 2 : 3;
+    const canopyRadius = kind === 1 ? 1 : kind === 2 ? 5 : 8;
     const reqRadius = inTrunk ? trunkRadius : canopyRadius;
     const absDx = dx < 0 ? -dx : dx;
     if (absDx <= reqRadius) return true;
