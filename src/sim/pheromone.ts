@@ -60,6 +60,16 @@ export class Pheromone {
    *  scalar path because the WASM kernel hardcodes the AIR-only
    *  gating; at 1-2 permeable fields per world the cost is fine. */
   private readonly permeable: boolean;
+  /** Lower bound on the next tick at which the field could possibly
+   *  hold non-zero values. step() bails immediately whenever this
+   *  is in the future relative to a monotonic counter we maintain
+   *  ourselves — meaning the field is provably empty (zero in →
+   *  zero everywhere out) and there's nothing to compute or to
+   *  swap. Set to +∞ (i.e. unbounded "all clear" window) on
+   *  construction; reset to "0 ticks remaining" by every deposit().
+   *  After a step that produces an all-zero output, we lengthen
+   *  the window again. */
+  private nonZero: boolean;
 
   constructor(width: number, height: number, diffuse: number, evaporate: number, permeable = false) {
     this.width = width;
@@ -80,6 +90,7 @@ export class Pheromone {
       this.current = new Float32Array(width * height);
       this.scratch = new Float32Array(width * height);
     }
+    this.nonZero = false;
   }
 
   /**
@@ -102,6 +113,23 @@ export class Pheromone {
    * and avoid denormal-float drag.
    */
   step(cells?: Uint8Array): void {
+    // Provably-empty fast path. A field with no live concentration
+    // anywhere produces zero output cell-by-cell (zero in → zero
+    // diffusion contribution → zero, then × evaporate → still zero,
+    // then sub-floor clamp → still zero). Both buffers stay
+    // all-zero either way, so we skip the stencil and (on the WASM
+    // path) the FFI overhead. `nonZero` is set true on every
+    // deposit and cleared at the end of any step() call where the
+    // output is fully sub-floor.
+    if (!this.nonZero) {
+      // Buffers are already all-zero; ping-pong the references so
+      // the swap-each-tick contract still sees a different
+      // `current` reference back.
+      const tmp = this.current;
+      this.current = this.scratch;
+      this.scratch = tmp;
+      return;
+    }
     // WASM path: kernel reads cells from its own copy (uploaded once
     // per tick by the worker via PheromoneWasm.uploadCells) and
     // operates directly on the Float32Array views backing this
@@ -111,6 +139,7 @@ export class Pheromone {
       wasmRuntime.step(this.wasmHandle, this.diffuse, this.evaporate, 1000);
       this.current = this.wasmHandle.current;
       this.scratch = this.wasmHandle.scratch;
+      this.refreshNonZero();
       return;
     }
     // Permeable fields ignore the cells gate so they diffuse through
@@ -219,12 +248,38 @@ export class Pheromone {
     }
     this.current = dst;
     this.scratch = src;
+    this.refreshNonZero();
+  }
+
+  /** Re-derive the empty/non-empty flag from the current buffer.
+   *  Public so external code that mutates `current` in place
+   *  (persist.restoreSnapshot) can resync the flag without
+   *  reaching into private state. */
+  resyncNonZero(): void {
+    this.refreshNonZero();
+  }
+
+  /** Scan the current buffer once to update `nonZero`. We avoid the
+   *  cost of checking every cell during step() itself by piggy-
+   *  backing on the post-step buffer; if the field happens to have
+   *  fully decayed, the next tick's step() bails immediately via
+   *  the empty fast-path. Cost is one Float32Array sweep per tick
+   *  per field — the same shape as the existing renderer scans —
+   *  and saves the full stencil pass on idle fields whose output
+   *  has dropped below floor. */
+  private refreshNonZero(): void {
+    const cur = this.current;
+    for (let i = 0; i < cur.length; i++) {
+      if (cur[i]! > 0) { this.nonZero = true; return; }
+    }
+    this.nonZero = false;
   }
 
   /** Add `amount` to the cell at (x, y). No-op for out-of-bounds. */
   deposit(x: number, y: number, amount: number): void {
     if (x < 0 || y < 0 || x >= this.width || y >= this.height) return;
     this.current[y * this.width + x]! += amount;
+    this.nonZero = true;
   }
 
   /** Concentration at integer (x, y). Zero outside the grid. */

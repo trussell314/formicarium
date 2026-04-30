@@ -310,6 +310,20 @@ export function restoreSnapshot(
     copyBytes(s.noEntryCurrent!, noEntryField.current);
     copyBytes(s.granaryCurrent!, granaryField.current);
     copyBytes(s.trunkCurrent!, trunkField.current);
+    // The Pheromone class tracks an internal "is the buffer all-zero"
+    // flag for the empty-field fast path in step(). Direct byte
+    // copies above bypass that bookkeeping, so re-derive it from
+    // each field's restored content before the next step().
+    digField.resyncNonZero();
+    buildField.resyncNonZero();
+    trailField.resyncNonZero();
+    alarmField.resyncNonZero();
+    queenField.resyncNonZero();
+    broodField.resyncNonZero();
+    necroField.resyncNonZero();
+    noEntryField.resyncNonZero();
+    granaryField.resyncNonZero();
+    trunkField.resyncNonZero();
   } catch {
     return false;
   }
