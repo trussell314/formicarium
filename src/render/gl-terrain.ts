@@ -237,8 +237,10 @@ void main() {
         int hashB = sampleU8(uSoilNoise, ivec2(bgChosenAnchor, max(cell.y, 0)));
         int subEdge = (uSub - 1);
         bool inBgSilhouette = true;
-        if (bgChosenAbsDx == bgChosenReqRadius && bgChosenReqRadius > 0) {
-          if ((hashB & 3) < 2) {
+        // Canopy-only ragged rim. Trunks stay solid so we don't get
+        // vertical sky-stripes through the brown columns.
+        if (!bgChosenInTrunk && bgChosenAbsDx == bgChosenReqRadius && bgChosenReqRadius > 0) {
+          if ((hashB & 7) < 2) {
             int margin = subEdge / 2;
             if (bgChosenSignDx > 0 && subOff.x > subEdge - margin) inBgSilhouette = false;
             if (bgChosenSignDx < 0 && subOff.x < margin) inBgSilhouette = false;
@@ -318,13 +320,15 @@ void main() {
         int hashP = sampleU8(uSoilNoise, ivec2(chosenAnchor, max(cell.y, 0)));
         int subEdge = (uSub - 1);
         bool inSilhouette = true;
-        // Soft outer rim: at the radius edge, hash-jitter a sub-cell
-        // off so the silhouette doesn't read as a hard rectangle.
-        if (chosenAbsDx == chosenReqRadius && chosenReqRadius > 0) {
-          if ((hashP & 3) < 2) {
+        // Soft outer rim — CANOPY ONLY. Real trunks are smooth-
+        // sided; rim-carving them produces vertical sky-stripes
+        // every other row instead of an organic edge. Canopies
+        // are leafy and benefit from a ragged silhouette. Carve
+        // is at ~25% rate (hashP & 7 < 2) so it reads as
+        // foliage variation rather than a regular pattern.
+        if (!chosenInTrunk && chosenAbsDx == chosenReqRadius && chosenReqRadius > 0) {
+          if ((hashP & 7) < 2) {
             int margin = subEdge / 2;
-            // Carve from the outward sub-cells (the side furthest
-            // from the plant centre) so the rim looks ragged.
             if (chosenSignDx > 0 && subOff.x > subEdge - margin) inSilhouette = false;
             if (chosenSignDx < 0 && subOff.x < margin) inSilhouette = false;
           }

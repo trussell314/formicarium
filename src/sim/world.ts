@@ -9,19 +9,20 @@ export const CELL_SOIL = 1;
 export const CELL_GRAIN = 2;
 
 /** Mature plant height in cells, indexed by plant kind. Index 0 is
- *  unused (kind 0 = no plant). At 3 mm/cell (the same world scale
- *  as the founding shaft) the heights below are calibrated to real
- *  *P. barbatus* habitat vegetation:
- *    - grass clumps (fluffgrass, three-awn): ~30 cm = 100 cells
- *    - shrubs (creosote, brittlebush): ~1.2 m = 400 cells
- *    - trees (mesquite, palo verde): ~4.5 m = 1500 cells
- *  These exceed the visible above-surface band — a 1500-cell tree is
- *  ~36× the typical sky band — so the GL fragment shader naturally
- *  crops trunks at the top of the canvas. Trees read as continuing
- *  off-screen, which matches what an ant at the base of one would
- *  see. The Uint16 storage backs heights up to 65 535 cells (~196 m)
- *  with room to spare. */
-export const PLANT_MAX_HEIGHT: ReadonlyArray<number> = [0, 100, 400, 1500];
+ *  unused (kind 0 = no plant). Calibrated for visual recognisability
+ *  rather than strict real-scale: the sky band above the natural
+ *  surface is ~12–30 cells, and at literal 3 mm/cell desert plant
+ *  heights (~100/400/1500) every kind read as identical "tall column
+ *  going off-screen". These reduced caps keep grass / shrub / tree
+ *  visually distinguishable inside the sky band:
+ *    - grass tufts at  ~12 mm (4 cells) — visibly small clumps
+ *    - shrubs    at  ~42 mm (14 cells) — bushy, fits below crop
+ *    - trees     at ~180 mm (60 cells) — tall trunks that crop at
+ *                  the canvas top in the typical sky band
+ *  Trees still drop trunk silhouettes off-screen as expected at
+ *  smaller world-heights. Uint16 storage retains room for any
+ *  future per-species overrides. */
+export const PLANT_MAX_HEIGHT: ReadonlyArray<number> = [0, 4, 14, 60];
 
 export type CellKind = 0 | 1 | 2;
 
@@ -364,7 +365,7 @@ export class World {
     // mound). These are visual decoration only: no roots, no seed
     // drops, no growth. Heights are biased toward the upper half of
     // the kind's range so the silhouette reads as imposing.
-    const BG_PLANT_DENSITY = 0.22;
+    const BG_PLANT_DENSITY = 0.10;
     for (let x = 0; x < this.width; x++) {
       const r = rng.next();
       const sizeRoll = rng.next();
