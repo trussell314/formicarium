@@ -180,6 +180,38 @@ function wrapAngle(a: number): number {
 }
 
 /**
+ * True if a nurse-aged worker (age < ageCutoff) is within `radius`
+ * cells of the brood at `targetIdx`. Brood depend on nurses to be
+ * physically transported between depths — without one nearby, the
+ * egg / larva can't migrate. Real nurses pick up brood with their
+ * mandibles and walk it to the target chamber (Hölldobler & Wilson
+ * 1990 ch. 9). We don't model the carry-state intermediate, but we
+ * do enforce the "no nurse, no transport" precondition.
+ *
+ * O(N) per call. Brood-migration runs at most every
+ * species.broodMigrateInterval ticks per brood, so the amortised
+ * cost is ≪1 % of step() at default colony sizes.
+ */
+function nurseNearby(
+  colony: Colony, targetIdx: number, ageCutoff: number, radius: number,
+): boolean {
+  const tx = colony.posX[targetIdx]!;
+  const ty = colony.posY[targetIdx]!;
+  const r2 = radius * radius;
+  for (let j = 0; j < colony.count; j++) {
+    if (j === targetIdx) continue;
+    const sj = colony.state[j]!;
+    if (sj === STATE_DEAD || sj === STATE_EGG || sj === STATE_LARVA
+        || sj === STATE_PUPA || sj === STATE_QUEEN) continue;
+    if (colony.age[j]! > ageCutoff) continue;
+    const dx = colony.posX[j]! - tx;
+    const dy = colony.posY[j]! - ty;
+    if (dx * dx + dy * dy < r2) return true;
+  }
+  return false;
+}
+
+/**
  * Pick the cardinal-neighbour SOIL cell that's most aligned with the
  * ant's current heading. Used only as the "which face am I touching"
  * resolver — the dig-or-not decision is the Sudd contact roll, made
@@ -1061,13 +1093,14 @@ export function step(
       // Brood thermoregulation. Penick & Tschinkel (2008): real
       // ants move eggs/larvae between depth strata to track the
       // optimal temperature range — deeper at noon (escaping heat),
-      // shallower at midnight (seeking residual warmth). We don't
-      // model the nurse-carry intermediate explicitly; the visible
-      // outcome — eggs slowly drifting up and down with the diurnal
-      // cycle — is the part the user wants to see. Each egg gets
-      // nudged at most one cell per broodMigrateInterval ticks
-      // toward a target-depth that swings linearly with daylight.
-      if (colony.stateTicks[i]! % species.broodMigrateInterval === 0) {
+      // shallower at midnight (seeking residual warmth). The drift
+      // requires a nurse-aged worker within ~3 cells: real eggs
+      // can't move themselves and a nurseless brood pile stays put
+      // (Hölldobler & Wilson 1990 ch. 9). We don't model the
+      // pickup-and-carry intermediate; the nurse-proximity gate
+      // captures the dependency without the explicit state.
+      if (colony.stateTicks[i]! % species.broodMigrateInterval === 0
+          && nurseNearby(colony, i, species.matureAge * 0.5, 3)) {
         const ex = colony.posX[i]! | 0;
         const eyNow = colony.posY[i]! | 0;
         if (ex >= 0 && ex < world.width) {
@@ -1154,8 +1187,10 @@ export function step(
           broodField.deposit(lx, ly, 0.005);
         }
       }
-      // Same depth-tracking drift as eggs.
-      if (colony.stateTicks[i]! % species.broodMigrateInterval === 0) {
+      // Same depth-tracking drift as eggs — also requires a nurse
+      // within ~3 cells to do the actual carrying.
+      if (colony.stateTicks[i]! % species.broodMigrateInterval === 0
+          && nurseNearby(colony, i, species.matureAge * 0.5, 3)) {
         const ex = colony.posX[i]! | 0;
         const eyNow = colony.posY[i]! | 0;
         if (ex >= 0 && ex < world.width) {

@@ -53,13 +53,27 @@ function spawnEgg(c: Colony, x: number, y: number, rng: RNG): void {
   c.stateTicks[idx] = 0;
 }
 
+/** Spawn a nurse-aged worker at the same cell as the brood. The
+ *  brood-migration code requires a nurse within ~3 cells before it
+ *  will move the brood — a real-world precondition (Hölldobler &
+ *  Wilson 1990 ch. 9). Tests need a co-located nurse to exercise
+ *  the migration path. */
+function spawnNurse(c: Colony, x: number, y: number, rng: RNG): void {
+  const idx = c.spawn(x, y, 0, rng, {
+    digProb: 0, pickProb: 0, stigmergy: 0, turnNoise: 0, restThreshold: 100,
+  });
+  c.age[idx] = 0; // pure nurse
+  c.energy[idx] = 1;
+}
+
 describe('brood thermoregulation', () => {
   it('an egg drifts deeper at noon', () => {
     const rng = new RNG(1);
     const w = deepChamberWorld();
     w.tick = DAY_TICKS / 2 - 1; // step() will increment to noon
-    const c = new Colony(1);
+    const c = new Colony(2);
     spawnEgg(c, 20.5, 12.5, rng);
+    spawnNurse(c, 20.5, 12.5, rng);
     const dig = new Pheromone(w.width, w.height, 0.12, 0.99);
     const build = new Pheromone(w.width, w.height, 0.10, 0.997);
     const startY = c.posY[0]! | 0;
@@ -72,9 +86,10 @@ describe('brood thermoregulation', () => {
     const rng = new RNG(2);
     const w = deepChamberWorld();
     w.tick = -1; // step() bumps to 0 (midnight)
-    const c = new Colony(1);
+    const c = new Colony(2);
     // Spawn deep so it has to climb up.
     spawnEgg(c, 20.5, 50.5, rng);
+    spawnNurse(c, 20.5, 50.5, rng);
     const dig = new Pheromone(w.width, w.height, 0.12, 0.99);
     const build = new Pheromone(w.width, w.height, 0.10, 0.997);
     const startY = c.posY[0]! | 0;
@@ -94,8 +109,9 @@ describe('brood thermoregulation', () => {
     }
     world.cells[world.index(20, 11)] = CELL_AIR;
     world.tick = DAY_TICKS / 2 - 1;
-    const c = new Colony(1);
+    const c = new Colony(2);
     spawnEgg(c, 20.5, 11.5, rng);
+    spawnNurse(c, 20.5, 11.5, rng);
     const dig = new Pheromone(world.width, world.height, 0.12, 0.99);
     const build = new Pheromone(world.width, world.height, 0.10, 0.997);
     for (let t = 0; t < 100; t++) step(world, c, dig, build, rng, DEFAULT_PARAMS, undefined, FAST_MIGRATE);
@@ -109,8 +125,9 @@ describe('brood thermoregulation', () => {
     // Step many migrations and check the egg parks at the target,
     // never going deeper than maxDepth (within 1 cell of rounding).
     w.tick = DAY_TICKS / 2 - 1;
-    const c = new Colony(1);
+    const c = new Colony(2);
     spawnEgg(c, 20.5, 12.5, rng);
+    spawnNurse(c, 20.5, 12.5, rng);
     const dig = new Pheromone(w.width, w.height, 0.12, 0.99);
     const build = new Pheromone(w.width, w.height, 0.10, 0.997);
     for (let t = 0; t < 1000; t++) {
@@ -133,13 +150,14 @@ describe('brood thermoregulation', () => {
     const rng = new RNG(101);
     const w = deepChamberWorld();
     w.tick = DAY_TICKS / 2 - 1; // step() bumps to noon
-    const c = new Colony(1);
+    const c = new Colony(2);
     const idx = c.spawn(20.5, 12.5, 0, rng, {
       digProb: 0, pickProb: 0, stigmergy: 0, turnNoise: 0, restThreshold: 100,
     });
     c.state[idx] = STATE_LARVA;
     c.stateTicks[idx] = 0;
     c.energy[idx] = 1;
+    spawnNurse(c, 20.5, 12.5, rng);
     const dig = new Pheromone(w.width, w.height, 0.12, 0.99);
     const build = new Pheromone(w.width, w.height, 0.10, 0.997);
     const startY = c.posY[0]! | 0;
@@ -173,8 +191,9 @@ describe('brood thermoregulation', () => {
     }
     w.initialSoilCells = w.countSoil();
     w.tick = -1; // step() bumps to 0 (midnight, lowest target)
-    const c = new Colony(1);
+    const c = new Colony(2);
     spawnEgg(c, 20.5, 33.5, rng);
+    spawnNurse(c, 20.5, 33.5, rng);
     const dig = new Pheromone(w.width, w.height, 0.12, 0.99);
     const build = new Pheromone(w.width, w.height, 0.10, 0.997);
     for (let t = 0; t < 200; t++) {
@@ -184,5 +203,24 @@ describe('brood thermoregulation', () => {
     // any cell at row 29 is in the 1-wide shaft and is rejected by
     // the chamber-only filter.
     expect(c.posY[0]! | 0).toBeGreaterThanOrEqual(30);
+  });
+
+  it('an egg with no nurse nearby does not migrate', () => {
+    // Real eggs cannot move themselves — they need a nurse worker
+    // to physically carry them. Without a nurse-aged worker within
+    // ~3 cells, the migration step is gated off.
+    const rng = new RNG(7);
+    const w = deepChamberWorld();
+    w.tick = DAY_TICKS / 2 - 1; // noon — would normally drift down
+    const c = new Colony(1);
+    spawnEgg(c, 20.5, 12.5, rng);
+    const dig = new Pheromone(w.width, w.height, 0.12, 0.99);
+    const build = new Pheromone(w.width, w.height, 0.10, 0.997);
+    const startY = c.posY[0]! | 0;
+    for (let t = 0; t < 500; t++) {
+      step(w, c, dig, build, rng, DEFAULT_PARAMS, undefined, FAST_MIGRATE);
+    }
+    const endY = c.posY[0]! | 0;
+    expect(endY).toBe(startY);
   });
 });
