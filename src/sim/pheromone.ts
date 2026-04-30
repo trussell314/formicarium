@@ -61,35 +61,6 @@ export class Pheromone {
    *  gating; at 1-2 permeable fields per world the cost is fine. */
   private readonly permeable: boolean;
 
-  // ── Dirty-tile tracking. The field is partitioned into 16×16 cell
-  //    tiles. A tile is "dirty" if any cell inside it has non-zero
-  //    concentration; clean tiles can be skipped entirely by step()
-  //    because zero in / zero diffusion neighbour out → zero out. On
-  //    a 300×300 idle world this turns ~360 tiles × ~10 fields × ~90k
-  //    cell-ops/tick into ~0 cell-ops for the empty fields and a few
-  //    hundred for the lightly-populated ones, recovering most of
-  //    the wall-time gap vs a smaller dense world.
-  //
-  //    Two bitmaps for double-buffering: `dirty` is the input set this
-  //    step() reads, `dirtyNext` is what step() rebuilds for the
-  //    following tick. Tiles with non-zero output cells (or tiles
-  //    adjacent to one — diffusion crosses tile boundaries) are
-  //    marked in dirtyNext; the bitmaps swap at end of step().
-  //
-  //    Invariant: in BOTH `current` and `scratch`, cells inside a
-  //    clean tile are guaranteed 0. Maintained by zeroing both
-  //    buffers' cells inside any tile that transitions dirty→clean.
-  //    Without this the ping-pong leaves stale values in the new
-  //    `current` buffer for tiles we skipped.
-  static readonly TILE_SHIFT = 4;
-  static readonly TILE_SIZE = 16;
-  private readonly tilesX: number;
-  private readonly tilesY: number;
-  private dirty: Uint8Array;
-  private dirtyNext: Uint8Array;
-  /** Cached `dirty` non-empty flag — fast early-exit in step(). */
-  private anyDirty: boolean;
-
   constructor(width: number, height: number, diffuse: number, evaporate: number, permeable = false) {
     this.width = width;
     this.height = height;
@@ -109,33 +80,6 @@ export class Pheromone {
       this.current = new Float32Array(width * height);
       this.scratch = new Float32Array(width * height);
     }
-    // Tile bookkeeping. Round up so the tile grid covers the whole
-    // world even when width or height isn't a multiple of TILE_SIZE.
-    this.tilesX = (width + Pheromone.TILE_SIZE - 1) >> Pheromone.TILE_SHIFT;
-    this.tilesY = (height + Pheromone.TILE_SIZE - 1) >> Pheromone.TILE_SHIFT;
-    this.dirty = new Uint8Array(this.tilesX * this.tilesY);
-    this.dirtyNext = new Uint8Array(this.tilesX * this.tilesY);
-    this.anyDirty = false;
-  }
-
-  /** Mark tile (tx, ty) and its 8 cardinal+diagonal neighbours dirty
-   *  in the current (input-side) bitmap. Used by deposit() — whenever
-   *  a cell receives a non-zero value, both that cell's tile AND its
-   *  neighbouring tiles need to step next round, because diffusion
-   *  outflow at a tile boundary lands in the adjacent tile. */
-  private markTileNeighbourhoodDirty(tx: number, ty: number): void {
-    const txMin = tx > 0 ? tx - 1 : 0;
-    const txMax = tx + 1 < this.tilesX ? tx + 1 : this.tilesX - 1;
-    const tyMin = ty > 0 ? ty - 1 : 0;
-    const tyMax = ty + 1 < this.tilesY ? ty + 1 : this.tilesY - 1;
-    const dirty = this.dirty;
-    const stride = this.tilesX;
-    for (let y = tyMin; y <= tyMax; y++) {
-      for (let x = txMin; x <= txMax; x++) {
-        dirty[y * stride + x] = 1;
-      }
-    }
-    this.anyDirty = true;
   }
 
   /**
@@ -158,43 +102,17 @@ export class Pheromone {
    * and avoid denormal-float drag.
    */
   step(cells?: Uint8Array): void {
-    // Fast bail when the field is fully zero. anyDirty becomes false
-    // only when every tile in `dirty` is also zero, which is the
-    // common case for trail/alarm/necro/granary/trunk in the early
-    // game and for noEntry/granary in idle worlds. Skipping the WASM
-    // call too matters: the FFI overhead is non-trivial at 10
-    // fields/tick.
-    //
-    // We still swap current ↔ scratch on the empty-field path to
-    // preserve the structural ping-pong invariant other callers
-    // (and one test) rely on. Both buffers are all-zero, so the
-    // swap is a no-op semantically — we just rotate the references.
-    if (!this.anyDirty) {
-      const tmp = this.current;
-      this.current = this.scratch;
-      this.scratch = tmp;
-      return;
-    }
-
     // WASM path: kernel reads cells from its own copy (uploaded once
     // per tick by the worker via PheromoneWasm.uploadCells) and
     // operates directly on the Float32Array views backing this
     // instance. After it runs, current/scratch refer to the swapped
     // buffers, identical semantics to the JS path.
-    //
-    // We populate the kernel's dirty-tile bitmap with our DILATED
-    // dirty set (each dirty tile + its 8 neighbours) so the kernel
-    // skips fully-clean tiles. After the kernel runs, scan the
-    // output to rebuild `dirty` for the next tick.
     if (this.wasmHandle !== null && wasmRuntime !== null) {
-      this.populateWasmDirtyBitmap();
       wasmRuntime.step(this.wasmHandle, this.diffuse, this.evaporate, 1000);
       this.current = this.wasmHandle.current;
       this.scratch = this.wasmHandle.scratch;
-      this.recomputeDirtyFromCurrent();
       return;
     }
-
     // Permeable fields ignore the cells gate so they diffuse through
     // SOIL/GRAIN as if the world were uniform — the JS scalar code
     // already does no-op gating when cells is undefined.
@@ -215,7 +133,6 @@ export class Pheromone {
     // the densest field — so capping here doesn't change visible
     // behaviour at any concentration the rest of the system reads.
     const CAP = 1000;
-
     // AIR-only diffusion with REFLECTING walls. Real volatile
     // pheromones don't propagate through soil walls — they live in
     // the air column the colony has carved out. The 5-point stencil
@@ -236,46 +153,47 @@ export class Pheromone {
     //
     // CELL_AIR == 0 (see world.ts). Skip the import to keep the
     // pheromone module self-contained.
-
-    // Build the "to-process" set: all tiles that are dirty OR adjacent
-    // to a dirty tile (a 1-tile dilation of `dirty`). Diffusion from
-    // a dirty tile reaches one cell into each adjacent tile, so the
-    // adjacent tile must be stepped to capture that inflow even if
-    // it was previously clean. We reuse `dirtyNext` as scratch space
-    // here — it's still safe because we're about to rebuild it from
-    // the output anyway.
-    const dirty = this.dirty;
-    const dirtyNext = this.dirtyNext;
-    dirtyNext.fill(0);
-    const tx = this.tilesX;
-    const ty = this.tilesY;
-    for (let yy = 0; yy < ty; yy++) {
-      const rowOff = yy * tx;
-      for (let xx = 0; xx < tx; xx++) {
-        if (dirty[rowOff + xx] === 0) continue;
-        const yMin = yy > 0 ? yy - 1 : 0;
-        const yMax = yy + 1 < ty ? yy + 1 : ty - 1;
-        const xMin = xx > 0 ? xx - 1 : 0;
-        const xMax = xx + 1 < tx ? xx + 1 : tx - 1;
-        for (let y2 = yMin; y2 <= yMax; y2++) {
-          for (let x2 = xMin; x2 <= xMax; x2++) {
-            dirtyNext[y2 * tx + x2] = 1;
-          }
+    if (w >= 2 && h >= 2) {
+      const wm1 = w - 1;
+      const hm1 = h - 1;
+      for (let y = 1; y < hm1; y++) {
+        const rowStart = y * w + 1;
+        const rowEnd = y * w + wm1;
+        for (let i = rowStart; i < rowEnd; i++) {
+          if (cells && cells[i] !== 0) { dst[i] = 0; continue; }
+          let sum = 0;
+          let kAir = 0;
+          if (!cells || cells[i - 1] === 0) { sum += src[i - 1]!; kAir++; }
+          if (!cells || cells[i + 1] === 0) { sum += src[i + 1]!; kAir++; }
+          if (!cells || cells[i - w] === 0) { sum += src[i - w]!; kAir++; }
+          if (!cells || cells[i + w] === 0) { sum += src[i + w]!; kAir++; }
+          const mEff = 1 - kAir * f4;
+          let v = mEff * src[i]! + f4 * sum;
+          v *= e;
+          if (v < 1e-6) v = 0;
+          else if (v > CAP) v = CAP;
+          dst[i] = v;
         }
       }
     }
-
-    // Scalar boundary stepper — used for cells in the outermost row
-    // or column. mEff uses kOut (out-of-grid absorbs, soil reflects),
-    // identical to the pre-tiled implementation.
-    const stepBoundaryCell = (x: number, y: number): number => {
+    // Edge rows (y=0 and y=h-1) and edge columns (x=0 and x=w-1).
+    // World-edge boundaries are ABSORBING (out-of-grid is a sink:
+    // outflow leaves the simulated cross-section permanently — the
+    // sky above the world or the deep soil below). Soil walls inside
+    // the world are REFLECTING (outflow has nowhere to go; stays put).
+    // Implementation: kOut counts directions where outflow goes
+    // somewhere — either an in-grid AIR neighbour (which receives
+    // it) OR an out-of-grid direction (which absorbs it). In-grid
+    // SOIL/GRAIN neighbours don't count: outflow toward them
+    // reflects. mEff = 1 - kOut × f/4.
+    const stepBoundaryCell = (x: number, y: number): void => {
       const i = y * w + x;
-      if (cells && cells[i] !== 0) { dst[i] = 0; return 0; }
+      if (cells && cells[i] !== 0) { dst[i] = 0; return; }
       let sum = 0;
       let kOut = 0;
       if (x > 0) {
         if (!cells || cells[i - 1] === 0) { sum += src[i - 1]!; kOut++; }
-      } else { kOut++; }
+      } else { kOut++; } // OOB: absorbs
       if (x < w - 1) {
         if (!cells || cells[i + 1] === 0) { sum += src[i + 1]!; kOut++; }
       } else { kOut++; }
@@ -290,189 +208,23 @@ export class Pheromone {
       if (v < 1e-6) v = 0;
       else if (v > CAP) v = CAP;
       dst[i] = v;
-      return v;
     };
-
-    // Now `dirtyNext` holds the to-process set. Walk those tiles,
-    // stepping every cell, and BUILD the new dirty bitmap into
-    // `dirty` (we'll swap at the end). For each tile, track whether
-    // any output cell ended up non-zero: if not, the tile is clean
-    // and we additionally zero its cells in `src` so the buffer-
-    // ping-pong invariant holds (clean tiles must have 0 in BOTH
-    // buffers).
-    dirty.fill(0);
-    let anyDirty = false;
-    const TILE = Pheromone.TILE_SIZE;
-    for (let yy = 0; yy < ty; yy++) {
-      const tileRowOff = yy * tx;
-      for (let xx = 0; xx < tx; xx++) {
-        if (dirtyNext[tileRowOff + xx] === 0) continue;
-        const x0 = xx << Pheromone.TILE_SHIFT;
-        const y0 = yy << Pheromone.TILE_SHIFT;
-        const x1 = x0 + TILE < w ? x0 + TILE : w;
-        const y1 = y0 + TILE < h ? y0 + TILE : h;
-        let tileMax = 0;
-        for (let y = y0; y < y1; y++) {
-          // Identify whether this row is at a world boundary; if so,
-          // every cell in it goes through stepBoundaryCell. Otherwise
-          // the leftmost / rightmost cells of the tile may still be
-          // boundary cells (when the tile sits against the world
-          // edge), but the interior cells use the fast 5-point form.
-          const yIsBoundary = (y === 0 || y === h - 1);
-          for (let x = x0; x < x1; x++) {
-            const xIsBoundary = (x === 0 || x === w - 1);
-            let v: number;
-            if (yIsBoundary || xIsBoundary) {
-              v = stepBoundaryCell(x, y);
-            } else {
-              const i = y * w + x;
-              if (cells && cells[i] !== 0) { dst[i] = 0; v = 0; }
-              else {
-                let sum = 0;
-                let kAir = 0;
-                if (!cells || cells[i - 1] === 0) { sum += src[i - 1]!; kAir++; }
-                if (!cells || cells[i + 1] === 0) { sum += src[i + 1]!; kAir++; }
-                if (!cells || cells[i - w] === 0) { sum += src[i - w]!; kAir++; }
-                if (!cells || cells[i + w] === 0) { sum += src[i + w]!; kAir++; }
-                const mEff = 1 - kAir * f4;
-                v = (mEff * src[i]! + f4 * sum) * e;
-                if (v < 1e-6) v = 0;
-                else if (v > CAP) v = CAP;
-                dst[i] = v;
-              }
-            }
-            if (v > tileMax) tileMax = v;
-          }
-        }
-        if (tileMax > 0) {
-          // Tile has live content next tick; mark it AND its 8
-          // neighbours dirty so subsequent ticks pick up the
-          // diffusion outflow.
-          const yMin = yy > 0 ? yy - 1 : 0;
-          const yMax = yy + 1 < ty ? yy + 1 : ty - 1;
-          const xMin = xx > 0 ? xx - 1 : 0;
-          const xMax = xx + 1 < tx ? xx + 1 : tx - 1;
-          for (let y2 = yMin; y2 <= yMax; y2++) {
-            for (let x2 = xMin; x2 <= xMax; x2++) {
-              dirty[y2 * tx + x2] = 1;
-            }
-          }
-          anyDirty = true;
-        } else {
-          // Tile transitioned to (or stayed at) all-zero. dst[tile
-          // cells] is 0 from the writes above; also zero src[tile
-          // cells] so when we swap buffers the new `scratch` won't
-          // hand stale values back when the tile is later skipped.
-          for (let y = y0; y < y1; y++) {
-            for (let x = x0; x < x1; x++) {
-              src[y * w + x] = 0;
-            }
-          }
-        }
-      }
+    if (h > 0) {
+      for (let x = 0; x < w; x++) stepBoundaryCell(x, 0);
+      if (h > 1) for (let x = 0; x < w; x++) stepBoundaryCell(x, h - 1);
     }
-
-    this.anyDirty = anyDirty;
+    if (w > 0) {
+      for (let y = 1; y < h - 1; y++) stepBoundaryCell(0, y);
+      if (w > 1) for (let y = 1; y < h - 1; y++) stepBoundaryCell(w - 1, y);
+    }
     this.current = dst;
     this.scratch = src;
-  }
-
-  /** Copy the dilation of `this.dirty` into the WASM kernel's bitmap
-   *  before each step(). The kernel skips tiles where the bitmap is
-   *  zero; by passing the dilation we make sure adjacent tiles that
-   *  receive diffusion inflow get processed. */
-  private populateWasmDirtyBitmap(): void {
-    if (this.wasmHandle === null) return;
-    const dirty = this.dirty;
-    const wasmDirty = this.wasmHandle.dirty;
-    const tx = this.tilesX;
-    const ty = this.tilesY;
-    wasmDirty.fill(0);
-    for (let yy = 0; yy < ty; yy++) {
-      const rowOff = yy * tx;
-      for (let xx = 0; xx < tx; xx++) {
-        if (dirty[rowOff + xx] === 0) continue;
-        const yMin = yy > 0 ? yy - 1 : 0;
-        const yMax = yy + 1 < ty ? yy + 1 : ty - 1;
-        const xMin = xx > 0 ? xx - 1 : 0;
-        const xMax = xx + 1 < tx ? xx + 1 : tx - 1;
-        for (let y2 = yMin; y2 <= yMax; y2++) {
-          for (let x2 = xMin; x2 <= xMax; x2++) {
-            wasmDirty[y2 * tx + x2] = 1;
-          }
-        }
-      }
-    }
-  }
-
-  /** Re-derive `dirty` from the current buffer's actual contents.
-   *  Used after the WASM path runs (which already skipped clean
-   *  tiles per the input bitmap) so the next tick can refine the
-   *  set: tiles that produced all-zero output drop out of `dirty`,
-   *  tiles whose diffusion crossed into a neighbour stay marked.
-   *  When this trips an all-zero tile we also zero the scratch
-   *  buffer's matching cells to maintain the buffer-zero invariant. */
-  private recomputeDirtyFromCurrent(): void {
-    const w = this.width;
-    const h = this.height;
-    const cur = this.current;
-    const scr = this.scratch;
-    const dirty = this.dirty;
-    const tx = this.tilesX;
-    const ty = this.tilesY;
-    const TILE = Pheromone.TILE_SIZE;
-    // We only need to scan tiles that the WASM kernel actually
-    // processed this tick (its input bitmap = the dilation we wrote
-    // in populateWasmDirtyBitmap). Tiles outside that set retained
-    // their pre-step zero by invariant, so they're still clean —
-    // scanning them again would waste ~256 reads per tile per tick.
-    const processSet = this.wasmHandle !== null ? this.wasmHandle.dirty : null;
-    dirty.fill(0);
-    let anyDirty = false;
-    for (let yy = 0; yy < ty; yy++) {
-      for (let xx = 0; xx < tx; xx++) {
-        if (processSet !== null && processSet[yy * tx + xx] === 0) continue;
-        const x0 = xx << Pheromone.TILE_SHIFT;
-        const y0 = yy << Pheromone.TILE_SHIFT;
-        const x1 = x0 + TILE < w ? x0 + TILE : w;
-        const y1 = y0 + TILE < h ? y0 + TILE : h;
-        let tileMax = 0;
-        for (let y = y0; y < y1; y++) {
-          for (let x = x0; x < x1; x++) {
-            const v = cur[y * w + x]!;
-            if (v > tileMax) tileMax = v;
-          }
-        }
-        if (tileMax > 0) {
-          const yMin = yy > 0 ? yy - 1 : 0;
-          const yMax = yy + 1 < ty ? yy + 1 : ty - 1;
-          const xMin = xx > 0 ? xx - 1 : 0;
-          const xMax = xx + 1 < tx ? xx + 1 : tx - 1;
-          for (let y2 = yMin; y2 <= yMax; y2++) {
-            for (let x2 = xMin; x2 <= xMax; x2++) {
-              dirty[y2 * tx + x2] = 1;
-            }
-          }
-          anyDirty = true;
-        } else {
-          // All-zero tile: ensure scratch matches so the buffer-zero
-          // invariant holds across subsequent skipped ticks.
-          for (let y = y0; y < y1; y++) {
-            for (let x = x0; x < x1; x++) {
-              scr[y * w + x] = 0;
-            }
-          }
-        }
-      }
-    }
-    this.anyDirty = anyDirty;
   }
 
   /** Add `amount` to the cell at (x, y). No-op for out-of-bounds. */
   deposit(x: number, y: number, amount: number): void {
     if (x < 0 || y < 0 || x >= this.width || y >= this.height) return;
     this.current[y * this.width + x]! += amount;
-    this.markTileNeighbourhoodDirty(x >> Pheromone.TILE_SHIFT, y >> Pheromone.TILE_SHIFT);
   }
 
   /** Concentration at integer (x, y). Zero outside the grid. */

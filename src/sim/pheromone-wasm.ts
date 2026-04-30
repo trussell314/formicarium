@@ -15,9 +15,9 @@
 
 export interface PheromoneWasm {
   /** Allocate a paired (current, scratch) buffer pair for one field
-   *  inside the kernel's linear memory plus a Uint8 dirty-tile
-   *  bitmap. Returns Float32Array views backed by that memory plus
-   *  the byte offsets needed when calling step(). */
+   *  inside the kernel's linear memory. Returns Float32Array views
+   *  backed by that memory plus the byte offsets needed when calling
+   *  step(). */
   allocField(width: number, height: number): WasmFieldHandle;
   /** Copy `cells` into the kernel's linear memory; subsequent
    *  step() calls reference this snapshot. Caller is responsible
@@ -26,30 +26,21 @@ export interface PheromoneWasm {
   uploadCells(cells: Uint8Array): void;
   /** Run one diffusion+evaporation+clamp pass on the field
    *  identified by `handle`, using the most recently uploaded
-   *  cells. The kernel reads the dirty-tile bitmap from the handle
-   *  (`handle.dirty`); the JS caller is expected to populate it
-   *  before each step() with the dilated set of tiles to process.
-   *  Swaps current ↔ scratch on the handle so the new field is
-   *  available via handle.current. */
+   *  cells. Swaps current ↔ scratch on the handle so the new
+   *  field is available via handle.current. */
   step(handle: WasmFieldHandle, diffuse: number, evaporate: number, cap: number): void;
 }
 
 export interface WasmFieldHandle {
   width: number;
   height: number;
-  tilesX: number;
-  tilesY: number;
   /** Float32Array view of the front buffer. Backed by WASM memory. */
   current: Float32Array;
   /** Float32Array view of the back buffer. Backed by WASM memory. */
   scratch: Float32Array;
-  /** Uint8Array view of the dirty-tile bitmap (1 = process this
-   *  tile next step; 0 = skip). Backed by WASM memory. */
-  dirty: Uint8Array;
   /** Internal: byte offsets the kernel needs. Mutated by step(). */
   _curPtr: number;
   _scrPtr: number;
-  _dirtyPtr: number;
 }
 
 /**
@@ -99,9 +90,8 @@ export async function initPheromoneWasm(
   const exports = mod.instance.exports as {
     memory: WebAssembly.Memory;
     step: (
-      srcPtr: number, dstPtr: number, cellsPtr: number, dirtyPtr: number,
-      w: number, h: number, tilesX: number, tilesY: number,
-      f: number, e: number, cap: number,
+      srcPtr: number, dstPtr: number, cellsPtr: number,
+      w: number, h: number, f: number, e: number, cap: number,
     ) => void;
   };
   const memory = exports.memory;
@@ -126,7 +116,6 @@ export async function initPheromoneWasm(
     for (const h of handles) {
       h.current = new Float32Array(memory.buffer, h._curPtr, h.width * h.height);
       h.scratch = new Float32Array(memory.buffer, h._scrPtr, h.width * h.height);
-      h.dirty = new Uint8Array(memory.buffer, h._dirtyPtr, h.tilesX * h.tilesY);
     }
   };
 
@@ -147,23 +136,14 @@ export async function initPheromoneWasm(
       }
       const len = width * height;
       const bytes = len * 4;
-      const tilesX = (width + 15) >> 4;
-      const tilesY = (height + 15) >> 4;
-      const dirtyBytes = tilesX * tilesY;
       const curPtr = align16(bumpPtr);
       const scrPtr = align16(curPtr + bytes);
-      const dirtyPtr = align16(scrPtr + bytes);
-      bumpPtr = align16(dirtyPtr + dirtyBytes);
+      bumpPtr = scrPtr + bytes;
       const grew = ensureMemory(bumpPtr);
       if (grew) refreshViews();
       const current = new Float32Array(memory.buffer, curPtr, len);
       const scratch = new Float32Array(memory.buffer, scrPtr, len);
-      const dirty = new Uint8Array(memory.buffer, dirtyPtr, dirtyBytes);
-      const handle: WasmFieldHandle = {
-        width, height, tilesX, tilesY,
-        current, scratch, dirty,
-        _curPtr: curPtr, _scrPtr: scrPtr, _dirtyPtr: dirtyPtr,
-      };
+      const handle: WasmFieldHandle = { width, height, current, scratch, _curPtr: curPtr, _scrPtr: scrPtr };
       handles.push(handle);
       return handle;
     },
@@ -188,9 +168,8 @@ export async function initPheromoneWasm(
         throw new Error('pheromone-wasm: uploadCells() must be called before step()');
       }
       exports.step(
-        handle._curPtr, handle._scrPtr, cellsPtr, handle._dirtyPtr,
-        handle.width, handle.height, handle.tilesX, handle.tilesY,
-        f, e, cap,
+        handle._curPtr, handle._scrPtr, cellsPtr,
+        handle.width, handle.height, f, e, cap,
       );
       // Swap front/back so the kernel's output becomes the next
       // tick's input. Field views point at the same byte offsets
