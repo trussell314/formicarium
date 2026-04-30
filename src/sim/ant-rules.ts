@@ -2368,7 +2368,20 @@ export function step(
     //     modulated; the age modulation was reverted because monotone
     //     aging without brood replenishment collapsed dig throughput.
     if (stateIn === STATE_CARRY) {
-      h += wrapAngle(-Math.PI / 2 - h) * geotaxis;
+      if (iy >= world.naturalSurface[ix]!) {
+        // Below the natural surface — pull up toward the exit.
+        h += wrapAngle(-Math.PI / 2 - h) * geotaxis;
+      } else {
+        // Above ground — bias outward from the entrance column to
+        // build the characteristic Pogonomyrmex crater rim with a
+        // low/absent centre and an annular bank ~5-15 cm out
+        // (Tschinkel 2004). Without this the build-pheromone gradient
+        // pulls every CARRY worker straight back to the existing
+        // peak at the entrance, making a single-column spire.
+        const entranceCx = world.width >> 1;
+        const outward = ix < entranceCx ? Math.PI : 0;
+        h += wrapAngle(outward - h) * 0.20;
+      }
     } else if (stateIn === STATE_WANDER) {
       if (iy < world.naturalSurface[ix]!) {
         h += wrapAngle(Math.PI / 2 - h) * geotaxis;
@@ -3071,7 +3084,15 @@ export function step(
       if (py < world.height - 1 && world.cells[(py + 1) * wW2 + px] === CELL_SOIL) cornerSoil++;
       const cornerBoost = cornerSoil >= 2 ? 2.0 : 1.0;
       let pDeposit = 0;
-      if (aboveSurface && groundIsIntact && cellIsAir) {
+      // Crater clear zone. Real Pogonomyrmex mounds are RING-shaped
+      // — a low/absent central rim around the entrance and an
+      // annular bank a few centimetres out where workers actually
+      // pile spoil (Tschinkel 2004). Suppress surface deposits
+      // within ±3 columns of the founding shaft column so workers
+      // walk past the rim before dropping their load.
+      const entranceCx = world.width >> 1;
+      const inCraterZone = Math.abs(px - entranceCx) < 3;
+      if (aboveSurface && groundIsIntact && cellIsAir && !inCraterZone) {
         // Mound height taper. Real Pogonomyrmex spoil mounds are
         // BROAD humps (Tschinkel 2004 measured P. badius nests at
         // 5–15 cm tall × 30–50 cm wide), not single-cell-wide
@@ -3179,7 +3200,7 @@ export function step(
         const broodHere = broodField ? broodField.sample(px, py) : 0;
         const inSanctum = queenHere > 0.3 || broodHere > 0.3;
         const overdue = colony.stateTicks[i]!;
-        if (!isVerticalShaft && !inSanctum && overdue >= 500) {
+        if (!isVerticalShaft && !inSanctum && !inCraterZone && overdue >= 500) {
           const ramp = Math.min(1, (overdue - 500) / 1500);
           pDeposit = ramp * 0.5;
           // Apply the same above-surface mound taper that gates the
