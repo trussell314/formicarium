@@ -387,6 +387,11 @@ export class GLTerrainRenderer {
   private pheroPack0?: Float32Array;
   private pheroPack1?: Float32Array;
   private pheroPack2?: Float32Array;
+  /** True once at least one frame has uploaded real pheromone packs.
+   *  Lets us keep `uShowPhero=1` on throttled frames where the
+   *  caller doesn't pass new data — we render against the cached
+   *  GPU textures rather than flickering the overlay off. */
+  private pPackUploaded = false;
 
   constructor(width: number, height: number, SUB: number) {
     this.width = width;
@@ -536,6 +541,7 @@ export class GLTerrainRenderer {
       this.uploadGrid('pPack0', this.pheroPack0, w, h);
       this.uploadGrid('pPack1', this.pheroPack1!, w, h);
       this.uploadGrid('pPack2', this.pheroPack2!, w, h);
+      this.pPackUploaded = true;
     }
 
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
@@ -548,7 +554,10 @@ export class GLTerrainRenderer {
     gl.uniform1f(u.uH!, h);
     gl.uniform1i(u.uSub!, this.SUB);
     gl.uniform1i(u.uTick!, world.tick);
-    gl.uniform1f(u.uShowPhero!, showPheromones && pheromones ? 1.0 : 0.0);
+    // showPheromones AND we've uploaded real packs at least once
+    // — frames where the caller throttles `pheromones` to null
+    // re-use the last packs that did get uploaded.
+    gl.uniform1f(u.uShowPhero!, showPheromones && this.pPackUploaded ? 1.0 : 0.0);
     gl.uniform1f(u.uDaylight!, daylight);
     this.bindSampler('uCells', 'cells');
     this.bindSampler('uSoilNoise', 'soilNoise');

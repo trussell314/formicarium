@@ -205,6 +205,22 @@ export class Renderer {
    *  translucent unused colours so they don't conflict with the
    *  brown/green/tan terrain palette: cyan = dig, magenta = build. */
   showPheromones = false;
+  /** Last pheromone payload received, cached so throttled frames
+   *  (the main render loop only requests fresh pheromone data
+   *  every Nth frame to keep the snapshot transfer cost down) can
+   *  still render the overlay. */
+  private cachedPheromones: {
+    dig: { current: Float32Array };
+    build: { current: Float32Array };
+    trail?: { current: Float32Array };
+    alarm?: { current: Float32Array };
+    queen?: { current: Float32Array };
+    brood?: { current: Float32Array };
+    necro?: { current: Float32Array };
+    noEntry?: { current: Float32Array };
+    granary?: { current: Float32Array };
+    trunk?: { current: Float32Array };
+  } | undefined;
   /** Toggleable mini-map in the bottom-right corner. On by default
    *  — at zoom 1 it's small enough to ignore, and at higher zooms
    *  the viewport indicator gives the user a "you are here" cue. */
@@ -361,6 +377,14 @@ export class Renderer {
     const digTick = this.world.digTick;
     const tick = this.world.tick;
     const data = this.buf;
+    // Pheromone-snapshot throttling. Main only requests fresh
+    // pheromone data every Nth frame; on the in-between frames the
+    // caller passes `pheromones=undefined`. Re-use the last
+    // received payload so the overlay keeps rendering. The first
+    // overlay-on frame before any data has arrived stays
+    // overlay-off — that's a single sub-100ms warm-up gap.
+    if (pheromones) this.cachedPheromones = pheromones;
+    pheromones = this.cachedPheromones;
     // GL fast-path: a single fragment shader does terrain +
     // pheromone overlay in one pass, replacing the per-pixel CPU
     // loop and the second per-cell pheromone composite. We still

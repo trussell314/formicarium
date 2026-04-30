@@ -371,7 +371,54 @@ function buildSnapshot(includePheromones: boolean): RenderSnapshot {
 
 function send(msg: FromWorker): void {
   // self.postMessage in a Worker context is the channel back to main.
+  // For 'snapshot' messages we hand the underlying ArrayBuffers off
+  // as Transferables: structured-clone otherwise copies every
+  // TypedArray, which at 300×300 with the pheromone overlay enabled
+  // is ~5 MB per frame on each end of the channel. Each snapshot
+  // typed array was built via .slice() (see buildSnapshot) so the
+  // worker has no need to keep the buffers after sending — transfer
+  // is safe.
+  if (msg.kind === 'snapshot') {
+    const transfer = collectSnapshotBuffers(msg.snap);
+    (self as unknown as Worker).postMessage(msg, transfer);
+    return;
+  }
   (self as unknown as Worker).postMessage(msg);
+}
+
+/** Walk a RenderSnapshot and collect every TypedArray's underlying
+ *  ArrayBuffer for the postMessage transfer list. Each buffer must
+ *  be transferred at most once across the run; since snapshots are
+ *  built fresh each call this holds. The .slice() typed-array
+ *  results we put in the snapshot are always backed by ArrayBuffer
+ *  (never SharedArrayBuffer), but lib.dom.d.ts types `.buffer` as
+ *  the union so we narrow with a cast. */
+function collectSnapshotBuffers(snap: RenderSnapshot): ArrayBuffer[] {
+  const ab = (a: { buffer: ArrayBufferLike }): ArrayBuffer => a.buffer as ArrayBuffer;
+  const bufs: ArrayBuffer[] = [
+    ab(snap.cells), ab(snap.soilNoise), ab(snap.naturalSurface),
+    ab(snap.food), ab(snap.foodMoves), ab(snap.corpse),
+    ab(snap.sprout), ab(snap.sproutTick), ab(snap.digTick),
+    ab(snap.posX), ab(snap.posY), ab(snap.prevX),
+    ab(snap.prevY), ab(snap.heading), ab(snap.state),
+    ab(snap.energy),
+  ];
+  if (snap.pheromones !== null) {
+    bufs.push(
+      ab(snap.pheromones.dig), ab(snap.pheromones.build),
+      ab(snap.pheromones.trail), ab(snap.pheromones.alarm),
+      ab(snap.pheromones.queen), ab(snap.pheromones.brood),
+      ab(snap.pheromones.necro), ab(snap.pheromones.noEntry),
+      ab(snap.pheromones.granary), ab(snap.pheromones.trunk),
+    );
+  }
+  if (snap.particles !== null) {
+    bufs.push(
+      ab(snap.particles.posX), ab(snap.particles.posY),
+      ab(snap.particles.life), ab(snap.particles.maxLife),
+    );
+  }
+  return bufs;
 }
 
 // Async WASM bootstrap. Started immediately on worker load so it

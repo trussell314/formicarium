@@ -465,6 +465,13 @@ function main(): void {
 
   // ── Render loop ─────────────────────────────────────────────
   let last = performance.now();
+  let frameCounter = 0;
+  // Pheromone overlay refresh cadence. Every Nth frame — at 60 fps
+  // that's 60 / N Hz of fresh overlay data. 6 = ~10 Hz, well above
+  // the visual rate at which slowly-diffusing chemical fields
+  // change perceptibly while cutting the overlay-on snapshot
+  // payload by ~85 %.
+  const PHERO_SNAPSHOT_INTERVAL = 6;
   const frame = () => {
     requestAnimationFrame(frame);
     const now = performance.now();
@@ -474,10 +481,23 @@ function main(): void {
     // Drive the worker by requesting a fresh snapshot. The worker
     // handles its own bio-time accumulation and stepping budget;
     // we just pull a new render frame each rAF.
+    //
+    // Pheromone snapshots are throttled. The fields are ~3.6 MB
+    // total at 300×300 (10 fields × 90k cells × 4 B each) and the
+    // overlay reads them through a 5-point diffusion that evolves
+    // on a half-life of hundreds of ticks — refreshing the overlay
+    // texture at 60 Hz wastes a lot of memcpy/transfer with no
+    // visible improvement. Refresh every PHERO_SNAPSHOT_INTERVAL
+    // frames; in between, the worker omits pheromones from the
+    // snapshot and the renderer keeps using its cached textures
+    // (GL path) or last-frame arrays (CPU fallback).
     if (!paused && !extinct && !snapshotPending) {
-      send({ kind: 'requestSnapshot', includePheromones: renderer.showPheromones });
+      const includePheromones = renderer.showPheromones &&
+        (frameCounter % PHERO_SNAPSHOT_INTERVAL) === 0;
+      send({ kind: 'requestSnapshot', includePheromones });
       snapshotPending = true;
     }
+    frameCounter++;
 
     if (latest) {
       const snap = latest;
