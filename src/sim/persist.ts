@@ -261,6 +261,17 @@ export function restoreSnapshot(
     dstBytes.set(bytes);
   };
 
+  /** Clamp NaN / Infinity in a freshly-restored Float32 pheromone
+   *  buffer to zero. See the call site for the failure mode this
+   *  guards against. Cost: one Float32 sweep per field on restore;
+   *  no per-tick cost. */
+  const sanitisePheromoneBuffer = (buf: Float32Array): void => {
+    for (let i = 0; i < buf.length; i++) {
+      const v = buf[i]!;
+      if (!Number.isFinite(v)) buf[i] = 0;
+    }
+  };
+
   try {
     rng.setState(s.rng!);
     world.tick = s.tick!;
@@ -310,6 +321,26 @@ export function restoreSnapshot(
     copyBytes(s.noEntryCurrent!, noEntryField.current);
     copyBytes(s.granaryCurrent!, granaryField.current);
     copyBytes(s.trunkCurrent!, trunkField.current);
+    // Defensive scrub. Saves authored by older builds may contain
+    // NaN / Infinity pheromone values — earlier in this branch's
+    // history a since-reverted dirty-tile pheromone refactor could
+    // produce both — and feeding a NaN through a 5-point stencil
+    // poisons every cell it touches by the next tick. The pheromone
+    // overlay path then uploads NaN-bearing RGBA32F textures, which
+    // some browser/GPU combinations handle by stalling the GL
+    // pipeline or running the fragment shader for a comically long
+    // time per pixel. Clearing here is a one-pass cost on restore
+    // and a no-op for buffers that were already valid.
+    sanitisePheromoneBuffer(digField.current);
+    sanitisePheromoneBuffer(buildField.current);
+    sanitisePheromoneBuffer(trailField.current);
+    sanitisePheromoneBuffer(alarmField.current);
+    sanitisePheromoneBuffer(queenField.current);
+    sanitisePheromoneBuffer(broodField.current);
+    sanitisePheromoneBuffer(necroField.current);
+    sanitisePheromoneBuffer(noEntryField.current);
+    sanitisePheromoneBuffer(granaryField.current);
+    sanitisePheromoneBuffer(trunkField.current);
     // The Pheromone class tracks an internal "is the buffer all-zero"
     // flag for the empty-field fast path in step(). Direct byte
     // copies above bypass that bookkeeping, so re-derive it from
