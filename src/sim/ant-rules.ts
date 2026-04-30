@@ -781,6 +781,20 @@ export function step(
               // brood — but they still keep enough reserve to walk to
               // food if needed.
               const PRIORITY_DONOR_FLOOR = 0.3;
+              // CARRY_FOOD ants are returning to the nest with food
+              // in their crop. Real foragers freely regurgitate to
+              // any nestmate they meet on the way back regardless
+              // of their own personal-energy reserves — the crop
+              // is the *social stomach* (Wilson 1971; Hölldobler
+              // & Wilson 1990 Ch. 7) and its content is for the
+              // colony, not the carrier. Our `energy` field
+              // conflates personal reserves and crop, so without
+              // a separate crop we treat CF donors like the
+              // priority-larva path: they can donate down to
+              // PRIORITY_DONOR_FLOOR. This unblocks the chamber-
+              // stuck CARRY workers who otherwise starve while
+              // food-laden CF ants pass them every few ticks.
+              const donorIsFoodCarrier = donorState === STATE_CARRY_FOOD;
               const donorOk =
                 donorState !== STATE_DEAD &&
                 donorState !== STATE_EGG &&
@@ -793,10 +807,11 @@ export function step(
                 // reserves and trophallactic exchange. Allow queen
                 // donation when the recipient is a larva.
                 (donorState !== STATE_QUEEN || recipState === STATE_LARVA) &&
-                // Standard donor gate: must have surplus above the
-                // threshold. Priority path lowers the gate to
-                // PRIORITY_DONOR_FLOOR for starving larvae.
-                (recipIsStarvingLarva
+                // Donor gates:
+                //   - food-carrying forager: lowered floor (crop content)
+                //   - priority larva recipient: lowered floor
+                //   - everyone else: standard surplus threshold
+                ((recipIsStarvingLarva || donorIsFoodCarrier)
                   ? donorE > PRIORITY_DONOR_FLOOR
                   : donorE > species.trophallaxisDonorThreshold);
               const recipOk =
@@ -809,7 +824,7 @@ export function step(
                 // donorThreshold). Priority path uses (donorE −
                 // PRIORITY_DONOR_FLOOR) — donor never goes below the
                 // floor.
-                const surplus = recipIsStarvingLarva
+                const surplus = (recipIsStarvingLarva || donorIsFoodCarrier)
                   ? Math.max(0, donorE - PRIORITY_DONOR_FLOOR)
                   : donorE - species.trophallaxisDonorThreshold;
                 const give = Math.min(species.trophallaxisAmount, want, surplus);
