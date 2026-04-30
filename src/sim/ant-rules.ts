@@ -2314,17 +2314,38 @@ export function step(
         colony.stuckTicks[i]!--;
       }
       const STUCK_GIVE_UP_TICKS = 60;
-      // Long-CARRY bail (FIX I). The stuckTicks accumulator only
-      // bumps on hitSoil+no-cell-change ticks; a worker walking back
-      // and forth in a narrow shaft section can stay in CARRY for
-      // thousands of ticks without ever accumulating stuckTicks.
-      // Headless monitoring at t=180k showed 11/13 CARRY workers
-      // stuck >2000 ticks unable to deposit. Extra bail on
-      // stateTicks: 4000 ticks in CARRY (~50 sim-minutes biological
-      // at 100× compression) → drop cargo at the first available
-      // neighbour, bail to WANDER. Releases the workforce so it can
-      // forage / re-dig instead of treadmilling.
-      if (colony.stuckTicks[i]! >= STUCK_GIVE_UP_TICKS || colony.stateTicks[i]! >= 4000) {
+      // CARRY bail conditions:
+      //   1. stuckTicks ≥ STUCK_GIVE_UP_TICKS (hitting soil
+      //      every tick without making progress), or
+      //   2. stateTicks ≥ 4000 (long stretch in CARRY without
+      //      depositing — see FIX I monitoring), or
+      //   3. energy < HUNGRY_BAIL_THRESHOLD (the worker is
+      //      starving and needs to leave to eat).
+      // Real ants drop a load they can't deposit when hunger
+      // becomes acute — the grain is colony-property; the ant
+      // is the colony's only producer and dies if she doesn't
+      // eat. Headless monitoring shows chamber-stuck CARRY
+      // workers losing energy from ~0.7 down to ~0.35 over
+      // 100k ticks because they never reach a food cell; the
+      // 4000-tick bail alone wasn't fast enough — they were
+      // already severely depleted by the time it fired. Hungry
+      // ants additionally transition to FORAGE rather than
+      // WANDER so they actively head to the surface to feed.
+      //
+      // Threshold at 0.3 (not 0.4) because the bail destination
+      // FORAGE pulls the worker AWAY from brood-feeding duty;
+      // a 0.4 threshold catches healthy mid-energy workers and
+      // strips brood of nurses, larva trophallaxis collapses,
+      // pupae starve before eclosing. 0.3 keeps the override
+      // narrow — only workers who actually risk death bail —
+      // so the brood-tending workforce stays around.
+      const HUNGRY_BAIL_THRESHOLD = 0.3;
+      const hungry = colony.energy[i]! < HUNGRY_BAIL_THRESHOLD;
+      if (
+        colony.stuckTicks[i]! >= STUCK_GIVE_UP_TICKS
+        || colony.stateTicks[i]! >= 4000
+        || hungry
+      ) {
         const wW = world.width;
         const cargoMoves = colony.carryMoves[i]!;
         const offsetsC: ReadonlyArray<readonly [number, number]> = [
@@ -2342,7 +2363,7 @@ export function step(
         }
         colony.carryMoves[i] = 0;
         colony.stuckTicks[i] = 0;
-        colony.setState(i, STATE_WANDER);
+        colony.setState(i, hungry ? STATE_FORAGE : STATE_WANDER);
         colony.heading[i] = rng.range(0, Math.PI * 2);
         continue;
       }
