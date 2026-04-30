@@ -70,105 +70,118 @@ const FLOOR: f32 = 1e-6;
 }
 
 /**
- * Step one pheromone field one tick.
+ * Step one pheromone field one tick — tile-aware.
  *
  * srcPtr / dstPtr point to two Float32 buffers of length w*h.
  * cellsPtr points to a Uint8 buffer of the same length (0 = AIR).
- * After this call, dst contains the next-tick field.
+ * dirtyPtr points to a Uint8 bitmap of length tilesX*tilesY; the
+ *   kernel processes only tiles where dirty[t] != 0 and skips the
+ *   rest. The JS wrapper builds this bitmap as the dilation of the
+ *   true "has content" set, so cells in skipped tiles are
+ *   guaranteed-zero in BOTH buffers (invariant maintained on the
+ *   JS side); the kernel can leave dst untouched there and the
+ *   ping-pong stays correct.
  *
- * Boundary cells (top/bottom row, leftmost/rightmost column) are
- * processed by the scalar path because their neighbour set is
- * conditional. The interior runs the SIMD lane-of-4 loop and falls
- * back to the scalar tail when the row width modulo 4 leaves
- * leftovers.
+ * For tiles that ARE processed: the interior of each tile uses the
+ * SIMD 4-lane body (16 cells per row = exactly 4 SIMD groups);
+ * tile rows that coincide with the world boundary, or tile columns
+ * that coincide with the world's left/right edge, fall back to the
+ * scalar `stepCell` form (which handles out-of-grid neighbours).
  */
 export function step(
-  srcPtr: usize, dstPtr: usize, cellsPtr: usize,
-  w: i32, h: i32,
+  srcPtr: usize, dstPtr: usize, cellsPtr: usize, dirtyPtr: usize,
+  w: i32, h: i32, tilesX: i32, tilesY: i32,
   f: f32, e: f32, cap: f32,
 ): void {
   const f4 = f * 0.25;
   const m = (1.0 as f32) - f; // legacy: still passed to stepCell for ABI stability
-  const wm1 = w - 1;
-  const hm1 = h - 1;
   const f4Splat = f32x4.splat(f4);
   const eSplat = f32x4.splat(e);
   const capSplat = f32x4.splat(cap);
   const floorSplat = f32x4.splat(FLOOR);
   const zeroSplat = f32x4.splat(0.0);
 
-  if (w >= 2 && h >= 2) {
-    for (let y = 1; y < hm1; y++) {
-      const rowStart = y * w;
-      let x = 1;
-      // SIMD body: process 4 cells per iteration as long as 4 cells
-      // fit before the right edge (x+4 <= wm1).
-      while (x + 4 <= wm1) {
-        const i = rowStart + x;
-        const srcByteI = srcPtr + (i << 2);
-        const dstByteI = dstPtr + (i << 2);
-        const cellsByteI = cellsPtr + i;
-        const wBytes = w << 2;
+  const TILE = 16;
+  for (let ty = 0; ty < tilesY; ty++) {
+    for (let tx = 0; tx < tilesX; tx++) {
+      if (load<u8>(dirtyPtr + ty * tilesX + tx) == 0) continue;
 
-        const cv = v128.load(srcByteI);
-        const lv = v128.load(srcByteI - 4);
-        const rv = v128.load(srcByteI + 4);
-        const tv = v128.load(srcByteI - wBytes);
-        const bv = v128.load(srcByteI + wBytes);
+      const x0 = tx * TILE;
+      const y0 = ty * TILE;
+      const x1Raw = x0 + TILE;
+      const y1Raw = y0 + TILE;
+      const x1 = x1Raw < w ? x1Raw : w;
+      const y1 = y1Raw < h ? y1Raw : h;
 
-        const centerMask = airMask4(cellsByteI);
-        const lMask = airMask4(cellsByteI - 1);
-        const rMask = airMask4(cellsByteI + 1);
-        const tMask = airMask4(cellsByteI - w);
-        const bMask = airMask4(cellsByteI + w);
+      for (let y = y0; y < y1; y++) {
+        const yIsBoundary = (y == 0) || (y == h - 1);
+        if (yIsBoundary) {
+          // Top or bottom edge row: every cell goes through scalar
+          // boundary path (kOut counts OOB as absorbing).
+          for (let x = x0; x < x1; x++) {
+            stepCell(srcPtr, dstPtr, cellsPtr, w, h, x, y, m, f4, e, cap);
+          }
+          continue;
+        }
+        // Interior row of an interior cell range. Handle the
+        // possibly-boundary leftmost / rightmost columns with
+        // scalar code, and the rest with SIMD.
+        let x = x0;
+        if (x == 0) {
+          stepCell(srcPtr, dstPtr, cellsPtr, w, h, 0, y, m, f4, e, cap);
+          x++;
+        }
+        const xRightInterior = (x1 == w) ? w - 1 : x1;
+        // SIMD body: 4 cells per iteration while there's room.
+        while (x + 4 <= xRightInterior) {
+          const i = y * w + x;
+          const srcByteI = srcPtr + (i << 2);
+          const dstByteI = dstPtr + (i << 2);
+          const cellsByteI = cellsPtr + i;
+          const wBytes = w << 2;
 
-        const sum = f32x4.add(
-          f32x4.add(f32x4.mul(lv, lMask), f32x4.mul(rv, rMask)),
-          f32x4.add(f32x4.mul(tv, tMask), f32x4.mul(bv, bMask)),
-        );
+          const cv = v128.load(srcByteI);
+          const lv = v128.load(srcByteI - 4);
+          const rv = v128.load(srcByteI + 4);
+          const tv = v128.load(srcByteI - wBytes);
+          const bv = v128.load(srcByteI + wBytes);
 
-        // Reflecting walls: each non-AIR neighbour means f/4 of the
-        // would-be outflow stays put rather than vanishing into soil.
-        // Sum the air masks (each lane is 0.0 or 1.0) for kAir, then
-        // mEff = 1 - kAir × (f/4). Cells with all-air neighbours
-        // recover the standard (1-f) self-retention; sealed cells
-        // (kAir=0) reach mEff=1 and only lose to evaporation.
-        const kAir = f32x4.add(
-          f32x4.add(lMask, rMask),
-          f32x4.add(tMask, bMask),
-        );
-        const mEff = f32x4.sub(f32x4.splat(1.0), f32x4.mul(kAir, f4Splat));
-        let result = f32x4.add(f32x4.mul(mEff, cv), f32x4.mul(f4Splat, sum));
-        result = f32x4.mul(result, eSplat);
-        // Zero non-AIR centers regardless of computed value.
-        result = f32x4.mul(result, centerMask);
-        // Clamp small to 0, large to cap. bitselect picks lane-by-lane:
-        // bitselect(a, b, mask) = (a & mask) | (b & ~mask).
-        const ltFloor = f32x4.lt(result, floorSplat);
-        result = v128.bitselect(zeroSplat, result, ltFloor);
-        const gtCap = f32x4.gt(result, capSplat);
-        result = v128.bitselect(capSplat, result, gtCap);
+          const centerMask = airMask4(cellsByteI);
+          const lMask = airMask4(cellsByteI - 1);
+          const rMask = airMask4(cellsByteI + 1);
+          const tMask = airMask4(cellsByteI - w);
+          const bMask = airMask4(cellsByteI + w);
 
-        v128.store(dstByteI, result);
-        x += 4;
-      }
-      // Scalar tail: handle 0..3 leftover cells.
-      while (x < wm1) {
-        stepCell(srcPtr, dstPtr, cellsPtr, w, h, x, y, m, f4, e, cap);
-        x++;
+          const sum = f32x4.add(
+            f32x4.add(f32x4.mul(lv, lMask), f32x4.mul(rv, rMask)),
+            f32x4.add(f32x4.mul(tv, tMask), f32x4.mul(bv, bMask)),
+          );
+          const kAir = f32x4.add(
+            f32x4.add(lMask, rMask),
+            f32x4.add(tMask, bMask),
+          );
+          const mEff = f32x4.sub(f32x4.splat(1.0), f32x4.mul(kAir, f4Splat));
+          let result = f32x4.add(f32x4.mul(mEff, cv), f32x4.mul(f4Splat, sum));
+          result = f32x4.mul(result, eSplat);
+          result = f32x4.mul(result, centerMask);
+          const ltFloor = f32x4.lt(result, floorSplat);
+          result = v128.bitselect(zeroSplat, result, ltFloor);
+          const gtCap = f32x4.gt(result, capSplat);
+          result = v128.bitselect(capSplat, result, gtCap);
+          v128.store(dstByteI, result);
+          x += 4;
+        }
+        // Scalar tail for any cells past the last SIMD group but
+        // still inside the tile's interior column range.
+        while (x < xRightInterior) {
+          stepCell(srcPtr, dstPtr, cellsPtr, w, h, x, y, m, f4, e, cap);
+          x++;
+        }
+        // Rightmost column of the world if the tile abuts it.
+        if (x1 == w) {
+          stepCell(srcPtr, dstPtr, cellsPtr, w, h, w - 1, y, m, f4, e, cap);
+        }
       }
     }
-  }
-
-  // Boundary rows + columns. Scalar path; cost is 2*(w + h - 2) per
-  // field per tick, dwarfed by the interior even at the smallest
-  // worlds we render.
-  if (h > 0) {
-    for (let x = 0; x < w; x++) stepCell(srcPtr, dstPtr, cellsPtr, w, h, x, 0, m, f4, e, cap);
-    if (h > 1) for (let x = 0; x < w; x++) stepCell(srcPtr, dstPtr, cellsPtr, w, h, x, h - 1, m, f4, e, cap);
-  }
-  if (w > 0) {
-    for (let y = 1; y < h - 1; y++) stepCell(srcPtr, dstPtr, cellsPtr, w, h, 0, y, m, f4, e, cap);
-    if (w > 1) for (let y = 1; y < h - 1; y++) stepCell(srcPtr, dstPtr, cellsPtr, w, h, w - 1, y, m, f4, e, cap);
   }
 }
