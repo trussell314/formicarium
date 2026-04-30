@@ -550,7 +550,11 @@ function main(): void {
       lastHud = now;
       const snap = latest;
       const start = settings.ants + 1;
-      const dugTotal = snap.cells.length - snap.hud.soilCount - snap.hud.grains;
+      // Excavation volume relative to the unbroken substrate at world
+      // gen — i.e. cells the colony has actually carved out, excluding
+      // the natural sky band above the surface and grain that was dug
+      // and re-deposited as mound.
+      const dugTotal = Math.max(0, snap.hud.initialSoilCells - snap.hud.soilCount - snap.hud.grains);
       // Bio time conversion. 100× wall-to-bio compression at 1×
       // speed and TICK_MS = 120 ms wall, so each sim tick advances
       // 12 sec of biological time (DAY_TICKS = 7200 → 1 bio day =

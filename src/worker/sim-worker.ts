@@ -356,6 +356,7 @@ function buildSnapshot(includePheromones: boolean): RenderSnapshot {
       totalBorn: world.totalBorn,
       totalDied: world.totalDied,
       soilCount,
+      initialSoilCells: world.initialSoilCells,
       ageBuckets,
       energyBuckets,
       meanWorkerEnergy,

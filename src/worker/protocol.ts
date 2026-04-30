@@ -109,6 +109,7 @@ export type RenderSnapshot = {
     totalBorn: number;
     totalDied: number;
     soilCount: number;
+    initialSoilCells: number;
     // 8-bucket histograms over alive non-queen ants.
     // ageBuckets bins age uniformly across [0, matureAge × 1.5];
     // energyBuckets bins across [0, maxEnergy].
