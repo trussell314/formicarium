@@ -474,3 +474,65 @@ describe('Khuong threshold deposit', () => {
     expect(deposited).toBe(true);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────
+//   Wall-following thigmotaxis (chamber-with-bottom-opening escape)
+// ─────────────────────────────────────────────────────────────────
+
+describe('thigmotaxis: ants escape a chamber whose only opening is at the bottom', () => {
+  it('a WANDER ant in a closed-top pocket finds the exit by following the wall', () => {
+    // The visual failure mode the user reported: a small pocket
+    // opens to the main trunk only at its bottom edge. Negative
+    // geotaxis on CARRY ants pointed them at the ceiling tick
+    // after tick; the old random-reversal bounce sent them right
+    // back at the ceiling on the next sub-step. The new bounce
+    // rotates ±90° (Heyman 2017 wall-following) so the ant traces
+    // the perimeter clockwise or counter-clockwise and falls out
+    // through whichever side has the opening.
+    const w = new World(20, 20);
+    for (let x = 0; x < w.width; x++) w.naturalSurface[x] = 4;
+    for (let y = 0; y < w.height; y++) {
+      for (let x = 0; x < w.width; x++) {
+        w.cells[w.index(x, y)] = y < 4 ? CELL_AIR : CELL_SOIL;
+      }
+    }
+    // Carve a 5×4 pocket with only its bottom row open into a
+    // vertical trunk that runs from y=8 down to y=15.
+    //   pocket cols 8..12, rows 8..11 (4 rows, 5 wide)
+    //   trunk  col  10,    rows 12..15
+    //   the pocket-trunk join is at (10, 12), one cell below the
+    //   pocket floor — accessible via the pocket cell at (10, 11)
+    //   then the trunk cell directly below.
+    for (let y = 8; y <= 11; y++) {
+      for (let x = 8; x <= 12; x++) w.cells[w.index(x, y)] = CELL_AIR;
+    }
+    for (let y = 12; y <= 15; y++) w.cells[w.index(10, y)] = CELL_AIR;
+    w.initialSoilCells = w.countSoil();
+
+    const rng = new RNG(42);
+    const colony = new Colony(1);
+    // Spawn a WANDER ant in the upper-left of the pocket. WANDER
+    // below-surface has positive geotaxis (head DOWN), and the
+    // pocket's only opening IS down, so wall-following + geotaxis
+    // both point at the exit. The pre-fix random-reversal bounce
+    // was the failure mode: the ant would jitter in place rather
+    // than trace a perimeter to the bottom row.
+    colony.spawn(8.5, 8.5, -Math.PI / 2, rng, TRAITS);
+    colony.state[0] = STATE_WANDER;
+    colony.energy[0] = 1.0;
+
+    const dig = new Pheromone(w.width, w.height, 0.24, 0.999);
+    const build = new Pheromone(w.width, w.height, 0.40, 0.9995);
+
+    // 600 ticks ≈ 12 sec biological. Empirically the wall-follow
+    // exits a 5×4 pocket within ~150 ticks at this seed; bounding
+    // at 600 leaves headroom for noise.
+    let exited = false;
+    for (let t = 0; t < 600; t++) {
+      step(w, colony, dig, build, rng, DEFAULT_PARAMS);
+      // Out the bottom: y has crossed below the pocket floor row.
+      if (colony.posY[0]! >= 12) { exited = true; break; }
+    }
+    expect(exited).toBe(true);
+  });
+});

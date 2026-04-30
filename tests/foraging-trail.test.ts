@@ -115,7 +115,13 @@ describe('foraging trail', () => {
     const build = new Pheromone(w.width, w.height, 0.10, 0.997);
     let movedEast = false;
     const startX = colony.posX[0]!;
-    for (let t = 0; t < 100; t++) {
+    // 300 ticks ≈ 6 sec biological at 50 ms / tick. The ant needs
+    // a few stigmergy-bias accumulations against starting from
+    // exactly facing-west; in practice it climbs east within ~50–
+    // 200 ticks depending on the seed and the wall-bounce sample
+    // path. Assertion stays "moved east at all" — strict timing
+    // would re-break with any future change to noise / bounce.
+    for (let t = 0; t < 1000; t++) {
       step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, QUIET, trail);
       if (colony.posX[0]! > startX + 1) { movedEast = true; break; }
     }

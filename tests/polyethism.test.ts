@@ -119,32 +119,58 @@ describe('caste polyethism', () => {
   });
 
   it('mid-age workers dig more than young or old workers', () => {
-    // Three parallel colonies at different ages. Run them long
-    // enough for a clear dig differential. We don't tightly bound
-    // the values — only the ordering matters. Averaged across
-    // several seeds so the assertion isn't brittle to per-seed
-    // RNG drift when the per-roll dig probability changes.
+    // The dig-rate-by-age invariant. We measure how often the
+    // step() loop's dig roll *fires successfully* at each age,
+    // not how many unique cells the ant carves out (carving
+    // changes the local geometry and saturates the count). After
+    // every successful dig we restore the world cell back to
+    // SOIL, so each subsequent tick presents the dig roll with
+    // identical 4-soil-neighbour geometry — total digs across
+    // 2000 ticks ≈ dig-roll probability × ticks.
     function digsAtAge(age: number, seed: number): number {
       const rng = new RNG(seed);
-      const w = flatWorld(40, 30, 6);
+      const w = new World(40, 30);
+      for (let x = 0; x < 40; x++) w.naturalSurface[x] = 6;
+      for (let y = 6; y < 30; y++) {
+        for (let x = 0; x < 40; x++) w.cells[w.index(x, y)] = CELL_SOIL;
+      }
+      w.cells[w.index(20, 8)] = CELL_AIR;
+      w.initialSoilCells = w.countSoil();
       w.tick = NOON;
-      // Ant deep in chamber so it has soil to dig.
       const colony = new Colony(1);
       colony.spawn(20.5, 8.5, 0, rng, TRAITS);
       colony.age[0] = age;
       colony.energy[0] = 1.0;
       const { dig, build } = fields(w);
-      const startSoil = w.countSoil();
+      let totalDigs = 0;
       for (let t = 0; t < 2000; t++) {
-        // Hold age, keep ant in WANDER so dig roll keeps firing.
+        colony.posX[0] = 20.5;
+        colony.posY[0] = 8.5;
         colony.age[0] = age;
         if (colony.state[0] !== STATE_WANDER) {
           colony.state[0] = STATE_WANDER;
           colony.collisionCount[0] = 0;
         }
+        const before = w.countSoil();
         step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, QUIET);
+        const after = w.countSoil();
+        if (after < before) {
+          totalDigs += before - after;
+          // Reset every soil cell so the next dig roll sees the
+          // same geometry. Drop any grain the ant is carrying so
+          // the next tick rolls dig (not deposit).
+          for (let y = 6; y < 30; y++) {
+            for (let x = 0; x < 40; x++) {
+              const idx = w.index(x, y);
+              if (x === 20 && y === 8) w.cells[idx] = CELL_AIR;
+              else w.cells[idx] = CELL_SOIL;
+            }
+          }
+          w.initialSoilCells = w.countSoil();
+          colony.carryMoves[0] = 0;
+        }
       }
-      return startSoil - w.countSoil();
+      return totalDigs;
     }
     const seeds = [3, 7, 11, 17, 23];
     const sum = (xs: ReadonlyArray<number>): number => xs.reduce((a, b) => a + b, 0);

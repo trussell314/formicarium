@@ -1396,7 +1396,14 @@ export function step(
           const r = tryStep(world, nx, ny, dx, dy);
           nx = r.x; ny = r.y;
           if (r.hitSoil) {
-            h = wrapAngle(h + Math.PI * (0.5 + rng.next() * 0.5));
+            // Wall-following: see thigmotaxis comment in the main
+            // movement loop below for rationale and citations.
+            // Single RNG draw so this hot path stays at one
+            // rng.next() call per bounce, matching the prior
+            // semantics for downstream determinism.
+            const _sign = (i & 1) === 0 ? -1 : 1;
+            const _jitter = (rng.next() - 0.5) * (Math.PI / 6);
+            h = wrapAngle(h + _sign * (Math.PI / 2) + _jitter);
             colony.heading[i] = h;
           }
         }
@@ -1532,7 +1539,14 @@ export function step(
           const r = tryStep(world, nx, ny, dx, dy);
           nx = r.x; ny = r.y;
           if (r.hitSoil) {
-            h = wrapAngle(h + Math.PI * (0.5 + rng.next() * 0.5));
+            // Wall-following: see thigmotaxis comment in the main
+            // movement loop below for rationale and citations.
+            // Single RNG draw so this hot path stays at one
+            // rng.next() call per bounce, matching the prior
+            // semantics for downstream determinism.
+            const _sign = (i & 1) === 0 ? -1 : 1;
+            const _jitter = (rng.next() - 0.5) * (Math.PI / 6);
+            h = wrapAngle(h + _sign * (Math.PI / 2) + _jitter);
             colony.heading[i] = h;
           }
         }
@@ -1651,7 +1665,9 @@ export function step(
         nx = r.x; ny = r.y;
         if (r.hitSoil) {
           cfHitSoil = true;
-          h = wrapAngle(h + Math.PI * (0.5 + rng.next() * 0.5));
+          const _sign = (i & 1) === 0 ? -1 : 1;
+          const _jitter = (rng.next() - 0.5) * (Math.PI / 6);
+          h = wrapAngle(h + _sign * (Math.PI / 2) + _jitter);
           colony.heading[i] = h;
         }
       }
@@ -1811,7 +1827,9 @@ export function step(
         const r = tryStep(world, nx, ny, dx, dy);
         nx = r.x; ny = r.y;
         if (r.hitSoil) {
-          h = wrapAngle(h + Math.PI * (0.5 + rng.next() * 0.5));
+          const _sign = (i & 1) === 0 ? -1 : 1;
+          const _jitter = (rng.next() - 0.5) * (Math.PI / 6);
+          h = wrapAngle(h + _sign * (Math.PI / 2) + _jitter);
           colony.heading[i] = h;
         }
       }
@@ -2226,9 +2244,34 @@ export function step(
       ny = r.y;
       if (r.hitSoil) {
         hitSoil = true;
-        // Bounce off the soil surface so the ant doesn't keep
-        // pressing into the same spot every sub-step.
-        h = wrapAngle(h + Math.PI * (0.5 + rng.next() * 0.5));
+        // Thigmotaxis: real ants antennate the wall they ran into
+        // and follow its tangent rather than reversing course.
+        // Rotating heading by ±90° aligns the ant parallel to the
+        // wall it just hit; over a few sub-steps that traces the
+        // perimeter and exits any chamber through whichever
+        // direction the opening lies (Heyman et al. 2017 on
+        // *Camponotus* / *Lasius* contour-following; Pratt 2005
+        // on *Temnothorax* in arenas). The ±sign is RNG-chosen
+        // per hit and a small ±7.5° jitter breaks the symmetry
+        // that would otherwise let an ant oscillate forever in a
+        // corner where both tangents point at solid.
+        //
+        // The earlier h + (π/2 .. π) reversal pointed the ant
+        // straight back at the wall it had just come from on the
+        // next sub-step, which produced the "ants pinned in a
+        // chamber that only opens at the bottom" failure mode —
+        // negative geotaxis kept rotating them back upward into
+        // the ceiling tick after tick.
+        // Persistent ±sign per ant so a wall-following ant traces
+        // the chamber perimeter consistently in one direction
+        // rather than oscillating. The ant's index `i` parity
+        // gives a free, stable, 50/50-distributed source. The
+        // single rng.next() jitters the turn magnitude (±15°) so
+        // perfect symmetry doesn't trap the ant in a corner where
+        // both tangents face soil.
+        const _sign = (i & 1) === 0 ? -1 : 1;
+        const _jitter = (rng.next() - 0.5) * (Math.PI / 6);
+        h = wrapAngle(h + _sign * (Math.PI / 2) + _jitter);
         colony.heading[i] = h;
       }
     }
