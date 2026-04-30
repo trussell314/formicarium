@@ -8,7 +8,7 @@
 //   4. The migration is bounded — once at target, no further drift.
 
 import { describe, expect, it } from 'vitest';
-import { Colony, STATE_EGG } from '../src/sim/colony';
+import { Colony, STATE_EGG, STATE_LARVA } from '../src/sim/colony';
 import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { Pheromone } from '../src/sim/pheromone';
 import { RNG } from '../src/sim/rng';
@@ -122,6 +122,32 @@ describe('brood thermoregulation', () => {
     const finalDepth = (c.posY[0]! | 0) - 10; // surface row = 10
     expect(finalDepth).toBeLessThanOrEqual(FAST_MIGRATE.broodMaxDepth + 1);
     expect(finalDepth).toBeGreaterThanOrEqual(FAST_MIGRATE.broodMaxDepth - 1);
+  });
+
+  it('a larva tracks the diel depth target the same way an egg does', () => {
+    // Same noon-deepens / midnight-shallows behaviour applies to
+    // larvae. Penick & Tschinkel 2008 actually focused on larva
+    // movement; the egg test covers the shared migration path
+    // but a larva-specific test locks in that the LARVA state
+    // dispatch also runs the migration.
+    const rng = new RNG(101);
+    const w = deepChamberWorld();
+    w.tick = DAY_TICKS / 2 - 1; // step() bumps to noon
+    const c = new Colony(1);
+    const idx = c.spawn(20.5, 12.5, 0, rng, {
+      digProb: 0, pickProb: 0, stigmergy: 0, turnNoise: 0, restThreshold: 100,
+    });
+    c.state[idx] = STATE_LARVA;
+    c.stateTicks[idx] = 0;
+    c.energy[idx] = 1;
+    const dig = new Pheromone(w.width, w.height, 0.12, 0.99);
+    const build = new Pheromone(w.width, w.height, 0.10, 0.997);
+    const startY = c.posY[0]! | 0;
+    for (let t = 0; t < 200; t++) {
+      step(w, c, dig, build, rng, DEFAULT_PARAMS, undefined, FAST_MIGRATE);
+    }
+    const endY = c.posY[0]! | 0;
+    expect(endY).toBeGreaterThan(startY);
   });
 
   it('an egg in a 1-cell-wide entrance shaft will not migrate up the shaft', () => {
