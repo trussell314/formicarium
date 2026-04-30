@@ -179,64 +179,88 @@ void main() {
       vec3 skyBot = mix(SKY_BOT_NIGHT, SKY_BOT_DAY, uDaylight);
       float skyT = clamp(float(cell.y) / max(1.0, uH * 0.5), 0.0, 1.0);
       col = mix(skyTop, skyBot, skyT);
-      // Surface vegetation. plantKind ∈ {1,2,3} = grass/shrub/tree
-      // selects the silhouette character (width, taper, palette);
-      // plantHeight is the current cell-count height, growing from 1
-      // to PLANT_MAX_HEIGHT[kind] over many ticks. Both render
-      // branches modulate by daylight so plants read dark at night.
-      int plantKind = sampleU8(uPlant, ivec2(cell.x, 0));
-      int plantH = sampleU16(uPlantHeight, ivec2(cell.x, 0));
-      int plantBase = surf - 1;
-      int plantTop = surf - plantH;
-      if (plantKind > 0 && plantH > 0 && cell.y >= plantTop && cell.y <= plantBase) {
-        int hashP = sampleU8(uSoilNoise, ivec2(cell.x, max(cell.y, 0)));
-        // Trunk proportions per kind. Grass = 1-cell stem (real
-        // grasses have no woody trunk — leaves spring from a basal
-        // crown). Shrubs = 2-cell woody base, leafy canopy above
-        // (creosote bushes out near the ground). Trees = ~quarter-
-        // height trunk, rest canopy (mesquite trunk ~1 m, canopy
-        // ~3-4 m). At the visible crop these read as: grass tufts,
-        // shrub canopies on the surface, brown trunks rising off-
-        // screen for trees.
+      // Surface vegetation. Each plant column anchors a body whose
+      // width scales (pre-crop) with the plant's height — bigger
+      // plants are visibly wider. We scan ±5 columns and pick the
+      // closest plant whose footprint covers this cell. Trunk
+      // radius is the lateral half-width inside the woody zone;
+      // canopy radius extends further. Both scale ~ sqrt(height)
+      // with kind-specific caps so the visual stays bounded
+      // (real-scale tree-trunk diameter would be 100+ cells, which
+      // would dominate the world).
+      int chosenKind = 0;
+      int chosenH = 0;
+      int chosenAnchor = -1;
+      int chosenAbsDx = 99;
+      int chosenSignDx = 0;
+      bool chosenInTrunk = false;
+      int chosenReqRadius = 0;
+      for (int dx = -5; dx <= 5; dx++) {
+        int sx = cell.x + dx;
+        if (sx < 0 || sx >= wi) continue;
+        int nKind = sampleU8(uPlant, ivec2(sx, 0));
+        if (nKind == 0) continue;
+        int nH = int(texelFetch(uPlantHeight, ivec2(sx, 0), 0).r);
+        if (nH == 0) continue;
+        int nSurf = sampleU16(uSurf, ivec2(sx, 0));
+        int nBase = nSurf - 1;
+        int nTop = nSurf - nH;
+        if (cell.y > nBase || cell.y < nTop) continue;
         int trunkCells =
-          (plantKind == 1) ? 1 :
-          ((plantKind == 2) ? 2 : max(1, plantH / 4));
-        bool isTrunkRow = (cell.y > plantBase - trunkCells);
-        // distFromTop counts up from the canopy crown (0 = topmost
-        // cell of the plant), used to taper canopy width.
-        int distFromTop = cell.y - plantTop;
+          (nKind == 1) ? 1 :
+          ((nKind == 2) ? 2 : max(1, nH / 4));
+        bool inTrunk = (cell.y > nBase - trunkCells);
+        float sqrtH = sqrt(float(nH));
+        int trunkRadius =
+          (nKind == 1) ? 0 :
+          ((nKind == 2) ? clamp(int(sqrtH / 8.0 + 0.5), 1, 2)
+                        : clamp(int(sqrtH / 8.0 + 0.5), 1, 4));
+        int canopyRadius =
+          (nKind == 1) ? 0 :
+          ((nKind == 2) ? clamp(int(sqrtH / 6.0 + 0.5), 1, 3)
+                        : clamp(int(sqrtH / 6.0 + 0.5), 2, 6));
+        int reqRadius = inTrunk ? trunkRadius : canopyRadius;
+        int absDx = (dx < 0) ? -dx : dx;
+        if (absDx > reqRadius) continue;
+        if (chosenKind == 0 || absDx < chosenAbsDx) {
+          chosenKind = nKind;
+          chosenH = nH;
+          chosenAnchor = sx;
+          chosenAbsDx = absDx;
+          chosenSignDx = dx;
+          chosenInTrunk = inTrunk;
+          chosenReqRadius = reqRadius;
+        }
+      }
+      if (chosenKind > 0) {
+        int hashP = sampleU8(uSoilNoise, ivec2(chosenAnchor, max(cell.y, 0)));
         int subEdge = (uSub - 1);
         bool inSilhouette = true;
-        if (isTrunkRow) {
-          // Trunk: centre sub-cells. Width by kind — grass is a
-          // single sub-cell stem, shrubs 2-3, trees up to ~half SUB.
-          int trunkHalf = (plantKind == 1) ? 0 : (plantKind == 2 ? 1 : max(1, uSub / 4));
+        // Soft outer rim: at the radius edge, hash-jitter a sub-cell
+        // off so the silhouette doesn't read as a hard rectangle.
+        if (chosenAbsDx == chosenReqRadius && chosenReqRadius > 0) {
+          if ((hashP & 3) < 2) {
+            int margin = subEdge / 2;
+            // Carve from the outward sub-cells (the side furthest
+            // from the plant centre) so the rim looks ragged.
+            if (chosenSignDx > 0 && subOff.x > subEdge - margin) inSilhouette = false;
+            if (chosenSignDx < 0 && subOff.x < margin) inSilhouette = false;
+          }
+        }
+        // Grass (kind 1) is single-column; constrain it to the
+        // centre sub-cells of its anchor cell.
+        if (chosenKind == 1) {
           int stemCenter = uSub / 2;
           int dxs = subOff.x - stemCenter;
-          if (dxs < -trunkHalf || dxs > trunkHalf) inSilhouette = false;
-        } else {
-          // Canopy: tapered. At the very top the silhouette pinches
-          // in; at the trunk shoulder it bulges out. Tree canopies
-          // are wider than shrubs which are wider than grass tufts.
-          int kindWidth = (plantKind == 1) ? 0 : (plantKind == 2 ? 1 : 2);
-          int kindMargin = subEdge - kindWidth;
-          int taperMargin = (distFromTop == 0) ? max(kindMargin, subEdge / 2)
-                                              : ((hashP & 3) > 1 ? max(0, kindMargin - 1) : kindMargin);
-          int margin = max(0, taperMargin / 2);
-          if (subOff.x < margin || subOff.x > subEdge - margin) inSilhouette = false;
+          if (dxs < -1 || dxs > 1) inSilhouette = false;
         }
         if (inSilhouette) {
           vec3 trunkCol = vec3(82.0, 60.0, 30.0) / 255.0;
           vec3 canopyCol = vec3(70.0, 130.0, 55.0) / 255.0;
-          // Shrubs and trees get a slightly darker, more saturated
-          // canopy than grass.
-          if (plantKind >= 2) canopyCol = vec3(56.0, 110.0, 48.0) / 255.0;
-          if (plantKind >= 3) canopyCol = vec3(44.0, 90.0, 42.0) / 255.0;
-          // Tree trunks are a slightly darker bark than the woody
-          // stems of shrub/grass.
-          if (plantKind >= 3) trunkCol = vec3(64.0, 44.0, 22.0) / 255.0;
-          vec3 plantC = isTrunkRow ? trunkCol : canopyCol;
-          // Per-pixel hash variation (±10% luminance) and night dim.
+          if (chosenKind >= 2) canopyCol = vec3(56.0, 110.0, 48.0) / 255.0;
+          if (chosenKind >= 3) canopyCol = vec3(44.0, 90.0, 42.0) / 255.0;
+          if (chosenKind >= 3) trunkCol = vec3(64.0, 44.0, 22.0) / 255.0;
+          vec3 plantC = chosenInTrunk ? trunkCol : canopyCol;
           float vJitter = (float(hashP & 31) / 31.0 - 0.5) * 0.20;
           plantC *= (1.0 + vJitter);
           plantC *= mix(0.45, 1.0, uDaylight);

@@ -2274,6 +2274,19 @@ export function step(
     // damper survives in the foundingPatrollerBoost cap (no infinite
     // amplification) and is bounded by smallForageMult itself.
     const foundingPatrollerBoost = isSmallColony ? 2 : 1;
+    // Dawn patroller gate. *P. barbatus* sends a small group of
+    // OLDEST workers ("patrollers") out at sunrise to scout the
+    // foraging arena before the regular forager force commits
+    // (Gordon 1991; Greene & Gordon 2003). Modeled here as a hard
+    // age gate during the first 30-or-so biological minutes after
+    // sunrise: only mature workers (age ≥ 1.2 × matureAge) can
+    // transition to FORAGE during this window. Younger workers
+    // wait. Outside the patrol window the gate is 1 (no effect).
+    // Doesn't change RNG draws — only shifts the comparison.
+    const patrolPhase = (world.tick % DAY_TICKS) / DAY_TICKS;
+    const inDawnPatrol = species.diurnal && patrolPhase >= 0.25 && patrolPhase <= 0.29;
+    const isPatroller = colony.age[i]! >= species.matureAge * 1.2;
+    const dawnPatrolGate = inDawnPatrol && !isPatroller ? 0 : 1;
     // Forage roll fires for both below-surface AND above-surface
     // WANDER ants (FIX J). Previously the gate required iy >=
     // naturalSurface (worker at or below the surface row), which
@@ -2288,7 +2301,7 @@ export function step(
     // the same heading (no need to reset to "head up" — they're
     // already up).
     if (stateIn === STATE_WANDER &&
-        rng.next() < species.forageProb * forageActivity * forageMult * smallForageMult * foodVisibleBoost * starvationBoost * inboundBoost * foundingOverride * foundingPatrollerBoost) {
+        rng.next() < species.forageProb * forageActivity * forageMult * smallForageMult * foodVisibleBoost * starvationBoost * inboundBoost * foundingOverride * foundingPatrollerBoost * dawnPatrolGate) {
       colony.setState(i, STATE_FORAGE);
       colony.collisionCount[i] = 0;
       // Heading: if below surface, head UP to start the trip; if
