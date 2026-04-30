@@ -18,7 +18,9 @@ import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { Pheromone } from '../src/sim/pheromone';
 import { RNG } from '../src/sim/rng';
 import { type AntSpecies, HARVESTER } from '../src/sim/species';
-import { CELL_AIR, CELL_GRAIN, CELL_SOIL, DAY_TICKS, World } from '../src/sim/world';
+import {
+  CELL_AIR, CELL_GRAIN, CELL_SOIL, DAY_TICKS, PLANT_MAX_HEIGHT, World,
+} from '../src/sim/world';
 
 const NOON = DAY_TICKS / 2;
 
@@ -120,6 +122,42 @@ describe('surface plants', () => {
       if (w.plant[20]! === 0) { cleared = true; break; }
     }
     expect(cleared).toBe(true);
+  });
+
+  it('seedling plants grow over time toward their kind cap', () => {
+    // Plant a tree (kind=3, mature height 8) at column 20 with
+    // seedling height 1. After enough ticks the height should
+    // increase but never exceed the cap.
+    const rng = new RNG(19);
+    const w = flatWorld(40, 40, 16);
+    w.tick = NOON;
+    w.plant[20] = 3;
+    w.plantHeight[20] = 1;
+    const colony = new Colony(0);
+    const { dig, build } = fields(w);
+    let grew = false;
+    for (let t = 0; t < 30000; t++) {
+      step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, QUIET);
+      if (w.plantHeight[20]! > 1) grew = true;
+      // Hard cap honoured even on a long run.
+      expect(w.plantHeight[20]!).toBeLessThanOrEqual(PLANT_MAX_HEIGHT[3]!);
+    }
+    expect(grew).toBe(true);
+  });
+
+  it('mature plants do not grow past their kind cap', () => {
+    // A grass (kind=1, max 2) seeded at its mature height stays put.
+    const rng = new RNG(23);
+    const w = flatWorld(40, 30, 12);
+    w.tick = NOON;
+    w.plant[10] = 1;
+    w.plantHeight[10] = PLANT_MAX_HEIGHT[1]!;
+    const colony = new Colony(0);
+    const { dig, build } = fields(w);
+    for (let t = 0; t < 5000; t++) {
+      step(w, colony, dig, build, rng, DEFAULT_PARAMS, undefined, QUIET);
+    }
+    expect(w.plantHeight[10]!).toBe(PLANT_MAX_HEIGHT[1]!);
   });
 
   it('a column with no plant never drops a plant-sourced seed', () => {

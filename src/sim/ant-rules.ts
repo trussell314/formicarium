@@ -47,7 +47,7 @@ import { Pheromone, uploadPheromoneCells } from './pheromone';
 import { digCell, pickGrain, placeGrain, settle, tryStep } from './physics';
 import type { RNG } from './rng';
 import { type AntSpecies, HARVESTER } from './species';
-import { CELL_AIR, CELL_GRAIN, CELL_SOIL, daylight, World } from './world';
+import { CELL_AIR, CELL_GRAIN, CELL_SOIL, daylight, PLANT_MAX_HEIGHT, World } from './world';
 
 export interface SimParams {
   /** Cells/tick walking speed. Sub-stepped so soil contacts aren't skipped. */
@@ -165,6 +165,13 @@ const TWO_PI = Math.PI * 2;
 // — plausible for a desert annual fruiting). The supply throttle
 // downstream caps total inventory regardless of source.
 const PLANT_SEED_RATE = 0.005;
+// Per-tick chance that the plant-growth roll selects a column to
+// advance one cell of height. Same rate envelope as drops, so a
+// fresh seedling reaches its mature height in roughly maxHeight ×
+// (width / hits) ticks ≈ a few biological hours. The slow ramp lets
+// the viewer actually see plants growing on the timescale of a
+// session rather than instantly snapping to maturity.
+const PLANT_GROW_RATE = 0.01;
 
 function wrapAngle(a: number): number {
   if (a > Math.PI) return a - TWO_PI;
@@ -346,8 +353,10 @@ export function step(
       const psurf = world.naturalSurface[pcol]!;
       const pAbove = (psurf - 1) * world.width + pcol;
       if (psurf >= 1 && world.cells[pAbove] !== CELL_AIR) {
-        // Plant cell got buried (mound stacked over it). Plant dies.
+        // Plant base cell got buried (mound stacked over it). Plant
+        // dies; clear both kind and height bookkeeping.
         world.plant[pcol] = 0;
+        world.plantHeight[pcol] = 0;
       } else {
         const dx = ((plantOffRoll * 5) | 0) - 2;
         const sx = pcol + dx;
@@ -366,6 +375,23 @@ export function step(
             }
           }
         }
+      }
+    }
+  }
+  // Plant growth. Two unconditional rng draws per tick (roll +
+  // column pick). On a hit, advance the picked column's plant by
+  // one cell of height if it's below its kind's mature cap. Growth
+  // tops out at PLANT_MAX_HEIGHT[kind] — a tree fully matures at 8
+  // cells, a shrub at 4, grass at 2.
+  const plantGrowRoll = rng.next();
+  const plantGrowCol = (rng.next() * world.width) | 0;
+  if (plantGrowRoll < PLANT_GROW_RATE) {
+    const gcol = plantGrowCol;
+    const kind = world.plant[gcol]!;
+    if (kind > 0) {
+      const maxH = PLANT_MAX_HEIGHT[kind]!;
+      if (world.plantHeight[gcol]! < maxH) {
+        world.plantHeight[gcol]!++;
       }
     }
   }

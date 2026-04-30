@@ -8,6 +8,13 @@ export const CELL_AIR = 0;
 export const CELL_SOIL = 1;
 export const CELL_GRAIN = 2;
 
+/** Mature plant height in cells, indexed by plant kind. Index 0 is
+ *  unused (kind 0 = no plant). Grass tops out at 2 cells; shrubs at
+ *  4; trees at 8 (visibly tree-shaped against a 12-30 cell sky band).
+ *  All plants start at height 1 (seedling) and grow stochastically
+ *  toward this cap. */
+export const PLANT_MAX_HEIGHT: ReadonlyArray<number> = [0, 2, 4, 8];
+
 export type CellKind = 0 | 1 | 2;
 
 /** Ticks per biological day. 1 tick ≈ 120 ms (see species.ts);
@@ -79,15 +86,21 @@ export class World {
    *  then either decays naturally or gets cleared by an ant that
    *  walks through. */
   readonly sprout: Uint8Array;
-  /** Per-column surface plant. 0 = none, 1..3 = plant size class
-   *  (grass / shrub / small tree). Plants live in the AIR cell(s)
-   *  immediately above naturalSurface[col] and periodically drop
-   *  seeds onto the surface around themselves — modelling the
-   *  granivore food source: P. barbatus harvests seeds dropped by
-   *  the surrounding desert vegetation (MacMahon, Mull & Crist 2000,
-   *  "Harvester Ants and Their Role"). Plants die when buried by
-   *  the colony's spoil mound. */
+  /** Per-column surface plant kind. 0 = none, 1 = grass, 2 = shrub,
+   *  3 = small tree. The kind is immutable for the plant's life and
+   *  determines its mature size cap and visual character. Plants
+   *  live in the AIR cell(s) immediately above naturalSurface[col]
+   *  and periodically drop seeds onto the surface around themselves
+   *  — modelling the granivore food source: P. barbatus harvests
+   *  seeds dropped by the surrounding desert vegetation (MacMahon,
+   *  Mull & Crist 2000, "Harvester Ants and Their Role"). Plants
+   *  die when buried by the colony's spoil mound. */
   readonly plant: Uint8Array;
+  /** Per-column current plant height in cells. 0 when no plant is
+   *  present; otherwise grows from a seedling height of 1 up to a
+   *  kind-determined cap (PLANT_MAX_HEIGHT[kind]). Growth advances
+   *  stochastically each tick. */
+  readonly plantHeight: Uint8Array;
   /** Tick at which each cell's sprout last germinated. Renderer
    *  uses (world.tick - sproutTick[idx]) for the age-driven visual
    *  ramp; the sim uses it for natural decay back to AIR after
@@ -185,6 +198,7 @@ export class World {
     this.sproutTick = new Int32Array(width * height);
     this.sproutTick.fill(-1_000_000);
     this.plant = new Uint8Array(width);
+    this.plantHeight = new Uint8Array(width);
     this.digTick = new Int32Array(width * height);
     this.digTick.fill(-1_000_000);
   }
@@ -289,12 +303,19 @@ export class World {
     const NEST_CLEAR_HALF = Math.max(4, Math.floor(this.width * 0.04));
     for (let x = 0; x < this.width; x++) {
       const r = rng.next();
+      const sizeRoll = rng.next();
+      const ageRoll = rng.next();
       if (Math.abs(x - cx) < NEST_CLEAR_HALF) continue;
       if (r >= PLANT_DENSITY) continue;
       // Bias toward the smallest size class. Tall plants are rare.
-      const sizeRoll = rng.next();
       const kind = sizeRoll < 0.65 ? 1 : (sizeRoll < 0.92 ? 2 : 3);
       this.plant[x] = kind;
+      // Initial height is uniform in [1, maxHeight] so the founding
+      // landscape has plants at every life stage rather than a uniform
+      // field of seedlings. Subsequent growth advances toward the cap.
+      const maxH = PLANT_MAX_HEIGHT[kind]!;
+      this.plantHeight[x] = 1 + ((ageRoll * maxH) | 0);
+      if (this.plantHeight[x]! > maxH) this.plantHeight[x] = maxH;
     }
   }
 
