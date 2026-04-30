@@ -9,11 +9,19 @@ export const CELL_SOIL = 1;
 export const CELL_GRAIN = 2;
 
 /** Mature plant height in cells, indexed by plant kind. Index 0 is
- *  unused (kind 0 = no plant). Grass tops out at 2 cells; shrubs at
- *  4; trees at 8 (visibly tree-shaped against a 12-30 cell sky band).
- *  All plants start at height 1 (seedling) and grow stochastically
- *  toward this cap. */
-export const PLANT_MAX_HEIGHT: ReadonlyArray<number> = [0, 2, 4, 8];
+ *  unused (kind 0 = no plant). At 3 mm/cell (the same world scale
+ *  as the founding shaft) the heights below are calibrated to real
+ *  *P. barbatus* habitat vegetation:
+ *    - grass clumps (fluffgrass, three-awn): ~30 cm = 100 cells
+ *    - shrubs (creosote, brittlebush): ~1.2 m = 400 cells
+ *    - trees (mesquite, palo verde): ~4.5 m = 1500 cells
+ *  These exceed the visible above-surface band — a 1500-cell tree is
+ *  ~36× the typical sky band — so the GL fragment shader naturally
+ *  crops trunks at the top of the canvas. Trees read as continuing
+ *  off-screen, which matches what an ant at the base of one would
+ *  see. The Uint16 storage backs heights up to 65 535 cells (~196 m)
+ *  with room to spare. */
+export const PLANT_MAX_HEIGHT: ReadonlyArray<number> = [0, 100, 400, 1500];
 
 export type CellKind = 0 | 1 | 2;
 
@@ -99,8 +107,11 @@ export class World {
   /** Per-column current plant height in cells. 0 when no plant is
    *  present; otherwise grows from a seedling height of 1 up to a
    *  kind-determined cap (PLANT_MAX_HEIGHT[kind]). Growth advances
-   *  stochastically each tick. */
-  readonly plantHeight: Uint8Array;
+   *  stochastically each tick. Uint16 (not Uint8) because mature
+   *  trees are ~1500 cells tall at the world's 3 mm/cell scale —
+   *  far above any reasonable byte-sized cap. The renderer crops
+   *  visible plants at the canvas top. */
+  readonly plantHeight: Uint16Array;
   /** Tick at which each cell's sprout last germinated. Renderer
    *  uses (world.tick - sproutTick[idx]) for the age-driven visual
    *  ramp; the sim uses it for natural decay back to AIR after
@@ -198,7 +209,7 @@ export class World {
     this.sproutTick = new Int32Array(width * height);
     this.sproutTick.fill(-1_000_000);
     this.plant = new Uint8Array(width);
-    this.plantHeight = new Uint8Array(width);
+    this.plantHeight = new Uint16Array(width);
     this.digTick = new Int32Array(width * height);
     this.digTick.fill(-1_000_000);
   }
@@ -312,10 +323,14 @@ export class World {
       this.plant[x] = kind;
       // Initial height is uniform in [1, maxHeight] so the founding
       // landscape has plants at every life stage rather than a uniform
-      // field of seedlings. Subsequent growth advances toward the cap.
+      // field of seedlings. With per-tick growth at the rate calibrated
+      // for biological time compression, a tree maturing from seedling
+      // would take days of wall time — initial random ages are the
+      // only practical way for the world to look populated at t=0.
       const maxH = PLANT_MAX_HEIGHT[kind]!;
-      this.plantHeight[x] = 1 + ((ageRoll * maxH) | 0);
-      if (this.plantHeight[x]! > maxH) this.plantHeight[x] = maxH;
+      let h = 1 + ((ageRoll * maxH) | 0);
+      if (h > maxH) h = maxH;
+      this.plantHeight[x] = h;
     }
   }
 

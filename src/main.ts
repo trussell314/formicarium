@@ -58,7 +58,7 @@ function makePlaceholderWorld(s: Settings): {
   corpse: Uint8Array; sprout: Uint8Array; sproutTick: Int32Array;
   digTick: Int32Array;
   plant: Uint8Array;
-  plantHeight: Uint8Array;
+  plantHeight: Uint16Array;
 } {
   // Renderer needs SOMETHING at construction time, before the
   // worker has produced its first snapshot. Empty arrays of the
@@ -75,7 +75,7 @@ function makePlaceholderWorld(s: Settings): {
     sprout: new Uint8Array(sz), sproutTick: new Int32Array(sz),
     digTick: new Int32Array(sz),
     plant: new Uint8Array(s.width),
-    plantHeight: new Uint8Array(s.width),
+    plantHeight: new Uint16Array(s.width),
   };
 }
 

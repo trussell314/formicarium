@@ -84,7 +84,7 @@ uniform sampler2D uSprout;       // R8: per-cell sprout marker
 uniform isampler2D uSproutTick;  // R32I: per-cell sprout tick
 uniform isampler2D uDigTick;     // R32I: per-cell dig tick
 uniform sampler2D uPlant;        // R8: per-column plant kind (1..3)
-uniform sampler2D uPlantHeight;  // R8: per-column current height (0..8)
+uniform usampler2D uPlantHeight; // R16UI: per-column current height in cells
 
 // Pheromone fields packed into 3 RGBA32F textures so the total
 // sampler count stays under MAX_TEXTURE_IMAGE_UNITS (WebGL2
@@ -184,14 +184,22 @@ void main() {
       // to PLANT_MAX_HEIGHT[kind] over many ticks. Both render
       // branches modulate by daylight so plants read dark at night.
       int plantKind = sampleU8(uPlant, ivec2(cell.x, 0));
-      int plantH = sampleU8(uPlantHeight, ivec2(cell.x, 0));
+      int plantH = sampleU16(uPlantHeight, ivec2(cell.x, 0));
       int plantBase = surf - 1;
       int plantTop = surf - plantH;
       if (plantKind > 0 && plantH > 0 && cell.y >= plantTop && cell.y <= plantBase) {
         int hashP = sampleU8(uSoilNoise, ivec2(cell.x, max(cell.y, 0)));
-        // Trees have a clear trunk segment; grass and shrub are
-        // canopy-only with a one-cell stem at the base.
-        int trunkCells = (plantKind == 3) ? max(1, plantH / 3) : 1;
+        // Trunk proportions per kind. Grass = 1-cell stem (real
+        // grasses have no woody trunk — leaves spring from a basal
+        // crown). Shrubs = 2-cell woody base, leafy canopy above
+        // (creosote bushes out near the ground). Trees = ~quarter-
+        // height trunk, rest canopy (mesquite trunk ~1 m, canopy
+        // ~3-4 m). At the visible crop these read as: grass tufts,
+        // shrub canopies on the surface, brown trunks rising off-
+        // screen for trees.
+        int trunkCells =
+          (plantKind == 1) ? 1 :
+          ((plantKind == 2) ? 2 : max(1, plantH / 4));
         bool isTrunkRow = (cell.y > plantBase - trunkCells);
         // distFromTop counts up from the canopy crown (0 = topmost
         // cell of the plant), used to taper canopy width.
@@ -417,7 +425,7 @@ export interface GLTerrainState {
   sproutTick: Int32Array;
   digTick: Int32Array;
   plant: Uint8Array;
-  plantHeight: Uint8Array;
+  plantHeight: Uint16Array;
   tick: number;
   width: number;
   height: number;
@@ -539,7 +547,7 @@ export class GLTerrainRenderer {
     addSlot('digTick', gl.R32I, gl.RED_INTEGER, gl.INT);
     addSlot('surf', gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT);
     addSlot('plant', gl.R8, gl.RED, gl.UNSIGNED_BYTE);
-    addSlot('plantHeight', gl.R8, gl.RED, gl.UNSIGNED_BYTE);
+    addSlot('plantHeight', gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT);
     // Pheromone textures: 4 fields per RGBA32F texture, 3 textures
     // for 10 fields. Keeping 19 single-channel samplers exceeded
     // the WebGL2 minimum guarantee (MAX_TEXTURE_IMAGE_UNITS = 16).

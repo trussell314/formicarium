@@ -27,8 +27,10 @@ const SAVE_KEY = 'formicarium:save';
 // (foodCap, clumpAccum); v6 added per-ant stuckTicks; v7 added the
 // queen pheromone; v8 added brood, necromone, no-entry, granary,
 // and trunk-trail pheromones; v9 added per-column surface plant;
-// v10 added per-column plant height (split from immutable kind).
-const SAVE_VERSION = 10;
+// v10 added per-column plant height (split from immutable kind);
+// v11 widened plantHeight to Uint16 for real-scale plants
+// (mature trees up to ~1500 cells at 3 mm/cell).
+const SAVE_VERSION = 11;
 
 // Chunked btoa to avoid argument-list length limits on very large arrays.
 function bytesToB64(view: ArrayBufferView): string {
@@ -48,8 +50,8 @@ function b64ToBytes(s: string): Uint8Array {
   return out;
 }
 
-interface SaveStateV10 {
-  v: 10;
+interface SaveStateV11 {
+  v: 11;
   foodCap: number;
   clumpAccum: number;
   // Settings — needed to validate that a save matches the requested run.
@@ -133,7 +135,7 @@ export function captureSnapshot(
   granaryField: Pheromone, trunkField: Pheromone,
   rng: RNG, settings: SaveSettings,
 ): string | null {
-  const state: SaveStateV10 = {
+  const state: SaveStateV11 = {
     v: SAVE_VERSION,
     seed: settings.seed,
     width: settings.width,
@@ -249,7 +251,7 @@ export function restoreSnapshot(
 ): boolean {
   let raw: unknown;
   try { raw = JSON.parse(blob); } catch { return false; }
-  const s = raw as Partial<SaveStateV10>;
+  const s = raw as Partial<SaveStateV11>;
   if (
     !s ||
     s.v !== SAVE_VERSION ||
