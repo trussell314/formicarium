@@ -83,10 +83,11 @@ uniform sampler2D uCorpse;       // R8: per-cell corpse marker
 uniform sampler2D uSprout;       // R8: per-cell sprout marker
 uniform isampler2D uSproutTick;  // R32I: per-cell sprout tick
 uniform isampler2D uDigTick;     // R32I: per-cell dig tick
-uniform sampler2D uPlant;        // R8: per-column plant kind (1..3)
-uniform usampler2D uPlantHeight; // R16UI: per-column current height in cells
-uniform sampler2D uBgPlant;      // R8: per-column background plant kind
-uniform usampler2D uBgPlantHeight; // R16UI: per-column background plant height
+// Plant kind / height textures are packed two layers deep — row 0 is
+// the foreground layer, row 1 is the background layer. Saves two
+// sampler units against the WebGL2 minimum guarantee of 16.
+uniform sampler2D uPlant;        // R8 W×2: kind (1..3) — row 0 = fg, row 1 = bg
+uniform usampler2D uPlantHeight; // R16UI W×2: height in cells — row 0 = fg, row 1 = bg
 uniform sampler2D uRoot;         // R8: per-cell root marker (2=shrub, 3=tree)
 
 // Pheromone fields packed into 3 RGBA32F textures so the total
@@ -197,9 +198,10 @@ void main() {
       for (int dx = -8; dx <= 8; dx++) {
         int sx = cell.x + dx;
         if (sx < 0 || sx >= wi) continue;
-        int nKind = sampleU8(uBgPlant, ivec2(sx, 0));
+        // Row 1 = background layer of the packed plant textures.
+        int nKind = sampleU8(uPlant, ivec2(sx, 1));
         if (nKind == 0) continue;
-        int nH = int(texelFetch(uBgPlantHeight, ivec2(sx, 0), 0).r);
+        int nH = int(texelFetch(uPlantHeight, ivec2(sx, 1), 0).r);
         if (nH == 0) continue;
         int nSurf = sampleU16(uSurf, ivec2(sx, 0));
         int nBase = nSurf - 1;
@@ -601,6 +603,10 @@ export class GLTerrainRenderer {
   /** Interleave scratch for the 3 RGBA32F pheromone packs. Allocated
    *  once at the size of the world × 4; reused every frame so we
    *  don't churn GC. Sized lazily on first uploadPheromones() call. */
+  /** Scratch buffers for the 2-row packed plant + bgPlant textures.
+   *  Sized lazily on first uploadGrid call. */
+  private plantPack?: Uint8Array;
+  private plantHeightPack?: Uint16Array;
   private pheroPack0?: Float32Array;
   private pheroPack1?: Float32Array;
   private pheroPack2?: Float32Array;
@@ -649,8 +655,7 @@ export class GLTerrainRenderer {
     for (const name of [
       'uW', 'uH', 'uTick', 'uSub', 'uShowPhero', 'uDaylight',
       'uCells', 'uSoilNoise', 'uSurf', 'uFood', 'uFoodMoves', 'uCorpse',
-      'uSprout', 'uSproutTick', 'uDigTick', 'uPlant', 'uPlantHeight',
-      'uBgPlant', 'uBgPlantHeight', 'uRoot',
+      'uSprout', 'uSproutTick', 'uDigTick', 'uPlant', 'uPlantHeight', 'uRoot',
       'uPPack0', 'uPPack1', 'uPPack2',
     ]) {
       this.uniforms[name] = gl.getUniformLocation(prog, name);
@@ -685,8 +690,6 @@ export class GLTerrainRenderer {
     addSlot('surf', gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT);
     addSlot('plant', gl.R8, gl.RED, gl.UNSIGNED_BYTE);
     addSlot('plantHeight', gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT);
-    addSlot('bgPlant', gl.R8, gl.RED, gl.UNSIGNED_BYTE);
-    addSlot('bgPlantHeight', gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT);
     addSlot('root', gl.R8, gl.RED, gl.UNSIGNED_BYTE);
     // Pheromone textures: 4 fields per RGBA32F texture, 3 textures
     // for 10 fields. Keeping 19 single-channel samplers exceeded
@@ -745,10 +748,22 @@ export class GLTerrainRenderer {
     this.uploadGrid('sproutTick', world.sproutTick, w, h);
     this.uploadGrid('digTick', world.digTick, w, h);
     this.uploadGrid('surf', world.naturalSurface, w, 1);
-    this.uploadGrid('plant', world.plant, w, 1);
-    this.uploadGrid('plantHeight', world.plantHeight, w, 1);
-    this.uploadGrid('bgPlant', world.bgPlant, w, 1);
-    this.uploadGrid('bgPlantHeight', world.bgPlantHeight, w, 1);
+    // Pack plant (foreground) + bgPlant (background) into a single
+    // 2-row texture. Saves two sampler units, keeping us under the
+    // WebGL2 minimum-guarantee MAX_TEXTURE_IMAGE_UNITS = 16. Without
+    // this, init silently fails on browsers near the cap and the
+    // renderer falls back to the CPU pixel-loop path which doesn't
+    // render plants at all.
+    if (!this.plantPack || this.plantPack.length !== w * 2) {
+      this.plantPack = new Uint8Array(w * 2);
+      this.plantHeightPack = new Uint16Array(w * 2);
+    }
+    this.plantPack!.set(world.plant, 0);
+    this.plantPack!.set(world.bgPlant, w);
+    this.plantHeightPack!.set(world.plantHeight, 0);
+    this.plantHeightPack!.set(world.bgPlantHeight, w);
+    this.uploadGrid('plant', this.plantPack!, w, 2);
+    this.uploadGrid('plantHeight', this.plantHeightPack!, w, 2);
     this.uploadGrid('root', world.root, w, h);
     if (pheromones) {
       // Interleave 4 single-channel Float32 fields into an RGBA
@@ -798,8 +813,6 @@ export class GLTerrainRenderer {
     this.bindSampler('uDigTick', 'digTick');
     this.bindSampler('uPlant', 'plant');
     this.bindSampler('uPlantHeight', 'plantHeight');
-    this.bindSampler('uBgPlant', 'bgPlant');
-    this.bindSampler('uBgPlantHeight', 'bgPlantHeight');
     this.bindSampler('uRoot', 'root');
     this.bindSampler('uPPack0', 'pPack0');
     this.bindSampler('uPPack1', 'pPack1');
