@@ -44,10 +44,10 @@ import {
 } from './colony';
 import type { ParticleSystem } from './particles';
 import { Pheromone, uploadPheromoneCells } from './pheromone';
-import { digCell, pickGrain, placeGrain, settle, tryStep } from './physics';
+import { digCell, pickGrain, placeGrain, recomputeMound, settle, tryStep } from './physics';
 import type { RNG } from './rng';
 import { type AntSpecies, HARVESTER } from './species';
-import { CELL_AIR, CELL_GRAIN, CELL_SOIL, daylight, PLANT_MAX_HEIGHT, World } from './world';
+import { CELL_AIR, CELL_GRAIN, CELL_SOIL, DAY_TICKS, daylight, PLANT_MAX_HEIGHT, World } from './world';
 
 export interface SimParams {
   /** Cells/tick walking speed. Sub-stepped so soil contacts aren't skipped. */
@@ -576,6 +576,85 @@ export function step(
   // trail body is wider than a single ant). Cheap: width-many
   // reads per sweep; runs every 64 ticks so we don't pay it every
   // step for a feature that visibly changes only over minutes.
+  // Diel entrance plug. P. barbatus closes the nest entrance with
+  // sand grains at sunset to retain humidity and exclude robbers,
+  // re-opening at dawn (MacKay 1981; Gordon 1991). One grain swap
+  // per attempt — donor from the nearest mound column, recipient
+  // is the founding-shaft entrance cell. Grain conservation holds
+  // by construction (atomic swap). Worker activity isn't modelled
+  // explicitly here; the global rule represents the colony-level
+  // behavioural shift around the diurnal transitions.
+  const dielPhase = (world.tick % DAY_TICKS) / DAY_TICKS;
+  const isDuskWindow = dielPhase >= 0.78 && dielPhase <= 0.95;
+  const isDawnWindow = dielPhase >= 0.20 && dielPhase <= 0.30;
+  // RNG draw is gated on being inside a window — outside the
+  // window the per-tick rng advance is unchanged from before this
+  // feature, which preserves determinism for all tests whose tick
+  // range stays in daylight or deep night.
+  if ((isDuskWindow || isDawnWindow) && rng.next() < 0.05) {
+    const ecx = world.width >> 1;
+    const esy = world.naturalSurface[ecx]!;
+    const entranceIdx = esy * world.width + ecx;
+    if (isDuskWindow && world.cells[entranceIdx] === CELL_AIR) {
+      // Find the nearest mounded column with at least one surface
+      // grain to donate.
+      let donorIdx = -1;
+      let donorCol = -1;
+      for (let r = 1; r <= 8; r++) {
+        for (const sx of [ecx - r, ecx + r]) {
+          if (sx < 0 || sx >= world.width) continue;
+          if (world.mound[sx]! === 0) continue;
+          const ssurf = world.naturalSurface[sx]!;
+          for (let py = ssurf - 1; py >= 0; py--) {
+            const dIdx = py * world.width + sx;
+            if (world.cells[dIdx] === CELL_GRAIN) {
+              donorIdx = dIdx;
+              donorCol = sx;
+              break;
+            }
+            if (world.cells[dIdx] !== CELL_AIR) break;
+          }
+          if (donorIdx !== -1) break;
+        }
+        if (donorIdx !== -1) break;
+      }
+      if (donorIdx !== -1) {
+        const moves = world.grainMoves[donorIdx]!;
+        world.cells[donorIdx] = CELL_AIR;
+        world.grainMoves[donorIdx] = 0;
+        world.cells[entranceIdx] = CELL_GRAIN;
+        world.grainMoves[entranceIdx] = Math.min(255, moves + 1);
+        recomputeMound(world, donorCol);
+      }
+    } else if (isDawnWindow && world.cells[entranceIdx] === CELL_GRAIN) {
+      // Re-open: pick up the seal grain and place it back on a
+      // nearby mound column (settles via standard grain physics).
+      const moves = world.grainMoves[entranceIdx]!;
+      world.cells[entranceIdx] = CELL_AIR;
+      world.grainMoves[entranceIdx] = 0;
+      const dir = rng.next() < 0.5 ? -1 : 1;
+      const sx = ecx + dir * 3;
+      if (sx >= 0 && sx < world.width) {
+        const ssurf = world.naturalSurface[sx]!;
+        // Drop one row above the column's current top — settleGrain
+        // cascades it to a stable rest.
+        let dropY = ssurf - 1 - world.mound[sx]!;
+        if (dropY < 0) dropY = 0;
+        const dropIdx = dropY * world.width + sx;
+        if (world.cells[dropIdx] === CELL_AIR) {
+          placeGrain(world, sx, dropY, rng, moves + 1);
+        } else {
+          // Couldn't place — restore the seal so we don't lose grain.
+          world.cells[entranceIdx] = CELL_GRAIN;
+          world.grainMoves[entranceIdx] = moves;
+        }
+      } else {
+        world.cells[entranceIdx] = CELL_GRAIN;
+        world.grainMoves[entranceIdx] = moves;
+      }
+    }
+  }
+
   const TRAIL_CLEAR_THRESHOLD = 0.30;
   if (trunkField && (world.tick & 63) === 0) {
     const wW = world.width;
