@@ -277,6 +277,34 @@ export function digCell(world: World, x: number, y: number, rng: RNG): boolean {
   if (x < 0 || y < 0 || x >= world.width || y >= world.height) return false;
   const idx = y * world.width + x;
   if (world.cells[idx] !== CELL_SOIL) return false;
+  // Anti-orphan rule. Real ants don't chew the connecting cell
+  // out from under a 1-cell SOIL peninsula and leave an island.
+  // Refuse the dig if it would leave any cardinal SOIL neighbour
+  // with zero remaining cardinal SOIL neighbours after the dig
+  // (i.e. fully isolated). Allows normal chamber widening (wall
+  // cells with 2+ vertical neighbours stay connected) while
+  // preventing the scattered 1-cell soil pillars users see in
+  // chambers.
+  const w = world.width;
+  const h = world.height;
+  const dirs: ReadonlyArray<readonly [number, number]> = [
+    [1, 0], [-1, 0], [0, 1], [0, -1],
+  ];
+  for (const [dx, dy] of dirs) {
+    const nx = x + dx;
+    const ny = y + dy;
+    if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+    if (world.cells[ny * w + nx] !== CELL_SOIL) continue;
+    let nbrSoil = 0;
+    for (const [ddx, ddy] of dirs) {
+      const nnx = nx + ddx;
+      const nny = ny + ddy;
+      if (nnx === x && nny === y) continue; // about to be AIR
+      if (nnx < 0 || nny < 0 || nnx >= w || nny >= h) continue;
+      if (world.cells[nny * w + nnx] === CELL_SOIL) nbrSoil++;
+    }
+    if (nbrSoil === 0) return false;
+  }
   world.cells[idx] = CELL_AIR;
   // Stamp the tick so the renderer can briefly glow this cell as
   // "freshly excavated." renderer.ts:163 reads digTick — without
