@@ -49,25 +49,52 @@ export const TICKS_PER_SEC = 10;
 /** Wall-clock (and micro-biological) duration of one tick in ms. */
 export const TICK_MS = 1000 / TICKS_PER_SEC;
 
-/** How many seconds of macro-biological time pass per real-world
- *  second of wall-clock at 1× speed. Slow biological processes
- *  (lifespan, egg→adult, diel cycle) advance at this multiple. */
-export const TIME_COMPRESSION = 100;
-
 /** Biological seconds per real day. */
 export const SECONDS_PER_DAY = 86400;
 
+/** Calibration baseline for macro-bio rates. The constants in
+ *  species.ts are tuned at this compression value; the runtime scale
+ *  factor for any per-tick macro rate is `TIME_COMPRESSION /
+ *  MACRO_BASELINE`. Don't change without retuning species.ts. */
+export const MACRO_BASELINE = 100;
+
+/** How many seconds of macro-biological time pass per real-world
+ *  second of wall-clock at 1× speed. Slow biological processes
+ *  (lifespan, egg→adult, diel cycle) advance at this multiple.
+ *  Mutable at runtime via `setTimeCompression()`. ES module live
+ *  binding propagates the new value to all importers — do not cache
+ *  the value into a local `const`. */
+export let TIME_COMPRESSION = 100;
+
 /** Ticks per in-sim day. Derived: a 24 h biological day, compressed
- *  100×, runs in 864 wall-clock seconds; at 10 ticks/sec that's 8 640
- *  ticks. The day/night cycle is a modulo of world.tick by this
- *  constant. */
-export const DAY_TICKS =
-  (SECONDS_PER_DAY / TIME_COMPRESSION) * TICKS_PER_SEC;
+ *  TIME_COMPRESSION×, runs at TICKS_PER_SEC ticks/sec wall-clock.
+ *  Updated alongside TIME_COMPRESSION. The day/night cycle is a
+ *  modulo of world.tick by this. */
+export let DAY_TICKS = (SECONDS_PER_DAY / TIME_COMPRESSION) * TICKS_PER_SEC;
 
 /** Macro-biological seconds advanced per tick. With TICKS_PER_SEC=10
  *  and TIME_COMPRESSION=100, each tick advances 10 sec of the slow
  *  biological calendar (lifespan, foraging cadence, etc.). */
-export const SECONDS_PER_TICK_BIO = TIME_COMPRESSION / TICKS_PER_SEC;
+export let SECONDS_PER_TICK_BIO = TIME_COMPRESSION / TICKS_PER_SEC;
+
+/** Per-tick macro-rate scale factor. Multiply Bernoulli probabilities,
+ *  per-tick energy drains, and per-tick rate counts by this. Divide
+ *  interval thresholds by this. Returns 1 at the baseline (no scaling
+ *  needed, behaviour matches species.ts as written). */
+export function macroScale(): number {
+  return TIME_COMPRESSION / MACRO_BASELINE;
+}
+
+/** Adjust the time-compression dial. Floors at 1× (real biology;
+ *  never expand time below realtime) and caps at 10000× (above which
+ *  several Bernoulli rates saturate even with rng.events()). Updates
+ *  DAY_TICKS and SECONDS_PER_TICK_BIO in lockstep. */
+export function setTimeCompression(c: number): void {
+  const clamped = Math.max(1, Math.min(10000, c));
+  TIME_COMPRESSION = clamped;
+  DAY_TICKS = (SECONDS_PER_DAY / TIME_COMPRESSION) * TICKS_PER_SEC;
+  SECONDS_PER_TICK_BIO = TIME_COMPRESSION / TICKS_PER_SEC;
+}
 
 /**
  * Daylight intensity in [0, 1] for a given tick. 0 at midnight,

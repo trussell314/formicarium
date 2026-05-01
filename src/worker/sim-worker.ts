@@ -21,7 +21,7 @@ import {
 } from '../sim/persist';
 import { RNG } from '../sim/rng';
 import { HARVESTER, type AntSpecies } from '../sim/species';
-import { CELL_AIR, daylight, TICK_MS, World } from '../sim/world';
+import { CELL_AIR, daylight, setTimeCompression, TICK_MS, World } from '../sim/world';
 import type { FromWorker, RenderSnapshot, SaveSettings, ToWorker } from './protocol';
 // WASM module URL — Vite resolves this at build time and serves the
 // compiled bytes at the resulting URL. Worker fetches the bytes
@@ -485,6 +485,9 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       break;
     case 'setSpeed':
       speedMul = msg.speedMul;
+      break;
+    case 'setCompression':
+      setTimeCompression(msg.compression);
       break;
     case 'reseed':
     case 'loadSave': {

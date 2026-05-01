@@ -142,6 +142,44 @@
         -webkit-tap-highlight-color: transparent;
       }
       #ctrls button:active { background: rgba(216, 200, 168, 0.25); }
+      /* Dials cluster — sits above the button row. Two sliders, each
+         clearly labeled, for the two orthogonal time knobs:
+           SPEED       — wall-clock ticks/sec (CPU dimension)
+           TIME SCALE  — bio-seconds advanced per tick (compression dial) */
+      #dials {
+        position: fixed; left: 50%; bottom: 70px;
+        transform: translateX(-50%);
+        display: flex; gap: 14px;
+        padding: 8px 12px;
+        background: rgba(10, 6, 6, 0.62);
+        border: 1px solid rgba(216, 200, 168, 0.18);
+        border-radius: 8px;
+        opacity: 0.65;
+        transition: opacity 200ms ease;
+        z-index: 10;
+        max-width: calc(100vw - 24px);
+        font: 600 11px ui-sans-serif, system-ui, sans-serif;
+        color: #f0e2c4;
+      }
+      #dials:hover, #dials:focus-within { opacity: 1; }
+      #dials.hidden { opacity: 0; pointer-events: none; }
+      #dials label {
+        display: flex; flex-direction: column; gap: 3px;
+        min-width: 180px;
+      }
+      #dials .lbl-row {
+        display: flex; justify-content: space-between;
+        align-items: baseline;
+        letter-spacing: 0.05em;
+      }
+      #dials .lbl-name { text-transform: uppercase; font-size: 10px; opacity: 0.85; }
+      #dials .lbl-val { font: 600 11px ui-monospace, monospace; color: #ffe8b8; }
+      #dials input[type=range] {
+        width: 100%;
+        accent-color: #d8c8a8;
+        cursor: pointer;
+        margin: 2px 0 0 0;
+      }
       /* Save/load confirmation flashes — green on success, red on no-op
          (e.g., load with no save). 600 ms total: snap on, fade off. */
       #ctrls button.flash-ok {
@@ -159,6 +197,16 @@
   <body>
     <canvas id="screen"></canvas>
     <div id="hud"></div>
+    <div id="dials" role="group" aria-label="speed and time-scale dials">
+      <label for="dial-speed">
+        <span class="lbl-row"><span class="lbl-name">Speed</span><span class="lbl-val" id="dial-speed-val">1×</span></span>
+        <input type="range" id="dial-speed" min="-3" max="13" step="1" value="0" aria-label="simulation speed multiplier" />
+      </label>
+      <label for="dial-comp">
+        <span class="lbl-row"><span class="lbl-name">Time scale</span><span class="lbl-val" id="dial-comp-val">100×</span></span>
+        <input type="range" id="dial-comp" min="0" max="3" step="0.05" value="2" aria-label="time compression — bio time per real time" />
+      </label>
+    </div>
     <div id="ctrls" role="toolbar" aria-label="simulation controls">
       <button data-act="pause" title="pause / resume (space)">⏯</button>
       <button data-act="slower" title="slower (-)">−</button>

@@ -14,7 +14,7 @@ import {
 import {
   clearSavedSnapshot, readSavedBlob, saveToLocalStorage,
 } from './sim/persist';
-import { DAY_TICKS, SECONDS_PER_TICK_BIO, TICK_MS } from './sim/world';
+import { DAY_TICKS, SECONDS_PER_TICK_BIO, setTimeCompression, TICK_MS } from './sim/world';
 import { Renderer } from './render/renderer';
 import type { FromWorker, RenderSnapshot, ToWorker } from './worker/protocol';
 import SimWorker from './worker/sim-worker?worker';
@@ -24,8 +24,16 @@ interface Settings {
   width: number;
   height: number;
   ants: number;
-  /** Realtime speed multiplier — 1× = wall:bio identity. */
+  /** Wall-clock tick-rate multiplier — independent of biology. 1× =
+   *  one wall-tick per TICK_MS ms; higher = more sim CPU per real
+   *  second; visually faster animation. */
   speedMul: number;
+  /** TIME_COMPRESSION at startup. How many seconds of macro-bio time
+   *  pass per real-world second of wall-clock at speed=1×. 100 (the
+   *  default and historical calibration baseline) plays one bio-day
+   *  out in 14.4 wall-min. 1 = realtime biology; 1000 = fast time
+   *  lapse. */
+  compression: number;
   /** When true, enable burn-in-prevention drift in the renderer
    *  AND hide the HUD/controls/help overlays so the visible canvas
    *  is just the simulation. Intended for use as a screensaver or
@@ -47,6 +55,7 @@ function readSettings(): Settings {
     height: Math.max(30, num('height', 250) | 0),
     ants: Math.max(0, num('ants', 0) | 0),
     speedMul: Math.max(0.125, num('speed', 8)),
+    compression: Math.max(1, Math.min(10000, num('compression', 100))),
     screensaver: p.get('screensaver') === '1',
   };
 }
@@ -387,6 +396,12 @@ function main(): void {
     restoreBlob: readSavedBlob(),
   });
   send({ kind: 'setSpeed', speedMul: settings.speedMul });
+  send({ kind: 'setCompression', compression: settings.compression });
+  // The main thread reads DAY_TICKS / macroScale-driven values for
+  // the HUD, so its module-side state must mirror what we sent the
+  // worker. (Without this the HUD's bio-time clock would advance at
+  // the default 100× regardless of the user's compression setting.)
+  setTimeCompression(settings.compression);
 
   // ── Camera (zoom + pan) ────────────────────────────────────
   const ZOOM_MIN = 1;
@@ -595,6 +610,58 @@ function main(): void {
       if (act && actions[act]) actions[act]!();
     });
   }
+
+  // ── Speed and time-scale dials ─────────────────────────────
+  // Two sliders, both log-scaled in the markup so the slider position
+  // varies linearly across powers of the displayed unit. They're
+  // independent: speed scales wall-clock tick rate (CPU dimension);
+  // time-scale scales how much biology happens per tick (the
+  // TIME_COMPRESSION knob). Their PRODUCT is biology-per-real-second.
+  const dials = document.getElementById('dials') as HTMLDivElement | null;
+  if (dials && settings.screensaver) dials.style.display = 'none';
+  const dialSpeed = document.getElementById('dial-speed') as HTMLInputElement | null;
+  const dialSpeedVal = document.getElementById('dial-speed-val');
+  const dialComp = document.getElementById('dial-comp') as HTMLInputElement | null;
+  const dialCompVal = document.getElementById('dial-comp-val');
+  const fmtMul = (n: number): string =>
+    n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2).replace(/\.?0+$/, '');
+  if (dialSpeed && dialSpeedVal) {
+    dialSpeed.value = String(Math.round(Math.log2(Math.max(0.125, settings.speedMul))));
+    dialSpeedVal.textContent = `${fmtMul(settings.speedMul)}×`;
+    const onSpeedInput = (): void => {
+      const exp = Number(dialSpeed.value);
+      const v = Math.pow(2, exp);
+      requestedSpeed = v;
+      send({ kind: 'setSpeed', speedMul: v });
+      dialSpeedVal.textContent = `${fmtMul(v)}×`;
+    };
+    dialSpeed.addEventListener('input', onSpeedInput);
+  }
+  if (dialComp && dialCompVal) {
+    dialComp.value = String(Math.log10(Math.max(1, settings.compression)));
+    dialCompVal.textContent = `${fmtMul(settings.compression)}×`;
+    const onCompInput = (): void => {
+      const v = Math.pow(10, Number(dialComp.value));
+      send({ kind: 'setCompression', compression: v });
+      setTimeCompression(v);
+      dialCompVal.textContent = `${fmtMul(v)}×`;
+    };
+    dialComp.addEventListener('input', onCompInput);
+  }
+  // Keep the speed slider in sync when keyboard +/− changes the value
+  // out from under the UI (so the slider thumb moves to match the
+  // requested speed). Re-uses requestedSpeed which the action handler
+  // updates.
+  const syncSpeedSlider = (): void => {
+    if (dialSpeed && dialSpeedVal) {
+      dialSpeed.value = String(Math.round(Math.log2(Math.max(0.125, requestedSpeed))));
+      dialSpeedVal.textContent = `${fmtMul(requestedSpeed)}×`;
+    }
+  };
+  const origFaster = actions.faster!;
+  const origSlower = actions.slower!;
+  actions.faster = () => { origFaster(); syncSpeedSlider(); };
+  actions.slower = () => { origSlower(); syncSpeedSlider(); };
 
   // Auto-save every 5 min wall (and on visibility-hidden /
   // beforeunload). The worker captures the snapshot; we hand off

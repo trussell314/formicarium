@@ -47,7 +47,7 @@ import { Pheromone, uploadPheromoneCells } from './pheromone';
 import { digCell, pickGrain, placeGrain, recomputeMound, settle, tryStep } from './physics';
 import type { RNG } from './rng';
 import { type AntSpecies, HARVESTER } from './species';
-import { CELL_AIR, CELL_GRAIN, CELL_SOIL, DAY_TICKS, daylight, PLANT_MAX_HEIGHT, World } from './world';
+import { CELL_AIR, CELL_GRAIN, CELL_SOIL, DAY_TICKS, daylight, macroScale, PLANT_MAX_HEIGHT, World } from './world';
 
 export interface SimParams {
   /** Cells/tick walking speed. Sub-stepped so soil contacts aren't skipped. */
@@ -293,6 +293,13 @@ export function step(
   trunkField?: Pheromone,
 ): void {
   world.tick++;
+  // Macro-rate scale factor. Multiply per-tick macro probabilities,
+  // per-tick energy drains, and per-tick rate counts by `ms`. Divide
+  // interval thresholds by `ms`. Cached once per step — every site
+  // sees the same compression value within a tick. At the calibration
+  // baseline (TIME_COMPRESSION = 100) this is 1 and the tick is a
+  // no-op identity; the dial only kicks in when the user moves it.
+  const ms = macroScale();
   // Decay the forager-return-rate counter (Greene & Gordon 2007
   // antennation-feedback model). Multiplicative decay 0.998 per tick
   // gives a half-life of ~350 ticks (~7 sec biological at 100×
@@ -354,7 +361,7 @@ export function step(
   // is 0. Short-circuiting via `seedsPerTick > 0 &&` would shift
   // every subsequent rng draw on this tick, silently breaking any
   // seeded behavioural test that doesn't enable seedsPerTick.
-  if (species.granivorous && rng.next() < species.seedsPerTick) {
+  if (species.granivorous && rng.next() < species.seedsPerTick * ms) {
     for (let attempt = 0; attempt < 10; attempt++) {
       const sx = (rng.next() * world.width) | 0;
       const sy = world.naturalSurface[sx]!;
@@ -384,7 +391,7 @@ export function step(
   // regardless of plant presence — preserves seeded determinism for
   // tests that don't enable plants. Additional drops in the same tick
   // (rate ≥ 2) draw two extra rolls each.
-  const dropEvents = rng.events(PLANT_SEED_RATE);
+  const dropEvents = rng.events(PLANT_SEED_RATE * ms);
   const plantPickCol = (rng.next() * world.width) | 0;
   const plantOffRoll = rng.next();
   if (species.granivorous && dropEvents > 0) {
@@ -430,7 +437,7 @@ export function step(
   // 0.01 (default compression) returns 0 or 1 from a single draw; at
   // higher compression multiple growth events can fire per tick, each
   // picking its own column.
-  const growEvents = rng.events(PLANT_GROW_RATE);
+  const growEvents = rng.events(PLANT_GROW_RATE * ms);
   const plantGrowCol = (rng.next() * world.width) | 0;
   if (growEvents > 0) {
     for (let e = 0; e < growEvents; e++) {
@@ -466,11 +473,11 @@ export function step(
       const s = colony.state[i];
       if (s === STATE_DEAD || s === STATE_EGG || s === STATE_PUPA) continue;
       if (s === STATE_LARVA) {
-        demand += species.larvaMetabolism;
+        demand += species.larvaMetabolism * ms;
       } else if (s === STATE_QUEEN) {
-        demand += species.metabolism * 0.5;
+        demand += species.metabolism * 0.5 * ms;
       } else {
-        demand += species.metabolism;
+        demand += species.metabolism * ms;
       }
     }
     // Saturation throttle. Without this, supply matches demand
@@ -759,7 +766,13 @@ export function step(
   // surface). Decay path: any sprout older than sproutLifetimeTicks
   // dries up and is cleared. The combined cost is a single O(W·H)
   // pass per interval.
-  if (species.sproutProb > 0 && world.tick % species.germinationSweepInterval === 0) {
+  // Effective per-tick rate is sproutProb / sweepInterval. To scale
+  // by `ms` we shorten the sweep interval (more sweeps per tick at
+  // high compression) and leave sproutProb at the per-roll value.
+  // Floor at 1 (every-tick sweeping) when compression is so high the
+  // interval would round to 0.
+  const sweepInterval = Math.max(1, Math.floor(species.germinationSweepInterval / ms));
+  if (species.sproutProb > 0 && world.tick % sweepInterval === 0) {
     const total = world.food.length;
     for (let idx = 0; idx < total; idx++) {
       // Germination roll on stored seeds.
@@ -777,7 +790,7 @@ export function step(
       // sprout=0 as "no sprout here".
       if (
         world.sprout[idx]! > 0 &&
-        world.tick - world.sproutTick[idx]! > species.sproutLifetimeTicks
+        world.tick - world.sproutTick[idx]! > species.sproutLifetimeTicks / ms
       ) {
         world.sprout[idx] = 0;
       }
@@ -1070,7 +1083,7 @@ export function step(
                 const surplus = (recipIsStarvingLarva || donorIsFoodCarrier)
                   ? Math.max(0, donorE - PRIORITY_DONOR_FLOOR)
                   : donorE - species.trophallaxisDonorThreshold;
-                const give = Math.min(species.trophallaxisAmount, want, surplus);
+                const give = Math.min(species.trophallaxisAmount * ms, want, surplus);
                 if (give > 0) {
                   colony.energy[recip] = recipE + give;
                   // Queens feeding larvae draw on non-modelled wing-
@@ -1122,8 +1135,8 @@ export function step(
       // (Hölldobler & Wilson 1990 ch. 9). We don't model the
       // pickup-and-carry intermediate; the nurse-proximity gate
       // captures the dependency without the explicit state.
-      if (colony.stateTicks[i]! % species.broodMigrateInterval === 0
-          && nurseNearby(colony, i, species.matureAge * 0.5, 3)) {
+      if (colony.stateTicks[i]! % Math.max(1, Math.floor(species.broodMigrateInterval / ms)) === 0
+          && nurseNearby(colony, i, species.matureAge * 0.5 / ms, 3)) {
         const ex = colony.posX[i]! | 0;
         const eyNow = colony.posY[i]! | 0;
         if (ex >= 0 && ex < world.width) {
@@ -1168,7 +1181,7 @@ export function step(
           }
         }
       }
-      if (colony.stateTicks[i]! >= species.eggMatureTicks) {
+      if (colony.stateTicks[i]! >= species.eggMatureTicks / ms) {
         // Hatch into LARVA — same position, but now needs feeding.
         // Spawn at half-energy: a freshly-hatched larva still has
         // some yolk reserves but will starve if not fed.
@@ -1212,8 +1225,8 @@ export function step(
       }
       // Same depth-tracking drift as eggs — also requires a nurse
       // within ~3 cells to do the actual carrying.
-      if (colony.stateTicks[i]! % species.broodMigrateInterval === 0
-          && nurseNearby(colony, i, species.matureAge * 0.5, 3)) {
+      if (colony.stateTicks[i]! % Math.max(1, Math.floor(species.broodMigrateInterval / ms)) === 0
+          && nurseNearby(colony, i, species.matureAge * 0.5 / ms, 3)) {
         const ex = colony.posX[i]! | 0;
         const eyNow = colony.posY[i]! | 0;
         if (ex >= 0 && ex < world.width) {
@@ -1262,7 +1275,7 @@ export function step(
       // and becomes a corpse cell at its position (just like a
       // starving adult). Workers may then haul the body to the
       // midden via the necrophoresis pathway.
-      colony.energy[i]! -= species.larvaMetabolism;
+      colony.energy[i]! -= species.larvaMetabolism * ms;
       if (colony.energy[i]! <= 0) {
         colony.energy[i] = 0;
         colony.setState(i, STATE_DEAD);
@@ -1281,7 +1294,7 @@ export function step(
       // renderer shows a distinct cocoon shape and the ~2-week
       // pupal window is visible in the brood pile rather than
       // being hidden in the larva timer.
-      if (colony.stateTicks[i]! >= species.larvaMatureTicks) {
+      if (colony.stateTicks[i]! >= species.larvaMatureTicks / ms) {
         colony.setState(i, STATE_PUPA);
         // Pupae don't drain energy through metabolism; reset to a
         // healthy reserve so the maturation timer can run cleanly.
@@ -1298,7 +1311,7 @@ export function step(
       colony.prevX[i] = colony.posX[i]!;
       colony.prevY[i] = colony.posY[i]!;
       colony.stateTicks[i]!++;
-      if (colony.stateTicks[i]! >= species.pupaMatureTicks) {
+      if (colony.stateTicks[i]! >= species.pupaMatureTicks / ms) {
         colony.setState(i, STATE_WANDER);
         colony.energy[i] = species.maxEnergy;
         colony.heading[i] = rng.range(0, Math.PI * 2);
@@ -1335,7 +1348,7 @@ export function step(
       // but at a 6× slower cadence — she's larger and harder to
       // budge. Same chamber constraint: she only steps into 3+ wide
       // passages, never the 1-cell entrance shaft.
-      const QUEEN_MIGRATE_TICK = species.broodMigrateInterval * 6;
+      const QUEEN_MIGRATE_TICK = Math.max(1, Math.floor(species.broodMigrateInterval * 6 / ms));
       if (
         colony.stateTicks[i]! > 0 &&
         colony.stateTicks[i]! % QUEEN_MIGRATE_TICK === 0
@@ -1400,7 +1413,7 @@ export function step(
       // unreliable trophallaxis attendance alive long enough for
       // brood to mature without being trivially immortal.
       const drain = colony.energy[i]! >= 0.5 ? 0.02 : 0.05;
-      colony.energy[i]! -= species.metabolism * drain;
+      colony.energy[i]! -= species.metabolism * drain * ms;
       if (colony.energy[i]! <= 0) {
         // Queen death → colony doom. We mark her STATE_DEAD just
         // like a worker; brood production stops and the colony
@@ -1447,7 +1460,7 @@ export function step(
         colony.stateTicks[i] = Math.max(0, colony.stateTicks[i]! - 2);
       }
       if (
-        colony.stateTicks[i]! >= species.eggLayInterval &&
+        colony.stateTicks[i]! >= species.eggLayInterval / ms &&
         queenE > OOSORPTION_THRESHOLD &&
         colony.count < colony.capacity &&
         colony.count < species.maxColonySize
@@ -1532,7 +1545,7 @@ export function step(
     // monotone aging without replenishment collapsed dig throughput
     // by old age. With egg → larva → adult brood now in, workers
     // are continuously replaced and the cohort balance is stable.
-    const ageFrac = Math.min(1, colony.age[i]! / species.matureAge);
+    const ageFrac = Math.min(1, colony.age[i]! / (species.matureAge / ms));
     // Sigmoid-stepped polyethism plateaus. Real Pogonomyrmex caste
     // transitions (Mirenda & Vinson 1981; Tschinkel 2006) aren't
     // smooth ramps — workers spend ~weeks on each role, then
@@ -1577,9 +1590,9 @@ export function step(
     // RNG draw is gated on lifeFrac >= 0.7 to keep determinism for
     // tests whose workers never reach old age.
     let mortal = false;
-    const lifeFrac = colony.age[i]! / species.workerLifespan;
+    const lifeFrac = colony.age[i]! / (species.workerLifespan / ms);
     if (lifeFrac >= 0.7) {
-      const pDie = (lifeFrac - 0.7) * 16 / species.workerLifespan;
+      const pDie = (lifeFrac - 0.7) * 16 / (species.workerLifespan / ms);
       if (rng.next() < pDie) mortal = true;
     }
     if (mortal) {
@@ -1624,7 +1637,7 @@ export function step(
     // energy reaches zero. CARRY_FOOD ants don't eat their cargo
     // (they're committed to delivering); FORAGE/CARRY_GRAIN/REST
     // ants will if hungry. WANDER is the most common eater.
-    colony.energy[i]! -= species.metabolism;
+    colony.energy[i]! -= species.metabolism * ms;
     if (colony.energy[i]! <= 0) {
       colony.energy[i] = 0;
       // Drop any carried cargo before becoming a corpse — otherwise
@@ -1701,7 +1714,7 @@ export function step(
     // a cleared collision count.
     if (stateIn === STATE_REST) {
       colony.stateTicks[i]!++;
-      if (colony.stateTicks[i]! >= params.restDuration) {
+      if (colony.stateTicks[i]! >= params.restDuration / ms) {
         colony.setState(i, STATE_WANDER);
         colony.collisionCount[i] = 0;
         // Fresh random heading. Without this, the exiting ant keeps
@@ -1781,8 +1794,8 @@ export function step(
       // the standard short cadence resumes.
       const scoutMode = world.foragerReturnRate < 0.05;
       const effectiveForageDuration = scoutMode
-        ? species.forageDuration * 5
-        : species.forageDuration;
+        ? species.forageDuration * 5 / ms
+        : species.forageDuration / ms;
       if (
         colony.stateTicks[i]! >= effectiveForageDuration ||
         forageActivity < 0.05
@@ -2226,7 +2239,7 @@ export function step(
         const noCorpseHere = world.corpse[dIdx]! === 0;
         if (
           aboveSurface && groundIsIntact && cellIsAir && noCorpseHere &&
-          colony.stateTicks[i]! >= species.necroHaulMinTicks &&
+          colony.stateTicks[i]! >= species.necroHaulMinTicks / ms &&
           // Probabilistic drop while on the surface so the deposit
           // point isn't always the first valid air cell. Distributes
           // bodies across a few cells of midden rather than
@@ -2303,7 +2316,7 @@ export function step(
       else if (ix < wW - 1 && world.corpse[here + 1]! > 0) cIdx = here + 1;
       else if (iy > 0 && world.corpse[here - wW]! > 0) cIdx = here - wW;
       else if (iy < world.height - 1 && world.corpse[here + wW]! > 0) cIdx = here + wW;
-      if (cIdx >= 0 && rng.next() < species.necrophoresisProb) {
+      if (cIdx >= 0 && rng.next() < species.necrophoresisProb * ms) {
         world.corpse[cIdx] = 0;
         colony.setState(i, STATE_NECRO_CARRY);
         // Head upward to start the trip out of the nest.
@@ -2416,7 +2429,7 @@ export function step(
     // Doesn't change RNG draws — only shifts the comparison.
     const patrolPhase = (world.tick % DAY_TICKS) / DAY_TICKS;
     const inDawnPatrol = species.diurnal && patrolPhase >= 0.25 && patrolPhase <= 0.29;
-    const isPatroller = colony.age[i]! >= species.matureAge * 1.2;
+    const isPatroller = colony.age[i]! >= species.matureAge * 1.2 / ms;
     const dawnPatrolGate = inDawnPatrol && !isPatroller ? 0 : 1;
     // Forage roll fires for both below-surface AND above-surface
     // WANDER ants (FIX J). Previously the gate required iy >=
@@ -2432,7 +2445,7 @@ export function step(
     // the same heading (no need to reset to "head up" — they're
     // already up).
     if (stateIn === STATE_WANDER &&
-        rng.next() < species.forageProb * forageActivity * forageMult * smallForageMult * foodVisibleBoost * starvationBoost * inboundBoost * foundingOverride * foundingPatrollerBoost * dawnPatrolGate) {
+        rng.next() < species.forageProb * ms * forageActivity * forageMult * smallForageMult * foodVisibleBoost * starvationBoost * inboundBoost * foundingOverride * foundingPatrollerBoost * dawnPatrolGate) {
       colony.setState(i, STATE_FORAGE);
       colony.collisionCount[i] = 0;
       // Heading: if below surface, head UP to start the trip; if
