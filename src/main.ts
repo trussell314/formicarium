@@ -760,7 +760,34 @@ function main(): void {
         const ey = snap.posY[id]!.toFixed(1);
         const en = snap.energy[id]!.toFixed(2);
         const hd = ((snap.heading[id]! * 180 / Math.PI) | 0);
-        hudEls.sel.textContent = `#${id} ${stateCode} (${ex},${ey}) e=${en} ${hd}°`;
+        // Local pheromones at the selected ant's cell. Names match
+        // the legend swatches. Sorted by strength; top 3 shown.
+        const ix = (snap.posX[id]! | 0);
+        const iy = (snap.posY[id]! | 0);
+        const cellIdx = iy * snap.width + ix;
+        const pheroSamples: Array<{ name: string; v: number }> = [];
+        if (snap.pheromones && ix >= 0 && iy >= 0 && ix < snap.width && iy < snap.height) {
+          const p = snap.pheromones;
+          pheroSamples.push({ name: 'dig', v: p.dig[cellIdx] ?? 0 });
+          pheroSamples.push({ name: 'build', v: p.build[cellIdx] ?? 0 });
+          pheroSamples.push({ name: 'trail', v: p.trail[cellIdx] ?? 0 });
+          pheroSamples.push({ name: 'alarm', v: p.alarm[cellIdx] ?? 0 });
+          pheroSamples.push({ name: 'queen', v: p.queen[cellIdx] ?? 0 });
+          pheroSamples.push({ name: 'brood', v: p.brood[cellIdx] ?? 0 });
+          pheroSamples.push({ name: 'necro', v: p.necro[cellIdx] ?? 0 });
+          pheroSamples.push({ name: 'noEntry', v: p.noEntry[cellIdx] ?? 0 });
+          pheroSamples.push({ name: 'granary', v: p.granary[cellIdx] ?? 0 });
+          pheroSamples.push({ name: 'trunk', v: p.trunk[cellIdx] ?? 0 });
+          pheroSamples.sort((a, b) => b.v - a.v);
+        }
+        const pheroSummary = pheroSamples
+          .filter((s) => s.v > 0.01)
+          .slice(0, 3)
+          .map((s) => `${s.name}=${s.v.toFixed(2)}`)
+          .join(' ');
+        hudEls.sel.textContent =
+          `#${id} ${stateCode} (${ex},${ey}) e=${en} ${hd}°` +
+          (pheroSummary ? ` · ${pheroSummary}` : '');
         hudEls.selRow.classList.remove('hidden');
       } else {
         hudEls.selRow.classList.add('hidden');
