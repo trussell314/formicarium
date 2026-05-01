@@ -2977,9 +2977,23 @@ export function step(
       // would pick a lateral mound cell most of the time. The whole
       // point of the bypass is to drill DOWN through intact ground,
       // so we override.
+      // Excavator-caste downward override (test #4). Mid-age workers
+      // are the dig specialists (digMult bell curve peaks at
+      // ageFrac=0.5). Override their target preference toward DOWN
+      // when a soil cell exists directly below — this drives the
+      // gallery-shaft formation that real ant nests rely on for
+      // stacking chambers at multiple depths. Falls back to the
+      // normal heading-aligned target if no soil is directly below.
+      const isExcavator = ageFrac >= 0.4 && ageFrac <= 0.7;
+      const downSoil = ay + 1 < world.height
+        && world.cells[(ay + 1) * world.width + ax]! === CELL_SOIL
+        ? { x: ax, y: ay + 1 }
+        : null;
       const target = stranded && neighbourSoil < 2
         ? { x: ax, y: ay + 1 }
-        : adjacentSoil(world, ax, ay, h);
+        : (isExcavator && downSoil !== null)
+          ? downSoil
+          : adjacentSoil(world, ax, ay, h);
       if (target !== null) {
         // Alarm boost. Strong local alarm pheromone signals "dig
         // here, fast" — multiplies the dig roll by up to 3× when
