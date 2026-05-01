@@ -133,6 +133,102 @@ function reportCheckpoint(world: World, c: Colony, label: string,
     : 0;
   lastReturnRate.value = world.foragerReturnRate;
   lastReturnRate.t = world.tick;
+  // Tunnel / chamber architecture. Flood-fill below-surface AIR to
+  // count connected components (chambers + galleries), each one's
+  // size, and the deepest extent. Compare against published *P.
+  // barbatus* / *P. badius* nest casts:
+  //   - Tschinkel 2004 (J Insect Sci 4:21): 30-100 chambers in
+  //     mature nest, mean chamber 5-15 cm wide × 2-5 cm tall,
+  //     vertical galleries spaced ~10 cm apart, max depth 1-2 m.
+  //   - Mikheyev & Tschinkel 2004: chambers cluster near top,
+  //     thin out with depth, total volume scales with colony pop.
+  // At 3 mm/cell that's: chambers ~17×7 to 50×17 cells; galleries
+  // ~33 cells apart vertically; max depth 333-666 cells. Our
+  // worlds are 140 cells tall so depth maxes much earlier — the
+  // useful comparison is shape-of-distribution, not absolute scale.
+  const wW = world.width, wH = world.height;
+  const visited = new Uint8Array(wW * wH);
+  const queue = new Int32Array(wW * wH);
+  type ChamberStat = { cells: number; minY: number; maxY: number; minX: number; maxX: number };
+  const chambers: ChamberStat[] = [];
+  for (let y = 0; y < wH; y++) {
+    for (let x = 0; x < wW; x++) {
+      const idx = y * wW + x;
+      if (world.cells[idx]! !== CELL_AIR) continue;
+      if (y < world.naturalSurface[x]!) continue;
+      if (visited[idx]) continue;
+      let head = 0, tail = 0;
+      queue[tail++] = idx;
+      visited[idx] = 1;
+      let cells = 0, minY = y, maxY = y, minX = x, maxX = x;
+      while (head < tail) {
+        const p = queue[head++]!;
+        const py = (p / wW) | 0;
+        const px = p - py * wW;
+        cells++;
+        if (py < minY) minY = py;
+        if (py > maxY) maxY = py;
+        if (px < minX) minX = px;
+        if (px > maxX) maxX = px;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+          const nx = px + dx, ny = py + dy;
+          if (nx < 0 || ny < 0 || nx >= wW || ny >= wH) continue;
+          const nIdx = ny * wW + nx;
+          if (visited[nIdx]) continue;
+          if (world.cells[nIdx]! !== CELL_AIR) continue;
+          if (ny < world.naturalSurface[nx]!) continue;
+          visited[nIdx] = 1;
+          queue[tail++] = nIdx;
+        }
+      }
+      chambers.push({ cells, minY, maxY, minX, maxX });
+    }
+  }
+  // Classify components into shafts (tall and narrow) vs chambers
+  // (broad). A shaft has aspectRatio ≥ 2 (height ≥ 2× width) and
+  // width ≤ 2 cells; everything else is a chamber.
+  let shaftCount = 0, shaftCellsTotal = 0, shaftLenMax = 0;
+  let chamberCount = 0, chamberCellsTotal = 0, chamberCellsMax = 0;
+  let chamberWidthMax = 0, chamberHeightMax = 0;
+  // 5-bin depth distribution of chamber cells.
+  const archDepthBins = [0, 0, 0, 0, 0];
+  for (const ch of chambers) {
+    const w = ch.maxX - ch.minX + 1;
+    const h = ch.maxY - ch.minY + 1;
+    const isShaft = w <= 2 && h >= w * 2;
+    if (isShaft) {
+      shaftCount++;
+      shaftCellsTotal += ch.cells;
+      if (h > shaftLenMax) shaftLenMax = h;
+    } else {
+      chamberCount++;
+      chamberCellsTotal += ch.cells;
+      if (ch.cells > chamberCellsMax) chamberCellsMax = ch.cells;
+      if (w > chamberWidthMax) chamberWidthMax = w;
+      if (h > chamberHeightMax) chamberHeightMax = h;
+      // Bin chamber cells by depth fraction of maxDepth.
+      const denom = Math.max(1, maxDepth);
+      for (let py = ch.minY; py <= ch.maxY; py++) {
+        const surf = world.naturalSurface[Math.floor((ch.minX + ch.maxX) / 2)]!;
+        const d = py - surf;
+        if (d < 0) continue;
+        const bin = Math.min(4, Math.floor((d / denom) * 5));
+        archDepthBins[bin]! += w; // approximate: each row of bbox
+      }
+    }
+  }
+  // Real-nest comparison flags — printed alongside the stats so
+  // anomalies stand out:
+  //   - chamberWidth in cells × 3mm = mm → cm. Real *P. barbatus*
+  //     chamber widths are 50-150 mm = 17-50 cells.
+  //   - shaft length: real galleries in young nests ~30-50 cm
+  //     = 100-167 cells; mature ~1-2 m, capped by world.height.
+  //   - chamber-to-shaft ratio: real mature 30-100 chambers per
+  //     ~5-10 vertical galleries = 3-20× more chambers than
+  //     shafts. Young nests start with 1 shaft + 1 chamber.
+  const chamberWidthCm = (chamberWidthMax * 0.3).toFixed(1);
+  const shaftLenCm = (shaftLenMax * 0.3).toFixed(1);
+
   log(
     `\n${label} t=${world.tick.toLocaleString()}\n` +
     `  pop:    Q${queens} ${eggs}E ${larvae}L ${pupae}P workers=${alive} dead=${dead} (born=${world.totalBorn} died=${world.totalDied})\n` +
@@ -140,11 +236,83 @@ function reportCheckpoint(world: World, c: Colony, label: string,
     `  energy: queen=${queenEnergy.toFixed(2)} workers=${meanWorkerE.toFixed(2)} larvae=${meanLarvaE.toFixed(2)} ` +
       `[C=${(cN > 0 ? cE / cN : 0).toFixed(2)} F=${(fN > 0 ? fE / fN : 0).toFixed(2)} Cf=${(cfN > 0 ? cfE / cfN : 0).toFixed(2)} W=${(wN > 0 ? wE / wN : 0).toFixed(2)}]\n` +
     `  nest:   dug=${dug} grains=${grains} food=${foodCount} corpses=${corpses} depth=${maxDepth}\n` +
+    `  arch:   shafts=${shaftCount} (max ${shaftLenMax}c=${shaftLenCm}cm) chambers=${chamberCount} ` +
+      `(max ${chamberCellsMax}c, ${chamberWidthMax}×${chamberHeightMax} = ${chamberWidthCm}×${(chamberHeightMax * 0.3).toFixed(1)}cm)\n` +
+    `  arch-ref: real *P. barbatus* — chambers 17-50c wide, galleries 100-700c long, ratio chambers:shafts ≈ 3-20×\n` +
+    `  arch-depth (d0-d4): ${archDepthBins.join('|')}\n` +
     `  depth-hist (above|d1|d2|d3|d4|d5): ${depthBins.join('|')}\n` +
     `  food-near-worker: ${foodWithWorkerNearby}/${foodCount}\n` +
     `  stuck-CARRY (>=2000t): ${stuckCarry}/${carry}\n` +
     `  forage: returnRate=${world.foragerReturnRate.toFixed(3)} (~${returnsThisCp.toFixed(1)} new returns since last)`,
   );
+}
+
+/** Log a behaviour snapshot for ~10 spatially-distributed ants.
+ *  Useful on short-slice runs to sanity-check that individuals are
+ *  doing something sensible. Picks the queen, then the youngest /
+ *  oldest worker, then 8 more spread by x-coordinate. */
+function logAntWatch(world: World, c: Colony): void {
+  const sample: number[] = [];
+  // Always include the queen.
+  for (let i = 0; i < c.count; i++) {
+    if (c.state[i]! === STATE_QUEEN) { sample.push(i); break; }
+  }
+  // Youngest + oldest live worker.
+  let youngest = -1, oldest = -1, youngestAge = Infinity, oldestAge = -Infinity;
+  for (let i = 0; i < c.count; i++) {
+    const s = c.state[i]!;
+    if (s === STATE_DEAD || s === STATE_EGG || s === STATE_LARVA || s === STATE_PUPA || s === STATE_QUEEN) continue;
+    const a = c.age[i]!;
+    if (a < youngestAge) { youngestAge = a; youngest = i; }
+    if (a > oldestAge) { oldestAge = a; oldest = i; }
+  }
+  if (youngest >= 0 && !sample.includes(youngest)) sample.push(youngest);
+  if (oldest >= 0 && !sample.includes(oldest)) sample.push(oldest);
+  // Fill to ~10 by spatial spread on x.
+  const workers: number[] = [];
+  for (let i = 0; i < c.count; i++) {
+    const s = c.state[i]!;
+    if (s === STATE_DEAD || s === STATE_EGG || s === STATE_LARVA || s === STATE_PUPA || s === STATE_QUEEN) continue;
+    if (!sample.includes(i)) workers.push(i);
+  }
+  workers.sort((a, b) => c.posX[a]! - c.posX[b]!);
+  const want = Math.min(10 - sample.length, workers.length);
+  for (let k = 0; k < want; k++) {
+    const idx = Math.floor((k + 0.5) * workers.length / want);
+    sample.push(workers[idx]!);
+  }
+  const stateName = (s: number): string => {
+    switch (s) {
+      case STATE_QUEEN: return 'QUEEN';
+      case STATE_WANDER: return 'WAND';
+      case STATE_CARRY: return 'CARRY';
+      case STATE_REST: return 'REST';
+      case STATE_FORAGE: return 'FORAGE';
+      case STATE_CARRY_FOOD: return 'CF';
+      case STATE_NECRO_CARRY: return 'NECRO';
+      case STATE_LARVA: return 'LARVA';
+      case STATE_PUPA: return 'PUPA';
+      case STATE_EGG: return 'EGG';
+      case STATE_DEAD: return 'DEAD';
+      default: return `?${s}`;
+    }
+  };
+  log(`  ant-watch (n=${sample.length}, sampled by spatial spread):`);
+  for (const i of sample) {
+    const px = c.posX[i]!.toFixed(1).padStart(5);
+    const py = c.posY[i]!.toFixed(1).padStart(5);
+    const ix = c.posX[i]! | 0;
+    const iy = c.posY[i]! | 0;
+    const surf = ix >= 0 && ix < world.width ? world.naturalSurface[ix]! : 0;
+    const depth = iy - surf;
+    const aboveSurface = iy < surf;
+    const cellAt = ix >= 0 && ix < world.width && iy >= 0 && iy < world.height
+      ? world.cells[iy * world.width + ix]! : -1;
+    const cellDesc = cellAt === CELL_AIR ? 'AIR' : cellAt === CELL_SOIL ? 'SOIL' : cellAt === CELL_GRAIN ? 'GRAIN' : '?';
+    const e = c.energy[i]!.toFixed(2);
+    const a = c.age[i]!;
+    log(`    #${String(i).padStart(3)} ${stateName(c.state[i]!).padEnd(6)} @(${px},${py}) ${aboveSurface ? 'above' : `d${depth}`} ${cellDesc} age=${a} E=${e}`);
+  }
 }
 
 describe('claustral monitoring (post-IJ)', () => {
@@ -157,6 +325,11 @@ describe('claustral monitoring (post-IJ)', () => {
     const lastState = new Uint8Array(HARVESTER.maxColonySize);
     const lastReturnRate = { value: 0, t: 0 };
     reportCheckpoint(world, colony, 't=0       ', carryStartTicks, lastReturnRate);
+    // Sample-ant watch is enabled by default for short-slice runs
+    // (≤ 6 checkpoints) so individual behaviour can be sanity-
+    // checked. Skipped on long runs to keep the log compact.
+    const watchAnts = NUM_CHECKPOINTS <= 6 || process.env.MONITOR_WATCH === '1';
+    if (watchAnts) logAntWatch(world, colony);
     for (let cp = 1; cp <= NUM_CHECKPOINTS; cp++) {
       const target = cp * TICKS_PER_CHECKPOINT;
       while (world.tick < target) {
@@ -170,6 +343,7 @@ describe('claustral monitoring (post-IJ)', () => {
         }
       }
       reportCheckpoint(world, colony, `5min×${cp.toString().padStart(2)}`, carryStartTicks, lastReturnRate);
+      if (watchAnts) logAntWatch(world, colony);
     }
     // ASCII nest dump — visualise the cross-section so chamber
     // formation is directly inspectable. Crops to the dug region
