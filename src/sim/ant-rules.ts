@@ -3026,7 +3026,30 @@ export function step(
             : avgEnergy <= 0.2
               ? 0.1
               : 0.1 + 0.9 * ((avgEnergy - 0.2) / 0.2);
-        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation * hungerDigMul) {
+        // Chamber satiation (test #3). When the worker is inside a
+        // large existing AIR cavity, reduce her dig probability so
+        // she walks past and digs elsewhere — preventing the colony
+        // from over-expanding the founding chamber. Counted as AIR
+        // cells in a 3×3 Moore neighbourhood (8 max, excluding self):
+        //   0-3 air nbrs = tunnel/wall (full dig rate)
+        //   4-6 air nbrs = chamber edge (gentle ramp down)
+        //   7-8 air nbrs = chamber interior (10% dig rate)
+        // Entombed/stranded workers exempt — they need to dig out.
+        let airNbrs = 0;
+        for (let dy3 = -1; dy3 <= 1; dy3++) {
+          for (let dx3 = -1; dx3 <= 1; dx3++) {
+            if (dx3 === 0 && dy3 === 0) continue;
+            const nx3 = ax + dx3;
+            const ny3 = ay + dy3;
+            if (nx3 < 0 || ny3 < 0 || nx3 >= world.width || ny3 >= world.height) continue;
+            if (world.cells[ny3 * world.width + nx3]! === CELL_AIR) airNbrs++;
+          }
+        }
+        const satMul = (entombed || stranded) ? 1.0
+          : airNbrs <= 3 ? 1.0
+          : airNbrs >= 7 ? 0.10
+          : 1.0 - (airNbrs - 3) * 0.225;
+        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation * hungerDigMul * satMul) {
           if (digCell(world, target.x, target.y, rng)) {
             // Track dig direction relative to the digger's cell, so
             // the diag can surface a vertical-vs-lateral histogram.
