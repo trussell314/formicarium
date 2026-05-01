@@ -230,8 +230,8 @@ function buildSnapshot(includePheromones: boolean): RenderSnapshot {
   let alive = 0, dead = 0, eggs = 0, larvae = 0, pupae = 0, queens = 0;
   let wander = 0, carry = 0, rest = 0, forage = 0, carryFood = 0, necroCarry = 0;
   let workerEnergySum = 0, workerEnergyN = 0;
-  const ageBuckets = new Uint16Array(8);
-  const energyBuckets = new Uint16Array(8);
+  const ageBuckets = new Uint16Array(12);
+  const energyBuckets = new Uint16Array(12);
   const ageCap = species.matureAge * 1.5;
   for (let i = 0; i < colony.count; i++) {
     const s = colony.state[i];
@@ -248,9 +248,9 @@ function buildSnapshot(includePheromones: boolean): RenderSnapshot {
     else if (s === 4 /* CARRY_FOOD */) carryFood++;
     else if (s === 8 /* NECRO_CARRY */) necroCarry++;
     // Histograms (alive workers only — eggs/larvae/queen excluded).
-    const ageBucket = Math.min(7, Math.floor((colony.age[i]! / ageCap) * 8));
+    const ageBucket = Math.min(11, Math.floor((colony.age[i]! / ageCap) * 12));
     ageBuckets[ageBucket]!++;
-    const energyBucket = Math.min(7, Math.max(0, Math.floor((colony.energy[i]! / species.maxEnergy) * 8)));
+    const energyBucket = Math.min(11, Math.max(0, Math.floor((colony.energy[i]! / species.maxEnergy) * 12)));
     energyBuckets[energyBucket]!++;
     workerEnergySum += colony.energy[i]!;
     workerEnergyN++;

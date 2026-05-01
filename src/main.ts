@@ -218,15 +218,14 @@ function main(): void {
     popCtx.fillText(`${last.alive} (max ${popMax})`, cw - 3, 1);
     popCtx.textAlign = 'left';
   }
-  // Unicode block-character bar chart from a small bucket array.
-  // Empty buckets render as `·` (U+00B7 middle dot) so all 8 bar
-  // positions remain visible at fixed width even when the histogram
-  // is mostly zero. The earlier NBSP zero-marker collapsed visually
-  // — empty bins looked like missing bars and the histogram's
-  // perceived width jumped as the population shifted between bins.
-  // Magnitudes scaled to the in-frame max so a flat-zero histogram
-  // still has stable width.
-  const BLOCKS = '·▁▂▃▄▅▆▇█';
+  // Unicode block-character bar chart. All 8 levels (▁ minimum
+  // through █ full) are in the U+2580 Block Elements range —
+  // guaranteed same width in any monospace font. Empty buckets
+  // map to ▁ (a small baseline, not a tall pipe) so the
+  // histogram has a continuous visible footprint without empty
+  // positions sticking up. Magnitudes scaled to the in-frame max
+  // so a flat-zero histogram still has stable width.
+  const BLOCKS = '▁▂▃▄▅▆▇█';
   const renderBars = (buckets: ArrayLike<number>): string => {
     let max = 1;
     for (let i = 0; i < buckets.length; i++) {
@@ -236,7 +235,7 @@ function main(): void {
     let out = '';
     for (let i = 0; i < buckets.length; i++) {
       const t = buckets[i]! / max;
-      out += BLOCKS[Math.min(8, Math.max(0, Math.round(t * 8)))];
+      out += BLOCKS[Math.min(7, Math.max(0, Math.round(t * 7)))];
     }
     return out;
   };
