@@ -239,17 +239,19 @@ function adjacentSoil(world: World, ix: number, iy: number, h: number): { x: num
   // shaped (Tschinkel 2004 — height/width ≈ 0.2-0.4); ours grow
   // squarish at scale because nurse-strong belowGeotaxis pulls
   // headings down and the dig-target selection picks soil aligned
-  // with heading. When the ant is INSIDE a wide air pocket (cells
-  // directly above AND below are AIR), force the dig-target
-  // selection to prefer LATERAL soil — workers extending a chamber
-  // should widen it, not dig the floor down. Two-pass: try lateral
-  // soils first; fall back to vertical only if no lateral soil
-  // exists. Heading itself is unchanged so geotaxis tests stay
-  // valid.
-  const aboveAir = iy > 0 && world.cells[(iy - 1) * w + ix]! === CELL_AIR;
-  const belowAir = iy < world.height - 1 && world.cells[(iy + 1) * w + ix]! === CELL_AIR;
-  const inChamber = aboveAir && belowAir;
-  if (inChamber) {
+  // with heading. When the ant is in a WIDE row (both lateral
+  // neighbours are AIR — i.e. she's somewhere inside a 3+ cell
+  // chamber row, including its floor and ceiling), force the dig
+  // target to prefer LATERAL soil. Two-pass: try lateral soils
+  // first; fall back to vertical only if no lateral soil exists.
+  // Heading itself is unchanged so geotaxis tests stay valid.
+  // The earlier "above AND below are AIR" condition only fired in
+  // chamber INTERIOR cells, which most workers don't occupy
+  // because geotaxis pulls them to the chamber floor.
+  const leftAir = ix > 0 && world.cells[iy * w + (ix - 1)]! === CELL_AIR;
+  const rightAir = ix < world.width - 1 && world.cells[iy * w + (ix + 1)]! === CELL_AIR;
+  const inWideRow = leftAir && rightAir;
+  if (inWideRow) {
     let bestX = -1, bestY = -1, bestDot = -Infinity;
     for (const [dx, dy] of candidates) {
       if (dy !== 0) continue;
