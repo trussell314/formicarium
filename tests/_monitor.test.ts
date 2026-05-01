@@ -133,99 +133,118 @@ function reportCheckpoint(world: World, c: Colony, label: string,
     : 0;
   lastReturnRate.value = world.foragerReturnRate;
   lastReturnRate.t = world.tick;
-  // Tunnel / chamber architecture. Flood-fill below-surface AIR to
-  // count connected components (chambers + galleries), each one's
-  // size, and the deepest extent. Compare against published *P.
-  // barbatus* / *P. badius* nest casts:
-  //   - Tschinkel 2004 (J Insect Sci 4:21): 30-100 chambers in
-  //     mature nest, mean chamber 5-15 cm wide × 2-5 cm tall,
-  //     vertical galleries spaced ~10 cm apart, max depth 1-2 m.
-  //   - Mikheyev & Tschinkel 2004: chambers cluster near top,
-  //     thin out with depth, total volume scales with colony pop.
-  // At 3 mm/cell that's: chambers ~17×7 to 50×17 cells; galleries
-  // ~33 cells apart vertically; max depth 333-666 cells. Our
-  // worlds are 140 cells tall so depth maxes much earlier — the
-  // useful comparison is shape-of-distribution, not absolute scale.
+  // Tunnel / chamber architecture. Real ant nests have a clear
+  // shaft-and-chamber topology: narrow vertical galleries connect
+  // pancake-shaped chambers stacked at intervals (Tschinkel 2004
+  // J Insect Sci 4:21; Mikheyev & Tschinkel 2004). The earlier
+  // analysis flood-filled every below-surface AIR cell as one
+  // component, so a chamber with a shaft attached read as a single
+  // tall L-shape — chambers always looked impossibly tall.
+  //
+  // The fix: classify each AIR cell first by its row-width (the
+  // span of contiguous AIR cells in its row). Cells in rows of
+  // width ≤ 2 are SHAFT cells; cells in rows of width ≥ 3 are
+  // CHAMBER cells. Then flood-fill each set separately. A shaft
+  // and a chamber sharing a boundary become two distinct
+  // components even though they're physically connected.
+  //
+  // Real-nest references (3 mm/cell scale):
+  //   chambers 17-50 cells wide × 7-17 cells tall (5-15 × 2-5 cm)
+  //   galleries 100-700 cells long
+  //   chambers : shafts ratio in mature nests 3-20×
   const wW = world.width, wH = world.height;
+  const SHAFT_WIDTH_MAX = 2;
+  // Per-cell classification: 0 = not air-below-surface, 1 = shaft,
+  // 2 = chamber.
+  const cellKind = new Uint8Array(wW * wH);
+  for (let y = 0; y < wH; y++) {
+    let runStart = -1;
+    for (let x = 0; x <= wW; x++) {
+      const idx = y * wW + x;
+      const isAir = x < wW
+        && world.cells[idx]! === CELL_AIR
+        && y >= world.naturalSurface[x]!;
+      if (isAir && runStart < 0) runStart = x;
+      if ((!isAir || x === wW) && runStart >= 0) {
+        const runEnd = x - 1;
+        const runWidth = runEnd - runStart + 1;
+        const kind = runWidth <= SHAFT_WIDTH_MAX ? 1 : 2;
+        for (let cx = runStart; cx <= runEnd; cx++) {
+          cellKind[y * wW + cx] = kind;
+        }
+        runStart = -1;
+      }
+    }
+  }
+  // Flood-fill each kind separately.
   const visited = new Uint8Array(wW * wH);
   const queue = new Int32Array(wW * wH);
-  type ChamberStat = { cells: number; minY: number; maxY: number; minX: number; maxX: number };
-  const chambers: ChamberStat[] = [];
-  for (let y = 0; y < wH; y++) {
-    for (let x = 0; x < wW; x++) {
-      const idx = y * wW + x;
-      if (world.cells[idx]! !== CELL_AIR) continue;
-      if (y < world.naturalSurface[x]!) continue;
-      if (visited[idx]) continue;
-      let head = 0, tail = 0;
-      queue[tail++] = idx;
-      visited[idx] = 1;
-      let cells = 0, minY = y, maxY = y, minX = x, maxX = x;
-      while (head < tail) {
-        const p = queue[head++]!;
-        const py = (p / wW) | 0;
-        const px = p - py * wW;
-        cells++;
-        if (py < minY) minY = py;
-        if (py > maxY) maxY = py;
-        if (px < minX) minX = px;
-        if (px > maxX) maxX = px;
-        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-          const nx = px + dx, ny = py + dy;
-          if (nx < 0 || ny < 0 || nx >= wW || ny >= wH) continue;
-          const nIdx = ny * wW + nx;
-          if (visited[nIdx]) continue;
-          if (world.cells[nIdx]! !== CELL_AIR) continue;
-          if (ny < world.naturalSurface[nx]!) continue;
-          visited[nIdx] = 1;
-          queue[tail++] = nIdx;
+  type Component = { cells: number; minY: number; maxY: number; minX: number; maxX: number };
+  const shafts: Component[] = [];
+  const chambers: Component[] = [];
+  for (let kind = 1; kind <= 2; kind++) {
+    for (let y = 0; y < wH; y++) {
+      for (let x = 0; x < wW; x++) {
+        const idx = y * wW + x;
+        if (visited[idx] || cellKind[idx]! !== kind) continue;
+        let head = 0, tail = 0;
+        queue[tail++] = idx;
+        visited[idx] = 1;
+        let cells = 0, minY = y, maxY = y, minX = x, maxX = x;
+        while (head < tail) {
+          const p = queue[head++]!;
+          const py = (p / wW) | 0;
+          const px = p - py * wW;
+          cells++;
+          if (py < minY) minY = py;
+          if (py > maxY) maxY = py;
+          if (px < minX) minX = px;
+          if (px > maxX) maxX = px;
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+            const nx = px + dx, ny = py + dy;
+            if (nx < 0 || ny < 0 || nx >= wW || ny >= wH) continue;
+            const nIdx = ny * wW + nx;
+            if (visited[nIdx] || cellKind[nIdx]! !== kind) continue;
+            visited[nIdx] = 1;
+            queue[tail++] = nIdx;
+          }
         }
+        const comp: Component = { cells, minY, maxY, minX, maxX };
+        if (kind === 1) shafts.push(comp);
+        else chambers.push(comp);
       }
-      chambers.push({ cells, minY, maxY, minX, maxX });
     }
   }
-  // Classify components into shafts (tall and narrow) vs chambers
-  // (broad). A shaft has aspectRatio ≥ 2 (height ≥ 2× width) and
-  // width ≤ 2 cells; everything else is a chamber.
-  let shaftCount = 0, shaftCellsTotal = 0, shaftLenMax = 0;
-  let chamberCount = 0, chamberCellsTotal = 0, chamberCellsMax = 0;
-  let chamberWidthMax = 0, chamberHeightMax = 0;
+  // Stats.
+  let shaftLenMax = 0;
+  for (const s of shafts) {
+    const len = s.maxY - s.minY + 1;
+    if (len > shaftLenMax) shaftLenMax = len;
+  }
+  let chamberCellsMax = 0, chamberWidthMax = 0, chamberHeightMax = 0;
+  // Mean aspect ratio (height / width) — real chambers are flat
+  // (h/w ≈ 0.2-0.4); a tall sim chamber would show h/w > 1.
+  let aspectSum = 0, aspectN = 0;
   // 5-bin depth distribution of chamber cells.
   const archDepthBins = [0, 0, 0, 0, 0];
+  const denom = Math.max(1, maxDepth);
   for (const ch of chambers) {
-    const w = ch.maxX - ch.minX + 1;
-    const h = ch.maxY - ch.minY + 1;
-    const isShaft = w <= 2 && h >= w * 2;
-    if (isShaft) {
-      shaftCount++;
-      shaftCellsTotal += ch.cells;
-      if (h > shaftLenMax) shaftLenMax = h;
-    } else {
-      chamberCount++;
-      chamberCellsTotal += ch.cells;
-      if (ch.cells > chamberCellsMax) chamberCellsMax = ch.cells;
-      if (w > chamberWidthMax) chamberWidthMax = w;
-      if (h > chamberHeightMax) chamberHeightMax = h;
-      // Bin chamber cells by depth fraction of maxDepth.
-      const denom = Math.max(1, maxDepth);
-      for (let py = ch.minY; py <= ch.maxY; py++) {
-        const surf = world.naturalSurface[Math.floor((ch.minX + ch.maxX) / 2)]!;
-        const d = py - surf;
-        if (d < 0) continue;
-        const bin = Math.min(4, Math.floor((d / denom) * 5));
-        archDepthBins[bin]! += w; // approximate: each row of bbox
-      }
+    const cw = ch.maxX - ch.minX + 1;
+    const chh = ch.maxY - ch.minY + 1;
+    if (ch.cells > chamberCellsMax) chamberCellsMax = ch.cells;
+    if (cw > chamberWidthMax) chamberWidthMax = cw;
+    if (chh > chamberHeightMax) chamberHeightMax = chh;
+    aspectSum += chh / Math.max(1, cw);
+    aspectN++;
+    for (let py = ch.minY; py <= ch.maxY; py++) {
+      const surf = world.naturalSurface[Math.floor((ch.minX + ch.maxX) / 2)]!;
+      const d = py - surf;
+      if (d < 0) continue;
+      const bin = Math.min(4, Math.floor((d / denom) * 5));
+      archDepthBins[bin]! += cw;
     }
   }
-  // Real-nest comparison flags — printed alongside the stats so
-  // anomalies stand out:
-  //   - chamberWidth in cells × 3mm = mm → cm. Real *P. barbatus*
-  //     chamber widths are 50-150 mm = 17-50 cells.
-  //   - shaft length: real galleries in young nests ~30-50 cm
-  //     = 100-167 cells; mature ~1-2 m, capped by world.height.
-  //   - chamber-to-shaft ratio: real mature 30-100 chambers per
-  //     ~5-10 vertical galleries = 3-20× more chambers than
-  //     shafts. Young nests start with 1 shaft + 1 chamber.
+  const meanAspect = aspectN > 0 ? aspectSum / aspectN : 0;
   const chamberWidthCm = (chamberWidthMax * 0.3).toFixed(1);
   const shaftLenCm = (shaftLenMax * 0.3).toFixed(1);
 
@@ -236,9 +255,10 @@ function reportCheckpoint(world: World, c: Colony, label: string,
     `  energy: queen=${queenEnergy.toFixed(2)} workers=${meanWorkerE.toFixed(2)} larvae=${meanLarvaE.toFixed(2)} ` +
       `[C=${(cN > 0 ? cE / cN : 0).toFixed(2)} F=${(fN > 0 ? fE / fN : 0).toFixed(2)} Cf=${(cfN > 0 ? cfE / cfN : 0).toFixed(2)} W=${(wN > 0 ? wE / wN : 0).toFixed(2)}]\n` +
     `  nest:   dug=${dug} grains=${grains} food=${foodCount} corpses=${corpses} depth=${maxDepth}\n` +
-    `  arch:   shafts=${shaftCount} (max ${shaftLenMax}c=${shaftLenCm}cm) chambers=${chamberCount} ` +
-      `(max ${chamberCellsMax}c, ${chamberWidthMax}×${chamberHeightMax} = ${chamberWidthCm}×${(chamberHeightMax * 0.3).toFixed(1)}cm)\n` +
-    `  arch-ref: real *P. barbatus* — chambers 17-50c wide, galleries 100-700c long, ratio chambers:shafts ≈ 3-20×\n` +
+    `  arch:   shafts=${shafts.length} (max ${shaftLenMax}c=${shaftLenCm}cm) chambers=${chambers.length} ` +
+      `(max ${chamberCellsMax}c, ${chamberWidthMax}×${chamberHeightMax} = ${chamberWidthCm}×${(chamberHeightMax * 0.3).toFixed(1)}cm) ` +
+      `mean h/w=${meanAspect.toFixed(2)}\n` +
+    `  arch-ref: real *P. barbatus* — chambers 17-50c wide × 7-17c tall (h/w ≈ 0.2-0.4), galleries 100-700c long, ratio chambers:shafts 3-20×\n` +
     `  arch-depth (d0-d4): ${archDepthBins.join('|')}\n` +
     `  depth-hist (above|d1|d2|d3|d4|d5): ${depthBins.join('|')}\n` +
     `  food-near-worker: ${foodWithWorkerNearby}/${foodCount}\n` +
