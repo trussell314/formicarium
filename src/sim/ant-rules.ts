@@ -3026,7 +3026,21 @@ export function step(
             : avgEnergy <= 0.2
               ? 0.1
               : 0.1 + 0.9 * ((avgEnergy - 0.2) / 0.2);
-        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation * hungerDigMul) {
+        // Depth-stratified excavation (test #2). Each worker has a
+        // personal target-depth band derived from her age fraction +
+        // small per-ant variation. Workers DIG more readily when at
+        // their target depth, less when far. Doesn't change heading
+        // (preserves thigmotaxis wall-following); only modulates the
+        // dig roll. Floor at 0.30× so far-from-target workers still
+        // dig occasionally (e.g. when pinned in a wall corner).
+        // Disabled for entombed/stranded workers who NEED to dig
+        // their way out regardless of caste preference.
+        const personalDepthCells = 5 + Math.min(1, ageFrac) * 30 + (i % 7);
+        const currentDepth = ay - world.naturalSurface[ax]!;
+        const depthDelta = Math.abs(currentDepth - personalDepthCells);
+        const depthAffinity = (entombed || stranded) ? 1.0
+          : Math.max(0.30, 1.0 - depthDelta / 20.0);
+        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation * hungerDigMul * depthAffinity) {
           if (digCell(world, target.x, target.y, rng)) {
             // Track dig direction relative to the digger's cell, so
             // the diag can surface a vertical-vs-lateral histogram.
