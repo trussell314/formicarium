@@ -1472,6 +1472,19 @@ export function step(
     // Per-ant aging.
     colony.age[i]!++;
 
+    // Passive nest-interior marker. Below-surface ants leave a
+    // small trunkField deposit on every cell they walk through
+    // (cuticular hydrocarbon footprint — Hangartner 1969 on
+    // *Monomorium pharaonis*; Hölldobler & Wilson 1990 ch. 7 on
+    // surface-marking pheromones distinct from trail pheromones).
+    // Builds up the colony's "occupied volume" signature over
+    // time; the proximity dig gate uses this signal to keep new
+    // excavation focused on the nest core. Above-surface ants
+    // don't deposit (the surface trunk-trail is forager-only).
+    if (trunkField && iy >= world.naturalSurface[ix]! && ix >= 0 && ix < world.width) {
+      trunkField.deposit(ix, iy, 0.005);
+    }
+
     // Caste-based polyethism (age polyethism). Mersch, Crespi &
     // Keller 2013 tracked individual Camponotus fellah workers
     // through nurse → cleaner → forager phases over weeks; Beshers

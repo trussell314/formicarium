@@ -111,7 +111,14 @@ function buildBundle(s: SaveSettings, restoreBlob: string | null): SimBundle {
   // entrance becomes invisible to surface workers and the colony
   // can't recover. Other fields (dig/build/trail/alarm/necro) are
   // truly volatile and stay AIR-only.
-  const queenField = new Pheromone(s.width, s.height, 0.10, 0.999, true);
+  // Queen pheromone: high diffusion + slow evaporation give a
+  // characteristic decay length of ~45 cells (13 cm), in the
+  // ballpark of real CHC detection range (30-100 cm). The
+  // earlier (D=0.10, evap=0.999) collapsed signal at ~10 cells
+  // (3 cm) — workers far from the queen never sensed her at all.
+  // 4.6-hr biological half-life matches real cuticular-hydrocarbon
+  // persistence in still chamber air.
+  const queenField = new Pheromone(s.width, s.height, 1.00, 0.9995, true);
   const broodField = new Pheromone(s.width, s.height, 0.20, 0.999, true);
   const necroField = new Pheromone(s.width, s.height, 0.30, 0.99);
   const noEntryField = new Pheromone(s.width, s.height, 0.05, 0.995);
