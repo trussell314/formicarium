@@ -239,19 +239,25 @@ function adjacentSoil(world: World, ix: number, iy: number, h: number): { x: num
   // shaped (Tschinkel 2004 — height/width ≈ 0.2-0.4); ours grow
   // squarish at scale because nurse-strong belowGeotaxis pulls
   // headings down and the dig-target selection picks soil aligned
-  // with heading. When the ant is in a WIDE row (both lateral
-  // neighbours are AIR — i.e. she's somewhere inside a 3+ cell
-  // chamber row, including its floor and ceiling), force the dig
-  // target to prefer LATERAL soil. Two-pass: try lateral soils
-  // first; fall back to vertical only if no lateral soil exists.
+  // with heading. When the ant has any lateral AIR neighbour (i.e.
+  // she's at the boundary of, or inside, an AIR space wider than
+  // a 1-cell shaft), force the dig target to prefer LATERAL soil.
+  // Two-pass: try lateral soils first; fall back to vertical only
+  // if no lateral soil exists.
+  //
+  // Trigger: leftAir || rightAir. The OR (not AND) is what makes
+  // the rule fire at chamber WALLS: a worker at the wall corner
+  // has the chamber interior on one side (AIR) and the soil wall
+  // on the other (SOIL); only one lateral is AIR. With the AND
+  // trigger she fell through to vertical and dug the floor; with
+  // OR she correctly digs the wall and widens the chamber.
   // Heading itself is unchanged so geotaxis tests stay valid.
-  // The earlier "above AND below are AIR" condition only fired in
-  // chamber INTERIOR cells, which most workers don't occupy
-  // because geotaxis pulls them to the chamber floor.
+  // 1-cell-wide tunnels (both lateral SOIL) leave the rule
+  // dormant, so vertical shaft digging is unaffected.
   const leftAir = ix > 0 && world.cells[iy * w + (ix - 1)]! === CELL_AIR;
   const rightAir = ix < world.width - 1 && world.cells[iy * w + (ix + 1)]! === CELL_AIR;
-  const inWideRow = leftAir && rightAir;
-  if (inWideRow) {
+  const adjacentToAir = leftAir || rightAir;
+  if (adjacentToAir) {
     let bestX = -1, bestY = -1, bestDot = -Infinity;
     for (const [dx, dy] of candidates) {
       if (dy !== 0) continue;
