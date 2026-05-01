@@ -43,7 +43,7 @@ function readSettings(): Settings {
   return {
     seed: num('seed', (Date.now() & 0xffffffff) >>> 0),
     width: Math.max(40, num('width', 280) | 0),
-    height: Math.max(30, num('height', 140) | 0),
+    height: Math.max(30, num('height', 400) | 0),
     ants: Math.max(0, num('ants', 0) | 0),
     speedMul: Math.max(0.125, num('speed', 8)),
     screensaver: p.get('screensaver') === '1',

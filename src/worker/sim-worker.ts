@@ -72,7 +72,14 @@ function buildBundle(s: SaveSettings, restoreBlob: string | null): SimBundle {
   // the rain on. (Zero would disable food entirely — used by tests
   // that need a no-food world.)
   world.foodCap = 1;
-  const surfaceRow = Math.floor(s.height * 0.30);
+  // Surface row at 10% — soil depth = 90% of world height. At the
+  // 280×400 default that's 360 cells of soil (≈ 108 cm), enough
+  // depth for stacked-chamber morphology to emerge over a session
+  // (Tschinkel 2004 measured 1-2 m for established P. barbatus
+  // nests). The earlier 30% surface was a holdover from the
+  // 280×140 world where a deeper soil/sky ratio was needed to fit
+  // any architecture at all.
+  const surfaceRow = Math.floor(s.height * 0.10);
   const halfW = Math.max(6, Math.floor(s.width * 0.06));
   const depth = Math.max(4, Math.floor(s.height * 0.05));
   world.generate(rng, surfaceRow, halfW, depth);
