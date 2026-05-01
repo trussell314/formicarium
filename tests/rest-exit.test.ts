@@ -12,7 +12,7 @@ import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { Pheromone } from '../src/sim/pheromone';
 import { RNG } from '../src/sim/rng';
 import { type AntSpecies, HARVESTER } from '../src/sim/species';
-import { CELL_AIR, CELL_SOIL, World } from '../src/sim/world';
+import { CELL_AIR, CELL_SOIL, DAY_TICKS, World } from '../src/sim/world';
 
 const QUIET: AntSpecies = {
   ...HARVESTER,
@@ -78,7 +78,7 @@ describe('REST exit transition', () => {
     // into FORAGE on the rest-exit tick.
     const rng = new RNG(2);
     const w = flatWorld();
-    w.tick = 3600; // noon — daylight=1 so the diurnal gate doesn't suppress forage (DAY_TICKS = 7200)
+    w.tick = DAY_TICKS / 2; // noon — daylight=1 so the diurnal gate doesn't suppress forage
     const colony = new Colony(40);
     colony.spawn(20.5, 15.5, 0, rng, {
       digProb: 0, pickProb: 0, stigmergy: 0, turnNoise: 0, restThreshold: 100,

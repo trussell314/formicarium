@@ -21,7 +21,7 @@ import {
 } from '../sim/persist';
 import { RNG } from '../sim/rng';
 import { HARVESTER, type AntSpecies } from '../sim/species';
-import { CELL_AIR, daylight, World } from '../sim/world';
+import { CELL_AIR, daylight, TICK_MS, World } from '../sim/world';
 import type { FromWorker, RenderSnapshot, SaveSettings, ToWorker } from './protocol';
 // WASM module URL — Vite resolves this at build time and serves the
 // compiled bytes at the resulting URL. Worker fetches the bytes
@@ -52,10 +52,10 @@ let settings: SaveSettings | null = null;
 let paused = false;
 let extinct = false;
 let speedMul = 1;
-// Wall-clock anchor for the bio-time accumulator.
+// Wall-clock anchor for the bio-time accumulator. TICK_MS is imported
+// from sim/world (= 1000 / TICKS_PER_SEC).
 let lastDriveMs = 0;
 let bioAccum = 0;
-const TICK_MS = 120;
 // Per "drive" call (request from main), spend at most this many ms
 // of wall time stepping. The drive call returns once it hits the
 // budget so the worker can answer the next message promptly. The

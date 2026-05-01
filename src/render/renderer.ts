@@ -11,7 +11,7 @@ import {
   STATE_CARRY, STATE_CARRY_FOOD, STATE_DEAD, STATE_EGG, STATE_FORAGE, STATE_LARVA,
   STATE_NECRO_CARRY, STATE_PUPA, STATE_QUEEN, STATE_REST,
 } from '../sim/colony';
-import { CELL_AIR, CELL_SOIL } from '../sim/world';
+import { CELL_AIR, CELL_SOIL, DAY_TICKS } from '../sim/world';
 import { GLTerrainRenderer } from './gl-terrain';
 
 // Renderer reads a structural subset of World/Colony — same field
@@ -745,7 +745,6 @@ export class Renderer {
 
       // Day-night phase. tick=0 is solar midnight; phase 0.25 = sunrise,
       // 0.5 = noon, 0.75 = sunset. See sim/world.ts daylight().
-      const DAY_TICKS = 7200;
       const phase = (tick % DAY_TICKS) / DAY_TICKS;
 
       // Stars. Visible while the sun is below the horizon (phase ∉

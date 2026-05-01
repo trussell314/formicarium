@@ -80,13 +80,14 @@ export interface SimParams {
 }
 
 export const DEFAULT_PARAMS: SimParams = {
-  // 1.2 cells/tick × 3 mm/cell ÷ 120 ms/tick = 30 mm/sec — matches
-  // Gordon (1989) Pogonomyrmex foraging speed. Scales with cell size:
-  // walkSpeed × cellMM = constant 30 × 0.12 = 3.6 mm/tick.
-  walkSpeed: 1.2,
-  // 0.05 rad/tick ÷ 0.12 sec/tick = 0.42 rad/sec ≈ 24°/sec — within
+  // 1.0 cell/tick × 3 mm/cell × 10 ticks/sec = 30 mm/sec — matches
+  // Gordon (1989) Pogonomyrmex foraging speed. With CELL_MM and
+  // TICKS_PER_SEC promoted to anchors in world.ts, this is exactly
+  // one cell per tick — no fudge factor needed.
+  walkSpeed: 1.0,
+  // 0.05 rad/tick ÷ 0.1 sec/tick = 0.50 rad/sec ≈ 29°/sec — within
   // observed correlated random walk turn rates for foragers (Kareiva
-  // & Shigesada 1983). Earlier 0.35 was 24× faster, ants spun in place.
+  // & Shigesada 1983).
   turnNoise: 0.05,
   digProb: 0.10,    // Sudd 1970: 5–15% per contact
   // pickProb 0.02/tick = 17%/sec biological. Keep lower than digProb

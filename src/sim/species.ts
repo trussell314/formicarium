@@ -265,33 +265,33 @@ export interface AntSpecies {
  */
 // ── Sim ↔ biology time/length anchors ──────────────────────────
 //
-// 1 cell  ≈ 3 mm  (so one P. barbatus worker body — 6 mm,
-//                  Hölldobler & Wilson 1990 — spans 2 cells)
-// 1 tick  ≈ 120 ms biological time
-//                  (calibrated from walkSpeed = 1.2 cells/tick
-//                  × 3 mm/cell × 8.3 ticks/sec = 30 mm/sec, the real
-//                  forager speed in Gordon 1989)
-// →   1 second biological  ≈ 8.3 ticks
-//     1 minute biological  ≈ 500 ticks
-//     1 hour biological    ≈ 30,000 ticks
-//     1 day biological     ≈ 720,000 ticks (real day; in-sim is 7,200)
-//     1 week biological    ≈ 5 million ticks
+// Defined in world.ts (CELL_MM, TICKS_PER_SEC, TIME_COMPRESSION).
+// Recap of the resulting unit conversions:
+//
+// 1 cell  = 3 mm                (one P. barbatus worker = 6 mm = 2 cells)
+// 1 tick  = 100 ms micro-biological
+//                                (walkSpeed = 1.0 cells/tick
+//                                 × 3 mm/cell × 10 ticks/sec = 30 mm/sec,
+//                                 the real forager speed in Gordon 1989)
+// →   1 second micro-biological  = 10 ticks
+//     1 minute micro-biological  = 600 ticks
+//     1 hour   micro-biological  = 36 000 ticks
+//     1 day    real-world clock  = 864 000 ticks (uncompressed)
+//     1 day    in-sim            = 8 640 ticks  (DAY_TICKS, 100× compressed)
 //
 // ── 100× time-compression convention ────────────────────────────
 //
-// All biologically-anchored event durations are compressed 100× from
-// their real-world values. So a real-world process taking T_real
-// seconds plays out in T_real/100 seconds biological in the sim,
-// then converts to ticks via 1 tick = 120 ms biological.
+// Slow biological events (lifespan, egg→adult, foraging cadence)
+// advance on a separate "macro" clock that runs TIME_COMPRESSION = 100×
+// faster than the micro clock. So 1 tick advances:
+//   - 100 ms of micro-biological time (walking, diffusion)
+//   - 10 sec of macro-biological time (calendar — see SECONDS_PER_TICK_BIO)
 //
-// The exception is WALK SPEED — that's a 1× anchor because it's
-// also a spatial constraint (compressing it would teleport ants
-// across the world per tick). Pheromone half-lives are also kept
-// at their literature-calibrated values: their real range spans
-// four orders of magnitude (seconds to weeks) and a uniform 100×
-// compression would either make queen-recognition pheromone
-// disappear in seconds or alarm pheromone last for a tick. The
-// existing values are within order-of-magnitude of real biology.
+// Walk speed and pheromone half-lives stay on the micro clock (1×):
+// compressing walk speed would teleport ants across the world per
+// tick, and pheromone half-lives span four orders of magnitude
+// (seconds to weeks) so a uniform 100× would either evaporate queen
+// pheromone instantly or freeze alarm pheromone permanently.
 //
 // All cell-relative quantities (walkSpeed, COLLISION_RADIUS, pinhole
 // geometry, default world dims, scatter band, pheromone diffuse rate)
@@ -428,10 +428,10 @@ export const HARVESTER: AntSpecies = {
   broodMinDepth: 12,
   broodMaxDepth: 30,
   // Eggs need ~26 cell-moves (broodMax - broodMin) over a half-day
-  // window. With DAY_TICKS = 7200 (100× compressed), half-day =
-  // 3600 ticks, so interval = 3600/26 ≈ 138 ticks per migrate step.
-  // Round to 140.
-  broodMigrateInterval: 140,
+  // window. DAY_TICKS = 8 640 (100× compressed), half-day = 4 320
+  // ticks, so interval = 4320/26 ≈ 166 ticks per migrate step.
+  // Round to 165.
+  broodMigrateInterval: 165,
   // Cassill & Tschinkel (1999) measured per-bout trophallactic
   // transfers of 0.5-5% of the donor's crop in S. invicta. We use
   // 0.005 = 0.5% of maxEnergy per tick of contact, which sums over

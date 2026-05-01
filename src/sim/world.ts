@@ -26,12 +26,48 @@ export const PLANT_MAX_HEIGHT: ReadonlyArray<number> = [0, 4, 14, 60];
 
 export type CellKind = 0 | 1 | 2;
 
-/** Ticks per biological day. 1 tick ≈ 120 ms (see species.ts);
- *  under the 100× time-compression convention, an in-sim "day"
- *  plays out at 100× real speed, so 1 day biological = 14.4 min
- *  biological = 7,200 ticks. The day/night cycle is a modulo of
- *  world.tick by this constant. */
-export const DAY_TICKS = 7200;
+// ── Scale anchors ────────────────────────────────────────────────
+// Two physical anchors and one design knob; everything time- or
+// length-related derives from these.
+//
+//   length: 1 cell = CELL_MM mm
+//   time:   1 tick = 1/TICKS_PER_SEC sec biological (micro)
+//                  ≈ TIME_COMPRESSION × that in macro-biological
+//                    time (drives day-night, lifespan, etc.)
+//
+// Walk speed and pheromone half-lives are 1× anchors (see species.ts);
+// slow biological events (egg→adult, lifespan, foraging probability)
+// run TIME_COMPRESSION× faster than real biology.
+
+/** Edge length of one grid cell, in millimetres. P. barbatus worker
+ *  body length is ~6 mm, so a worker spans 2 cells. */
+export const CELL_MM = 3;
+
+/** Wall-clock and micro-biological tick rate at 1× simulation speed. */
+export const TICKS_PER_SEC = 10;
+
+/** Wall-clock (and micro-biological) duration of one tick in ms. */
+export const TICK_MS = 1000 / TICKS_PER_SEC;
+
+/** How many seconds of macro-biological time pass per real-world
+ *  second of wall-clock at 1× speed. Slow biological processes
+ *  (lifespan, egg→adult, diel cycle) advance at this multiple. */
+export const TIME_COMPRESSION = 100;
+
+/** Biological seconds per real day. */
+export const SECONDS_PER_DAY = 86400;
+
+/** Ticks per in-sim day. Derived: a 24 h biological day, compressed
+ *  100×, runs in 864 wall-clock seconds; at 10 ticks/sec that's 8 640
+ *  ticks. The day/night cycle is a modulo of world.tick by this
+ *  constant. */
+export const DAY_TICKS =
+  (SECONDS_PER_DAY / TIME_COMPRESSION) * TICKS_PER_SEC;
+
+/** Macro-biological seconds advanced per tick. With TICKS_PER_SEC=10
+ *  and TIME_COMPRESSION=100, each tick advances 10 sec of the slow
+ *  biological calendar (lifespan, foraging cadence, etc.). */
+export const SECONDS_PER_TICK_BIO = TIME_COMPRESSION / TICKS_PER_SEC;
 
 /**
  * Daylight intensity in [0, 1] for a given tick. 0 at midnight,
