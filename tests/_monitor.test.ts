@@ -109,7 +109,16 @@ function reportCheckpoint(world: World, c: Colony, label: string,
     if (world.food[i]! > 0) foodCount++;
     if (world.corpse[i]! > 0) corpses++;
   }
-  const dug = world.initialSoilCells - soilCount;
+  // Below-surface AIR cells = current open nest volume (chambers +
+  // tunnels). Tracks how big the nest cavity is right now.
+  let nestVol = 0;
+  for (let y = 0; y < world.height; y++) {
+    for (let x = 0; x < world.width; x++) {
+      if (world.cells[y * world.width + x]! !== CELL_AIR) continue;
+      if (y < world.naturalSurface[x]!) continue;
+      nestVol++;
+    }
+  }
   let foodWithWorkerNearby = 0;
   if (foodCount > 0) {
     for (let fi = 0; fi < world.food.length; fi++) {
@@ -254,7 +263,7 @@ function reportCheckpoint(world: World, c: Colony, label: string,
     `  states: W${wander} C${carry} R${rest} F${forage} Cf${carryFood} N${necro}\n` +
     `  energy: queen=${queenEnergy.toFixed(2)} workers=${meanWorkerE.toFixed(2)} larvae=${meanLarvaE.toFixed(2)} ` +
       `[C=${(cN > 0 ? cE / cN : 0).toFixed(2)} F=${(fN > 0 ? fE / fN : 0).toFixed(2)} Cf=${(cfN > 0 ? cfE / cfN : 0).toFixed(2)} W=${(wN > 0 ? wE / wN : 0).toFixed(2)}]\n` +
-    `  nest:   dug=${dug} grains=${grains} food=${foodCount} corpses=${corpses} depth=${maxDepth}\n` +
+    `  nest:   cells=${nestVol} grains=${grains} food=${foodCount} corpses=${corpses} depth=${maxDepth}\n` +
     `  arch:   shafts=${shafts.length} (max ${shaftLenMax}c=${shaftLenCm}cm) chambers=${chambers.length} ` +
       `(max ${chamberCellsMax}c, ${chamberWidthMax}×${chamberHeightMax} = ${chamberWidthCm}×${(chamberHeightMax * 0.3).toFixed(1)}cm) ` +
       `mean h/w=${meanAspect.toFixed(2)}\n` +
