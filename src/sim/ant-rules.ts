@@ -1479,9 +1479,20 @@ export function step(
     // surface-marking pheromones distinct from trail pheromones).
     // Builds up the colony's "occupied volume" signature over
     // time; the proximity dig gate uses this signal to keep new
-    // excavation focused on the nest core. Above-surface ants
-    // don't deposit (the surface trunk-trail is forager-only).
-    if (trunkField && iy >= world.naturalSurface[ix]! && ix >= 0 && ix < world.width) {
+    // excavation focused on the nest core.
+    //
+    // Gated on queen-pheromone presence (≥0.03) at the cell so the
+    // signal only accumulates inside the actual colony envelope.
+    // Without the gate, a few wandering workers in a remote pocket
+    // deposited trunk → forager trunk-gradient bias pulled in
+    // foragers → more ants lingered → more deposit, runaway
+    // positive-feedback "dance" attractor far from the main nest.
+    // Real CHC nest signatures saturate the queen's chamber and
+    // surrounding rooms; they don't form spontaneous remote
+    // hotspots.
+    if (trunkField && queenField
+        && iy >= world.naturalSurface[ix]! && ix >= 0 && ix < world.width
+        && queenField.sample(ix, iy) > 0.03) {
       trunkField.deposit(ix, iy, 0.005);
     }
 
