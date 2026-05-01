@@ -233,34 +233,42 @@ function adjacentSoil(world: World, ix: number, iy: number, h: number): { x: num
   const candidates: ReadonlyArray<readonly [number, number]> = [
     [1, 0], [-1, 0], [0, 1], [0, -1],
   ];
-  let bestX = -1, bestY = -1, bestDot = -Infinity;
   const hx = Math.cos(h);
   const hy = Math.sin(h);
   // Chamber-flatten bias. Real Pogonomyrmex chambers are pancake-
   // shaped (Tschinkel 2004 — height/width ≈ 0.2-0.4); ours grow
   // squarish at scale because nurse-strong belowGeotaxis pulls
-  // headings down and the dig-target selection picks the soil
-  // most aligned with heading. When the ant is INSIDE a wide air
-  // pocket (cells directly above AND below are AIR), nudge the
-  // dig-target selection toward LATERAL soil even if heading is
-  // vertical — workers extending a chamber should widen it, not
-  // dig the floor down. Heading itself is unchanged so geotaxis
-  // tests stay valid.
+  // headings down and the dig-target selection picks soil aligned
+  // with heading. When the ant is INSIDE a wide air pocket (cells
+  // directly above AND below are AIR), force the dig-target
+  // selection to prefer LATERAL soil — workers extending a chamber
+  // should widen it, not dig the floor down. Two-pass: try lateral
+  // soils first; fall back to vertical only if no lateral soil
+  // exists. Heading itself is unchanged so geotaxis tests stay
+  // valid.
   const aboveAir = iy > 0 && world.cells[(iy - 1) * w + ix]! === CELL_AIR;
   const belowAir = iy < world.height - 1 && world.cells[(iy + 1) * w + ix]! === CELL_AIR;
   const inChamber = aboveAir && belowAir;
+  if (inChamber) {
+    let bestX = -1, bestY = -1, bestDot = -Infinity;
+    for (const [dx, dy] of candidates) {
+      if (dy !== 0) continue;
+      const x = ix + dx;
+      const y = iy + dy;
+      if (x < 0 || y < 0 || x >= world.width || y >= world.height) continue;
+      if (world.cells[y * w + x] !== CELL_SOIL) continue;
+      const dot = hx * dx + hy * dy;
+      if (dot > bestDot) { bestDot = dot; bestX = x; bestY = y; }
+    }
+    if (bestX >= 0) return { x: bestX, y: bestY };
+  }
+  let bestX = -1, bestY = -1, bestDot = -Infinity;
   for (const [dx, dy] of candidates) {
     const x = ix + dx;
     const y = iy + dy;
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) continue;
     if (world.cells[y * w + x] !== CELL_SOIL) continue;
-    let dot = hx * dx + hy * dy;
-    // Lateral candidates get a +0.5 bonus when in a chamber. With
-    // dot range [-1, +1] this makes lateral soil typically beat
-    // vertical soil unless heading is strongly aligned with
-    // vertical (|hy| > 0.7) AND the lateral candidate is on the
-    // wrong side of heading.
-    if (inChamber && dy === 0) dot += 0.5;
+    const dot = hx * dx + hy * dy;
     if (dot > bestDot) { bestDot = dot; bestX = x; bestY = y; }
   }
   return bestX < 0 ? null : { x: bestX, y: bestY };
