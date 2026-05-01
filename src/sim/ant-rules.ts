@@ -233,45 +233,9 @@ function adjacentSoil(world: World, ix: number, iy: number, h: number): { x: num
   const candidates: ReadonlyArray<readonly [number, number]> = [
     [1, 0], [-1, 0], [0, 1], [0, -1],
   ];
+  let bestX = -1, bestY = -1, bestDot = -Infinity;
   const hx = Math.cos(h);
   const hy = Math.sin(h);
-  // Chamber-flatten bias. Real Pogonomyrmex chambers are pancake-
-  // shaped (Tschinkel 2004 — height/width ≈ 0.2-0.4); ours grow
-  // squarish at scale because nurse-strong belowGeotaxis pulls
-  // headings down and the dig-target selection picks soil aligned
-  // with heading.
-  //
-  // Trigger: ant is at a chamber WALL CORNER — one lateral
-  // neighbour is AIR (chamber interior on one side) AND the other
-  // lateral is SOIL (the wall she could dig). In that case prefer
-  // the lateral soil over any vertical soil so chambers widen
-  // sideways instead of growing tall. We don't fire on chamber
-  // FLOOR CENTRES (both lateral AIR, below SOIL) because that's
-  // exactly the geometry where workers should be able to dig
-  // downward to start a NEW gallery shaft — clamping that case to
-  // lateral-only collapses chamber count to 1 and the colony stops
-  // extending downward (verified on a long-run monitor).
-  //
-  // Heading is unchanged so the geotaxis tests stay valid.
-  const leftAir = ix > 0 && world.cells[iy * w + (ix - 1)]! === CELL_AIR;
-  const rightAir = ix < world.width - 1 && world.cells[iy * w + (ix + 1)]! === CELL_AIR;
-  const leftSoil = ix > 0 && world.cells[iy * w + (ix - 1)]! === CELL_SOIL;
-  const rightSoil = ix < world.width - 1 && world.cells[iy * w + (ix + 1)]! === CELL_SOIL;
-  const atChamberWall = (leftAir && rightSoil) || (rightAir && leftSoil);
-  if (atChamberWall) {
-    let bestX = -1, bestY = -1, bestDot = -Infinity;
-    for (const [dx, dy] of candidates) {
-      if (dy !== 0) continue;
-      const x = ix + dx;
-      const y = iy + dy;
-      if (x < 0 || y < 0 || x >= world.width || y >= world.height) continue;
-      if (world.cells[y * w + x] !== CELL_SOIL) continue;
-      const dot = hx * dx + hy * dy;
-      if (dot > bestDot) { bestDot = dot; bestX = x; bestY = y; }
-    }
-    if (bestX >= 0) return { x: bestX, y: bestY };
-  }
-  let bestX = -1, bestY = -1, bestDot = -Infinity;
   for (const [dx, dy] of candidates) {
     const x = ix + dx;
     const y = iy + dy;
