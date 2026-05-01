@@ -24,19 +24,27 @@ function log(line: string): void { fs.appendFileSync(LOG_PATH, line + '\n'); }
 
 function buildClaustralWorld(seed: number) {
   const rng = new RNG(seed);
-  const world = new World(280, 140);
+  // World height bumped from 140 → 400 (test #5 in the morphology
+  // sequence). At 3 mm/cell that's 120 cm deep — the bottom end of
+  // a real *P. barbatus* nest depth (Tschinkel 2004 measured 1-2 m
+  // for established nests). The previous 140-cell (42 cm) world
+  // cropped chambers to a young-nest depth where flat-pancake
+  // morphology hasn't yet emerged. Width stays 280 (84 cm) so the
+  // top-down footprint matches typical mature-nest mound diameter.
+  const W = 280, H = 400;
+  const world = new World(W, H);
   world.foodCap = 1;
-  world.generate(rng, Math.floor(140 * 0.30), Math.max(6, Math.floor(280 * 0.06)), 7);
-  const dig = new Pheromone(280, 140, 0.24, 0.999);
-  const build = new Pheromone(280, 140, 0.40, 0.9995);
-  const trail = new Pheromone(280, 140, 0.40, 0.999);
-  const alarm = new Pheromone(280, 140, 0.50, 0.985);
-  const queen = new Pheromone(280, 140, 0.10, 0.999, true);
-  const brood = new Pheromone(280, 140, 0.20, 0.999, true);
-  const necro = new Pheromone(280, 140, 0.30, 0.99);
-  const noEntry = new Pheromone(280, 140, 0.05, 0.995);
-  const granary = new Pheromone(280, 140, 0.10, 0.999);
-  const trunk = new Pheromone(280, 140, 0.20, 0.9995);
+  world.generate(rng, Math.floor(H * 0.10), Math.max(6, Math.floor(W * 0.06)), 7);
+  const dig = new Pheromone(W, H, 0.24, 0.999);
+  const build = new Pheromone(W, H, 0.40, 0.9995);
+  const trail = new Pheromone(W, H, 0.40, 0.999);
+  const alarm = new Pheromone(W, H, 0.50, 0.985);
+  const queen = new Pheromone(W, H, 0.10, 0.999, true);
+  const brood = new Pheromone(W, H, 0.20, 0.999, true);
+  const necro = new Pheromone(W, H, 0.30, 0.99);
+  const noEntry = new Pheromone(W, H, 0.05, 0.995);
+  const granary = new Pheromone(W, H, 0.10, 0.999);
+  const trunk = new Pheromone(W, H, 0.20, 0.9995);
   const colony = new Colony(HARVESTER.maxColonySize);
   const cx = world.width >> 1;
   const SHAFT_DEPTH = 10;
