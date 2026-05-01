@@ -3314,28 +3314,6 @@ export function step(
           if (localBuild > PILLAR_THRESHOLD) {
             pDeposit = Math.min(1, localBuild * cornerBoost); // Khuong + corner
           }
-          // Tall-chamber height cap (test #1 in the morphology
-          // sequence). Real Pogonomyrmex chambers are pancake-shaped
-          // (Tschinkel 2004 — height/width ≈ 0.2-0.4); ours grow
-          // taller than real because the build-pheromone gradient
-          // alone doesn't catch up with downward dig pressure. When
-          // the cell sits at the bottom of a tall AIR column
-          // (≥4 cells of AIR directly above ≈ 12 mm at 3 mm/cell),
-          // boost the deposit probability so a passing CARRY worker
-          // fills the floor back in. The chamber loses its bottom
-          // row → height stays bounded; the dug cell that produced
-          // this grain becomes net-zero excavation. Excavation
-          // continues laterally because workers at chamber walls
-          // still encounter SOIL with no AIR above.
-          let airAbove = 0;
-          for (let dy = 1; dy <= 8; dy++) {
-            if (py - dy < 0) break;
-            if (world.cells[(py - dy) * wW3 + px] !== CELL_AIR) break;
-            airAbove++;
-          }
-          if (airAbove >= 4) {
-            pDeposit = Math.max(pDeposit, 0.30);
-          }
         }
       }
       // Carry-deadlock relief. A worker who's been carrying spoil
