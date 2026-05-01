@@ -372,42 +372,49 @@ export function step(
       }
     }
   }
-  // Plant seed drop. Three RNG draws per tick regardless of plant
-  // count (preserves test determinism — see the `seedsPerTick`
-  // comment above for why we never gate rng.next() on a config flag).
-  // On a hit we pick a random column; if there's a plant there and
-  // the cell hasn't been buried by mound, drop a seed within ±2
-  // columns of the plant's base. The supply throttle in the clump
-  // rain below counts plant drops too, so plants displace some of
-  // the random-clump rate rather than adding on top.
-  const plantDropRoll = rng.next();
+  // Plant seed drop. Expressed as expected events per tick. At rate
+  // PLANT_SEED_RATE (= 0.005, default compression) rng.events() returns
+  // 0 or 1 with the same single draw a Bernoulli would consume — so
+  // the RNG sequence is bit-identical to the previous formulation at
+  // current compression. When the time-compression dial scales the
+  // rate past 1, multiple drops can fire in a single tick, each
+  // picking its own column and within-cluster offset.
+  //
+  // Three RNG draws minimum per tick (event count + column + offset)
+  // regardless of plant presence — preserves seeded determinism for
+  // tests that don't enable plants. Additional drops in the same tick
+  // (rate ≥ 2) draw two extra rolls each.
+  const dropEvents = rng.events(PLANT_SEED_RATE);
   const plantPickCol = (rng.next() * world.width) | 0;
   const plantOffRoll = rng.next();
-  if (species.granivorous && plantDropRoll < PLANT_SEED_RATE) {
-    const pcol = plantPickCol;
-    if (world.plant[pcol]! > 0) {
-      const psurf = world.naturalSurface[pcol]!;
-      const pAbove = (psurf - 1) * world.width + pcol;
-      if (psurf >= 1 && world.cells[pAbove] !== CELL_AIR) {
-        // Plant base cell got buried (mound stacked over it). Plant
-        // dies; clear both kind and height bookkeeping.
-        world.plant[pcol] = 0;
-        world.plantHeight[pcol] = 0;
-      } else {
-        const dx = ((plantOffRoll * 5) | 0) - 2;
-        const sx = pcol + dx;
-        if (sx >= 0 && sx < world.width) {
-          const sy = world.naturalSurface[sx]!;
-          if (sy >= 1) {
-            for (let py = sy - 1; py >= 0; py--) {
-              const pIdx = py * world.width + sx;
-              const cell = world.cells[pIdx]!;
-              if (cell === CELL_AIR && world.food[pIdx] === 0) {
-                world.food[pIdx] = 1;
-                world.foodMoves[pIdx] = 0;
-                break;
+  if (species.granivorous && dropEvents > 0) {
+    for (let e = 0; e < dropEvents; e++) {
+      const pcol = e === 0 ? plantPickCol : (rng.next() * world.width) | 0;
+      const offRoll = e === 0 ? plantOffRoll : rng.next();
+      if (world.plant[pcol]! > 0) {
+        const psurf = world.naturalSurface[pcol]!;
+        const pAbove = (psurf - 1) * world.width + pcol;
+        if (psurf >= 1 && world.cells[pAbove] !== CELL_AIR) {
+          // Plant base cell got buried (mound stacked over it). Plant
+          // dies; clear both kind and height bookkeeping.
+          world.plant[pcol] = 0;
+          world.plantHeight[pcol] = 0;
+        } else {
+          const dx = ((offRoll * 5) | 0) - 2;
+          const sx = pcol + dx;
+          if (sx >= 0 && sx < world.width) {
+            const sy = world.naturalSurface[sx]!;
+            if (sy >= 1) {
+              for (let py = sy - 1; py >= 0; py--) {
+                const pIdx = py * world.width + sx;
+                const cell = world.cells[pIdx]!;
+                if (cell === CELL_AIR && world.food[pIdx] === 0) {
+                  world.food[pIdx] = 1;
+                  world.foodMoves[pIdx] = 0;
+                  break;
+                }
+                if (cell === CELL_SOIL) break;
               }
-              if (cell === CELL_SOIL) break;
             }
           }
         }
@@ -419,15 +426,21 @@ export function step(
   // one cell of height if it's below its kind's mature cap. Growth
   // tops out at PLANT_MAX_HEIGHT[kind] — a tree fully matures at 8
   // cells, a shrub at 4, grass at 2.
-  const plantGrowRoll = rng.next();
+  // Same events()-as-count pattern as PLANT_SEED_RATE above. At rate
+  // 0.01 (default compression) returns 0 or 1 from a single draw; at
+  // higher compression multiple growth events can fire per tick, each
+  // picking its own column.
+  const growEvents = rng.events(PLANT_GROW_RATE);
   const plantGrowCol = (rng.next() * world.width) | 0;
-  if (plantGrowRoll < PLANT_GROW_RATE) {
-    const gcol = plantGrowCol;
-    const kind = world.plant[gcol]!;
-    if (kind > 0) {
-      const maxH = PLANT_MAX_HEIGHT[kind]!;
-      if (world.plantHeight[gcol]! < maxH) {
-        world.plantHeight[gcol]!++;
+  if (growEvents > 0) {
+    for (let e = 0; e < growEvents; e++) {
+      const gcol = e === 0 ? plantGrowCol : (rng.next() * world.width) | 0;
+      const kind = world.plant[gcol]!;
+      if (kind > 0) {
+        const maxH = PLANT_MAX_HEIGHT[kind]!;
+        if (world.plantHeight[gcol]! < maxH) {
+          world.plantHeight[gcol]!++;
+        }
       }
     }
   }

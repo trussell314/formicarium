@@ -39,4 +39,20 @@ export class RNG {
     const u2 = this.next();
     return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
   }
+
+  /** Number of events fired this tick given an expected per-tick rate.
+   *  Returns floor(rate) + Bernoulli(rate − floor(rate)). Equivalent to
+   *  `rng.next() < rate` for rate < 1 (consumes the same one draw, same
+   *  result), but does not saturate at 1 — useful for any per-tick
+   *  rate that may exceed unity once the time-compression dial scales
+   *  it. Not a true Poisson sample (variance is lower) but fine as a
+   *  visible-biology approximation; the "always fire floor(rate)
+   *  events" behaviour is actually what we want for plant drops and
+   *  egg laying when compression is cranked high. */
+  events(rate: number): number {
+    if (rate <= 0) return 0;
+    const whole = Math.floor(rate);
+    const frac = rate - whole;
+    return whole + (this.next() < frac ? 1 : 0);
+  }
 }
