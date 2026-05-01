@@ -109,7 +109,7 @@ function main(): void {
     <div class="row sel hidden" id="h-sel-row"><span>selected</span><span class="v" id="h-sel"></span></div>
     <div class="row dim"><span>render</span><span class="v" id="h-fps"></span></div>
     <div class="pop-graph" id="h-pop-graph">
-      <canvas id="h-pop-canvas" width="220" height="56"></canvas>
+      <canvas id="h-pop-canvas" width="340" height="56"></canvas>
     </div>
     <div class="legend" id="h-legend" style="display:none">
       <div><span class="swatch" style="background:#00dcdc"></span><span id="leg-dig">dig</span></div>
