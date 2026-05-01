@@ -1938,6 +1938,33 @@ export function step(
       h += rng.gauss() * colony.turnNoise[i]!;
       // Below or above surface, bias DOWN (positive geotaxis).
       h += wrapAngle(Math.PI / 2 - h) * geotaxis;
+      // Above-surface homing. A Cf ant returning across the surface
+      // needs a directional cue toward the entrance. Without one she
+      // just walks down into the soil, wall-bounces, and ends up
+      // dancing in place — accumulating trail and trunk pheromone
+      // that draws foragers out to investigate the false hotspot.
+      // The queen-pheromone gradient is too weak to navigate by at
+      // 100+ cells (decay length ~13 cells → field is ~5e-4 of peak
+      // out there, gradient lost in numerical noise), so we use a
+      // hard-coded heading toward the founding-shaft column as the
+      // primary above-surface cue. The queen gradient is overlaid as
+      // a finer correction once she's close enough that it resolves.
+      if (iy < world.naturalSurface[ix]!) {
+        const entranceCx = world.width >> 1;
+        const dxToEntrance = entranceCx - ix;
+        if (Math.abs(dxToEntrance) > 1) {
+          const want = dxToEntrance > 0 ? 0 : Math.PI;
+          h += wrapAngle(want - h) * 0.5;
+        }
+        if (queenField) {
+          const qGrad = queenField.gradient(ix, iy);
+          const qMag = Math.hypot(qGrad.dx, qGrad.dy);
+          if (qMag > 1e-4) {
+            const want = Math.atan2(qGrad.dy, qGrad.dx);
+            h += wrapAngle(want - h) * colony.stigmergy[i]! * 0.4;
+          }
+        }
+      }
       // Brood emergency rerouting (FIX H). Standard CARRY_FOOD
       // behaviour heads down via geotaxis and biases toward
       // granaryField for storage. But a colony with starving
