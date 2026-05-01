@@ -289,8 +289,8 @@ export function digCell(world: World, x: number, y: number, rng: RNG): boolean {
   // Allows normal chamber widening (a wall cell typically has
   // 2-3 SOIL neighbours, all part of a larger wall component
   // hundreds of cells in size — flood-fill exits early). Blocks
-  // digs that would create 1-3 cell isolated bits inside chambers.
-  const ISLAND_MIN = 4;
+  // digs that would create 1-7 cell isolated bits inside chambers.
+  const ISLAND_MIN = 8;
   const w = world.width;
   const h = world.height;
   const dirs: ReadonlyArray<readonly [number, number]> = [

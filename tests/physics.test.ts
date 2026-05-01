@@ -249,10 +249,13 @@ describe('digCell', () => {
     // The excavation primitive. After digCell, the cell must be air
     // and the grain count of the world is unchanged (digging produces
     // a CARRY ant separately; the cell itself just becomes air).
-    const w = withFloor(10, 10);
+    // 20-wide floor so digging at x=10 leaves SOIL fragments of
+    // 10 and 9 cells, both ≥ ISLAND_MIN. With a narrower floor the
+    // anti-island rule would correctly refuse the dig.
+    const w = withFloor(20, 10);
     const rng = new RNG(1);
-    expect(digCell(w, 5, 9, rng)).toBe(true);
-    expect(w.cells[w.index(5, 9)]).toBe(CELL_AIR);
+    expect(digCell(w, 10, 9, rng)).toBe(true);
+    expect(w.cells[w.index(10, 9)]).toBe(CELL_AIR);
   });
 
   it('returns false on non-soil cells (no double-dig, no air-dig)', () => {
