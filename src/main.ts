@@ -219,13 +219,14 @@ function main(): void {
     popCtx.textAlign = 'left';
   }
   // Unicode block-character bar chart from a small bucket array.
-  // Each bucket maps to one of 9 levels: NBSP for empty (preserves
-  // width in HTML — runs of regular spaces collapse and the histogram
-  // jumps between frames as adjacent zeros merge), then ▁..█ for
-  // increasing fill. Caller passes the array; the bar magnitudes are
-  // scaled to the in-frame max so a flat-zero histogram still has a
-  // stable width.
-  const BLOCKS = ' ▁▂▃▄▅▆▇█';
+  // Empty buckets render as `·` (U+00B7 middle dot) so all 8 bar
+  // positions remain visible at fixed width even when the histogram
+  // is mostly zero. The earlier NBSP zero-marker collapsed visually
+  // — empty bins looked like missing bars and the histogram's
+  // perceived width jumped as the population shifted between bins.
+  // Magnitudes scaled to the in-frame max so a flat-zero histogram
+  // still has stable width.
+  const BLOCKS = '·▁▂▃▄▅▆▇█';
   const renderBars = (buckets: ArrayLike<number>): string => {
     let max = 1;
     for (let i = 0; i < buckets.length; i++) {
