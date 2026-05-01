@@ -72,12 +72,12 @@ function buildBundle(s: SaveSettings, restoreBlob: string | null): SimBundle {
   // the rain on. (Zero would disable food entirely — used by tests
   // that need a no-food world.)
   world.foodCap = 1;
-  // Surface row at 20% — sky band 80 cells (24 cm at 3 mm/cell),
-  // soil depth 320 cells (96 cm). Real P. barbatus nests run
+  // Surface row at 17% — sky band 68 cells (≈ 20 cm at 3 mm/cell),
+  // soil depth 332 cells (≈ 100 cm). Real P. barbatus nests run
   // 1-2 m deep so we still cover the lower end of mature-nest
   // depth, while leaving meaningful sky for plants, stars, and
   // the celestial cycle to read.
-  const surfaceRow = Math.floor(s.height * 0.20);
+  const surfaceRow = Math.floor(s.height * 0.17);
   const halfW = Math.max(6, Math.floor(s.width * 0.06));
   const depth = Math.max(4, Math.floor(s.height * 0.05));
   world.generate(rng, surfaceRow, halfW, depth);
