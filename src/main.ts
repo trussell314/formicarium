@@ -55,7 +55,7 @@ function readSettings(): Settings {
     height: Math.max(30, num('height', 250) | 0),
     ants: Math.max(0, num('ants', 0) | 0),
     speedMul: Math.max(0.125, num('speed', 8)),
-    compression: Math.max(1, Math.min(10000, num('compression', 100))),
+    compression: Math.max(1, Math.min(10000, num('compression', 1))),
     screensaver: p.get('screensaver') === '1',
   };
 }
