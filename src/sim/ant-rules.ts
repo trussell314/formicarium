@@ -180,13 +180,14 @@ function wrapAngle(a: number): number {
 }
 
 /**
- * True if a nurse-aged worker (age < ageCutoff) is within `radius`
- * cells of the brood at `targetIdx`. Brood depend on nurses to be
- * physically transported between depths — without one nearby, the
- * egg / larva can't migrate. Real nurses pick up brood with their
- * mandibles and walk it to the target chamber (Hölldobler & Wilson
- * 1990 ch. 9). We don't model the carry-state intermediate, but we
- * do enforce the "no nurse, no transport" precondition.
+ * True if a nurse-aged worker (or, in claustral founding, the queen
+ * herself) is within `radius` cells of the brood at `targetIdx`.
+ * Brood depend on nurses to be physically transported between
+ * depths — without one nearby, the egg / larva can't migrate. Real
+ * nurses pick up brood with their mandibles (Hölldobler & Wilson
+ * 1990 ch. 9). Founding queens nurse their own first brood from
+ * wing-muscle reserves (H&W 1990 ch. 5), so the queen counts as a
+ * valid attendant whenever she's adjacent.
  *
  * O(N) per call. Brood-migration runs at most every
  * species.broodMigrateInterval ticks per brood, so the amortised
@@ -202,8 +203,10 @@ function nurseNearby(
     if (j === targetIdx) continue;
     const sj = colony.state[j]!;
     if (sj === STATE_DEAD || sj === STATE_EGG || sj === STATE_LARVA
-        || sj === STATE_PUPA || sj === STATE_QUEEN) continue;
-    if (colony.age[j]! > ageCutoff) continue;
+        || sj === STATE_PUPA) continue;
+    // Queens count as attendants (claustral founding); workers
+    // count only when nurse-aged.
+    if (sj !== STATE_QUEEN && colony.age[j]! > ageCutoff) continue;
     const dx = colony.posX[j]! - tx;
     const dy = colony.posY[j]! - ty;
     if (dx * dx + dy * dy < r2) return true;
@@ -936,7 +939,13 @@ export function step(
           const dx = colony.posX[j]! - colony.posX[i]!;
           const dy = colony.posY[j]! - colony.posY[i]!;
           const d2 = dx * dx + dy * dy;
-          if (d2 < cr2 && d2 > 1e-6) {
+          // Allow d2 = 0 (exact co-location). The earlier `d2 > 1e-6`
+          // gate excluded queen-and-her-just-laid-egg-or-larva pairs,
+          // which broke claustral founding once the brood-migration
+          // gate started leaving brood at the queen's spawn position
+          // — larvae would never receive trophallaxis and starve. j>i
+          // already prevents self-pairing.
+          if (d2 < cr2) {
             const stI = colony.state[i]!;
             const stJ = colony.state[j]!;
             // Skip eggs entirely — they can't collide or trophallax.
