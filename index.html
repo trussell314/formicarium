@@ -70,7 +70,15 @@
         padding: 0;
       }
       #hud-min:hover { background: rgba(216, 200, 168, 0.10); }
-      #hud.minimized .row:not(.hdr):not(.hdr-mini), #hud.minimized .legend { display: none; }
+      #hud .pop-graph {
+        margin-top: 6px;
+        padding-top: 6px;
+        border-top: 1px solid rgba(216, 200, 168, 0.15);
+      }
+      #hud .pop-graph canvas { display: block; }
+      #hud.minimized .row:not(.hdr):not(.hdr-mini),
+      #hud.minimized .legend,
+      #hud.minimized .pop-graph { display: none; }
       #hud.minimized { padding: 4px 10px; }
       #help {
         position: fixed; right: 12px; bottom: 12px;

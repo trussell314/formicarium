@@ -108,7 +108,10 @@ function main(): void {
     <div class="row"><span>energy</span><span class="v" id="h-energy"></span></div>
     <div class="row sel hidden" id="h-sel-row"><span>selected</span><span class="v" id="h-sel"></span></div>
     <div class="row dim"><span>render</span><span class="v" id="h-fps"></span></div>
-    <div class="legend" id="h-legend">
+    <div class="pop-graph" id="h-pop-graph">
+      <canvas id="h-pop-canvas" width="220" height="56"></canvas>
+    </div>
+    <div class="legend" id="h-legend" style="display:none">
       <div><span class="swatch" style="background:#00dcdc"></span>dig</div>
       <div><span class="swatch" style="background:#dc00dc"></span>build</div>
       <div><span class="swatch" style="background:#f0dc3c"></span>trail</div>
@@ -137,6 +140,84 @@ function main(): void {
     selRow: document.getElementById('h-sel-row')!,
     fps: document.getElementById('h-fps')!,
   };
+  // Population graph. Adaptive-decimation ring buffer: the most
+  // recent samples stay fine-grained; once the buffer is full, every
+  // other sample is dropped and the push interval doubles. End
+  // result is a roughly log-spaced timeline that always covers
+  // "all time" since session start, regardless of how long it runs.
+  type PopSample = { tick: number; alive: number };
+  const popHistory: PopSample[] = [];
+  const POP_HISTORY_MAX = 220;
+  let popPushInterval = 1;
+  let popPushCounter = 0;
+  function pushPopSample(tick: number, alive: number): void {
+    popPushCounter++;
+    if (popPushCounter < popPushInterval) return;
+    popPushCounter = 0;
+    if (popHistory.length > 0 && popHistory[popHistory.length - 1]!.tick === tick) return;
+    popHistory.push({ tick, alive });
+    if (popHistory.length > POP_HISTORY_MAX) {
+      const half: PopSample[] = [];
+      for (let i = 0; i < popHistory.length; i += 2) half.push(popHistory[i]!);
+      popHistory.length = 0;
+      popHistory.push(...half);
+      popPushInterval *= 2;
+    }
+  }
+  // Tick milestones rendered as faint vertical lines on the graph.
+  // Chosen to be visible across the typical session range.
+  const POP_MILESTONES: ReadonlyArray<{ tick: number; label: string }> = [
+    { tick: 100_000, label: '100k' },
+    { tick: 500_000, label: '500k' },
+    { tick: 1_000_000, label: '1M' },
+    { tick: 5_000_000, label: '5M' },
+    { tick: 10_000_000, label: '10M' },
+  ];
+  const popCanvas = document.getElementById('h-pop-canvas') as HTMLCanvasElement;
+  const popCtx = popCanvas.getContext('2d')!;
+  function drawPopGraph(): void {
+    const cw = popCanvas.width;
+    const ch = popCanvas.height;
+    popCtx.clearRect(0, 0, cw, ch);
+    if (popHistory.length < 2) return;
+    const t0 = popHistory[0]!.tick;
+    const t1 = popHistory[popHistory.length - 1]!.tick;
+    const tRange = Math.max(1, t1 - t0);
+    let popMax = 1;
+    for (const p of popHistory) if (p.alive > popMax) popMax = p.alive;
+    // Milestone lines first so the population line renders on top.
+    popCtx.fillStyle = 'rgba(216, 200, 168, 0.18)';
+    popCtx.font = '9px monospace';
+    popCtx.textBaseline = 'top';
+    for (const m of POP_MILESTONES) {
+      if (m.tick < t0 || m.tick > t1) continue;
+      const x = ((m.tick - t0) / tRange) * cw;
+      popCtx.fillRect(x, 0, 1, ch);
+      popCtx.fillStyle = 'rgba(216, 200, 168, 0.55)';
+      popCtx.fillText(m.label, x + 2, 1);
+      popCtx.fillStyle = 'rgba(216, 200, 168, 0.18)';
+    }
+    // Population line.
+    popCtx.strokeStyle = '#7bcda0';
+    popCtx.lineWidth = 1.25;
+    popCtx.beginPath();
+    for (let i = 0; i < popHistory.length; i++) {
+      const p = popHistory[i]!;
+      const x = ((p.tick - t0) / tRange) * cw;
+      const y = ch - 1 - (p.alive / popMax) * (ch - 12);
+      if (i === 0) popCtx.moveTo(x, y);
+      else popCtx.lineTo(x, y);
+    }
+    popCtx.stroke();
+    // Latest-value annotation.
+    const last = popHistory[popHistory.length - 1]!;
+    popCtx.fillStyle = '#f0e2c4';
+    popCtx.font = '10px monospace';
+    popCtx.textBaseline = 'top';
+    popCtx.textAlign = 'right';
+    popCtx.fillText(`${last.alive} (max ${popMax})`, cw - 3, 1);
+    popCtx.textAlign = 'left';
+  }
   // Unicode block-character bar chart from a small bucket array.
   // Each bucket maps to one of 9 levels: NBSP for empty (preserves
   // width in HTML — runs of regular spaces collapse and the histogram
@@ -400,7 +481,11 @@ function main(): void {
         document.exitFullscreen().catch(() => {});
       }
     },
-    phero: () => { renderer.showPheromones = !renderer.showPheromones; },
+    phero: () => {
+      renderer.showPheromones = !renderer.showPheromones;
+      const legend = document.getElementById('h-legend');
+      if (legend) legend.style.display = renderer.showPheromones ? '' : 'none';
+    },
     minimap: () => { renderer.showMinimap = !renderer.showMinimap; },
     reseed: () => {
       clearSavedSnapshot();
@@ -606,6 +691,8 @@ function main(): void {
         `0x${settings.seed.toString(16)} · ${snap.width}×${snap.height}`;
       setPulse(hudEls.colony,
         `${snap.hud.alive} alive (start ${start}, +${snap.hud.totalBorn} −${snap.hud.totalDied})`);
+      pushPopSample(snap.tick, snap.hud.alive);
+      drawPopGraph();
       setPulse(hudEls.brood,
         `Q ${snap.hud.queens} · ${snap.hud.eggs}E · ${snap.hud.larvae}L · ${snap.hud.pupae}P`);
       setPulse(hudEls.nest,

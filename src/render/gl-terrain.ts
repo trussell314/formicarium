@@ -186,60 +186,77 @@ void main() {
       // perspective haze (mix toward the sky color). Real bg-skyline
       // photos of *P. barbatus* sites show distant mesquite stands
       // visibly larger and hazier than the immediate-foreground
-      // plants. Extra width multiplier 1.6× and a sky-blend of 0.45
-      // so the silhouette reads as misty rather than crisp.
+      // plants.
+      //
+      // Per-plant distance class. Each BG plant is deterministically
+      // assigned a distance bucket (0..3) from a column hash. Far
+      // plants render with smaller silhouettes and stronger sky-haze
+      // blend, near plants are bigger and crisper. When two BG plants
+      // overlap a pixel, the NEARER one wins so closer plants appear
+      // to occlude farther ones — proper parallax depth cue.
       int bgChosenKind = 0;
       int bgChosenAnchor = -1;
       int bgChosenAbsDx = 99;
       int bgChosenSignDx = 0;
       bool bgChosenInTrunk = false;
       int bgChosenReqRadius = 0;
+      int bgChosenDistClass = 99;
       for (int dx = -8; dx <= 8; dx++) {
         int sx = cell.x + dx;
         if (sx < 0 || sx >= wi) continue;
-        // Row 1 = background layer of the packed plant textures.
         int nKind = sampleU8(uPlant, ivec2(sx, 1));
         if (nKind == 0) continue;
         int nH = int(texelFetch(uPlantHeight, ivec2(sx, 1), 0).r);
         if (nH == 0) continue;
         int nSurf = sampleU16(uSurf, ivec2(sx, 0));
-        int nBase = nSurf - 1;
-        int nTop = nSurf - nH;
+        // Distance class derived from per-column hash. Bits 4-5 of
+        // the soilNoise byte at row 0 give a stable 0..3 bucket.
+        int distHash = sampleU8(uSoilNoise, ivec2(sx, 0));
+        int distClass = (distHash >> 4) & 3;
+        // Far plants sit lower (perspective foreshortening) — pull
+        // their visual base down by distClass cells so the silhouette
+        // peeks above the foreground.
+        int nBase = nSurf - 1 + distClass;
+        int nTop = nSurf - nH + distClass;
         if (cell.y > nBase || cell.y < nTop) continue;
-        // Trunk cells per kind, same scheme as foreground but with
-        // tree trunk reduced to nH/6 so canopies show through the
-        // visible sky band.
         int trunkCells =
           (nKind == 1) ? 0 :
           ((nKind == 2) ? 1 : max(1, nH / 6));
         bool inTrunk = trunkCells > 0 && (cell.y > nBase - trunkCells);
-        // Background widths exceed foreground by ~1.5–2× so the
-        // distant skyline reads visually bigger than nearby plants
-        // (parallax depth cue). Fixed kind-based radii.
+        // Base radii — fixed per kind. Distance class shrinks them.
         int trunkRadius =
           (nKind == 1) ? 0 :
           ((nKind == 2) ? 2 : 3);
         int canopyRadius =
           (nKind == 1) ? 1 :
           ((nKind == 2) ? 5 : 8);
+        // Distance scale: 1.00 / 0.80 / 0.65 / 0.50 for class 0..3.
+        // Far plants ~half the silhouette of near.
+        float distScale = 1.0 - float(distClass) * 0.18;
+        trunkRadius = max(0, int(float(trunkRadius) * distScale + 0.5));
+        canopyRadius = max(0, int(float(canopyRadius) * distScale + 0.5));
         int reqRadius = inTrunk ? trunkRadius : canopyRadius;
         int absDx = (dx < 0) ? -dx : dx;
         if (absDx > reqRadius) continue;
-        if (bgChosenKind == 0 || absDx < bgChosenAbsDx) {
+        // Prefer the NEARER (smaller distClass) plant when two
+        // overlap; secondary tiebreak on smaller absDx.
+        bool better = bgChosenKind == 0
+          || distClass < bgChosenDistClass
+          || (distClass == bgChosenDistClass && absDx < bgChosenAbsDx);
+        if (better) {
           bgChosenKind = nKind;
           bgChosenAnchor = sx;
           bgChosenAbsDx = absDx;
           bgChosenSignDx = dx;
           bgChosenInTrunk = inTrunk;
           bgChosenReqRadius = reqRadius;
+          bgChosenDistClass = distClass;
         }
       }
       if (bgChosenKind > 0) {
         int hashB = sampleU8(uSoilNoise, ivec2(bgChosenAnchor, max(cell.y, 0)));
         int subEdge = (uSub - 1);
         bool inBgSilhouette = true;
-        // Canopy-only ragged rim. Trunks stay solid so we don't get
-        // vertical sky-stripes through the brown columns.
         if (!bgChosenInTrunk && bgChosenAbsDx == bgChosenReqRadius && bgChosenReqRadius > 0) {
           if ((hashB & 7) < 2) {
             int margin = subEdge / 2;
@@ -252,10 +269,11 @@ void main() {
           vec3 bgCanopyCol = vec3(46.0, 84.0, 42.0) / 255.0;
           if (bgChosenKind >= 3) bgCanopyCol = vec3(38.0, 70.0, 38.0) / 255.0;
           vec3 bgC = bgChosenInTrunk ? bgTrunkCol : bgCanopyCol;
-          // Atmospheric haze: blend toward the current sky colour so
-          // the silhouette fades into the distance. Stronger blend at
-          // higher daylight (haze is more visible against bright sky).
-          float hazeAmt = mix(0.30, 0.55, uDaylight);
+          // Distance-modulated haze. Class 0 = closest BG (light haze),
+          // class 3 = farthest (heavy haze, dissolves into sky).
+          float baseHaze = mix(0.25, 0.45, uDaylight);
+          float distHaze = float(bgChosenDistClass) * 0.12;
+          float hazeAmt = clamp(baseHaze + distHaze, 0.0, 0.92);
           bgC = mix(bgC, col, hazeAmt);
           float vJitter = (float(hashB & 31) / 31.0 - 0.5) * 0.18;
           bgC *= (1.0 + vJitter);

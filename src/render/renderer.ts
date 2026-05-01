@@ -130,7 +130,9 @@ function plantCovers(world: RenderableWorld, cellX: number, cellY: number): bool
     const absDx = dx < 0 ? -dx : dx;
     if (absDx <= reqRadius) return true;
   }
-  // Background scan — wider radii, ±8 columns. Matches GL BG branch.
+  // Background scan — only the NEAR BG plants (distClass 0-1) occlude
+  // stars; far ones (distClass 2-3) are too hazy to block. Matches the
+  // GL BG branch's distance-modulated rendering.
   for (let dx = -8; dx <= 8; dx++) {
     const nx = cellX + dx;
     if (nx < 0 || nx >= w) continue;
@@ -138,14 +140,19 @@ function plantCovers(world: RenderableWorld, cellX: number, cellY: number): bool
     if (kind === 0) continue;
     const h = world.bgPlantHeight[nx]!;
     if (h === 0) continue;
+    const distClass = (world.soilNoise[nx]! >> 4) & 3;
+    if (distClass >= 2) continue;
     const surf = world.naturalSurface[nx]!;
-    const base = surf - 1;
-    const top = surf - h;
+    const base = surf - 1 + distClass;
+    const top = surf - h + distClass;
     if (cellY > base || cellY < top) continue;
     const trunkCells = kind === 1 ? 0 : kind === 2 ? 1 : Math.max(1, Math.floor(h / 6));
     const inTrunk = trunkCells > 0 && cellY > base - trunkCells;
-    const trunkRadius = kind === 1 ? 0 : kind === 2 ? 2 : 3;
-    const canopyRadius = kind === 1 ? 1 : kind === 2 ? 5 : 8;
+    const distScale = 1.0 - distClass * 0.18;
+    const trunkR0 = kind === 1 ? 0 : kind === 2 ? 2 : 3;
+    const canopyR0 = kind === 1 ? 1 : kind === 2 ? 5 : 8;
+    const trunkRadius = Math.max(0, Math.round(trunkR0 * distScale));
+    const canopyRadius = Math.max(0, Math.round(canopyR0 * distScale));
     const reqRadius = inTrunk ? trunkRadius : canopyRadius;
     const absDx = dx < 0 ? -dx : dx;
     if (absDx <= reqRadius) return true;
