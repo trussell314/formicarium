@@ -31,7 +31,7 @@ function buildClaustralWorld(seed: number) {
   // cropped chambers to a young-nest depth where flat-pancake
   // morphology hasn't yet emerged. Width stays 280 (84 cm) so the
   // top-down footprint matches typical mature-nest mound diameter.
-  const W = 280, H = 400;
+  const W = 400, H = 400;
   const world = new World(W, H);
   world.foodCap = 1;
   world.generate(rng, Math.floor(H * 0.10), Math.max(6, Math.floor(W * 0.06)), 7);
