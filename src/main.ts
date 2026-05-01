@@ -387,6 +387,7 @@ function main(): void {
   // is rendered in main's render call and shown in the HUD.
   let pressX = 0, pressY = 0, pressMoved = 0;
   let selectedAntId = -1;
+  let selectedCell: { x: number; y: number } | null = null;
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId);
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -445,6 +446,16 @@ function main(): void {
         energy: latest.energy,
       };
       selectedAntId = renderer.pickAnt(e.clientX, e.clientY, colony, 2.5);
+      if (selectedAntId < 0) {
+        // No ant at click position — pick the cell so the HUD can
+        // report its type / pheromones / depth. Useful for
+        // diagnosing whether visible specks are SOIL pillars or
+        // GRAIN deposits (they share the same render palette).
+        const w = renderer.screenToWorld(e.clientX, e.clientY);
+        selectedCell = { x: w.x | 0, y: w.y | 0 };
+      } else {
+        selectedCell = null;
+      }
     }
   };
   canvas.addEventListener('pointerup', onPointerEnd);
@@ -787,6 +798,45 @@ function main(): void {
         hudEls.sel.textContent =
           `#${id} ${stateCode} (${ex},${ey}) e=${en} ${hd}°` +
           (pheroSummary ? ` · ${pheroSummary}` : '');
+        hudEls.selRow.classList.remove('hidden');
+      } else if (selectedCell !== null
+                 && selectedCell.x >= 0 && selectedCell.x < snap.width
+                 && selectedCell.y >= 0 && selectedCell.y < snap.height) {
+        // Cell-type readout (no ant under cursor — clicked empty
+        // space). Shows the raw cell type and depth so we can tell
+        // SOIL pillars from GRAIN deposits.
+        const cx = selectedCell.x;
+        const cy = selectedCell.y;
+        const cIdx = cy * snap.width + cx;
+        const cellVal = snap.cells[cIdx]!;
+        const cellName = cellVal === 0 ? 'AIR' : cellVal === 1 ? 'SOIL' : cellVal === 2 ? 'GRAIN' : '?';
+        const surf = snap.naturalSurface[cx]!;
+        const depth = cy - surf;
+        const where = cy < surf ? 'above' : `d${depth}`;
+        // Local pheromones same as ant readout.
+        const cellSamples: Array<{ name: string; v: number }> = [];
+        if (snap.pheromones) {
+          const p = snap.pheromones;
+          cellSamples.push({ name: 'dig', v: p.dig[cIdx] ?? 0 });
+          cellSamples.push({ name: 'build', v: p.build[cIdx] ?? 0 });
+          cellSamples.push({ name: 'trail', v: p.trail[cIdx] ?? 0 });
+          cellSamples.push({ name: 'alarm', v: p.alarm[cIdx] ?? 0 });
+          cellSamples.push({ name: 'queen', v: p.queen[cIdx] ?? 0 });
+          cellSamples.push({ name: 'brood', v: p.brood[cIdx] ?? 0 });
+          cellSamples.push({ name: 'necro', v: p.necro[cIdx] ?? 0 });
+          cellSamples.push({ name: 'noEntry', v: p.noEntry[cIdx] ?? 0 });
+          cellSamples.push({ name: 'granary', v: p.granary[cIdx] ?? 0 });
+          cellSamples.push({ name: 'trunk', v: p.trunk[cIdx] ?? 0 });
+          cellSamples.sort((a, b) => b.v - a.v);
+        }
+        const cellPheroSummary = cellSamples
+          .filter((s) => s.v > 0.01)
+          .slice(0, 3)
+          .map((s) => `${s.name}=${s.v.toFixed(2)}`)
+          .join(' ');
+        hudEls.sel.textContent =
+          `cell (${cx},${cy}) ${cellName} ${where}` +
+          (cellPheroSummary ? ` · ${cellPheroSummary}` : '');
         hudEls.selRow.classList.remove('hidden');
       } else {
         hudEls.selRow.classList.add('hidden');
