@@ -104,8 +104,8 @@ function main(): void {
     <div class="row"><span>time</span><span class="v" id="h-time"></span></div>
     <div class="row"><span>speed</span><span class="v" id="h-speed"></span></div>
     <div class="row"><span>states</span><span class="v" id="h-states"></span></div>
-    <div class="row"><span>age</span><span class="v" id="h-age"></span></div>
-    <div class="row"><span>energy</span><span class="v" id="h-energy"></span></div>
+    <div class="row"><span>age</span><span class="v"><span class="histo-label" id="h-age-lbl">young → old</span><canvas class="histo" id="h-age-cv" width="120" height="14"></canvas></span></div>
+    <div class="row"><span>energy</span><span class="v"><span class="histo-label" id="h-energy-lbl">low → full</span><canvas class="histo" id="h-energy-cv" width="120" height="14"></canvas></span></div>
     <div class="row sel hidden" id="h-sel-row"><span>selected</span><span class="v" id="h-sel"></span></div>
     <div class="row dim"><span>render</span><span class="v" id="h-fps"></span></div>
     <div class="pop-graph" id="h-pop-graph">
@@ -134,8 +134,6 @@ function main(): void {
     time: document.getElementById('h-time')!,
     speed: document.getElementById('h-speed')!,
     states: document.getElementById('h-states')!,
-    age: document.getElementById('h-age')!,
-    energy: document.getElementById('h-energy')!,
     sel: document.getElementById('h-sel')!,
     selRow: document.getElementById('h-sel-row')!,
     fps: document.getElementById('h-fps')!,
@@ -254,27 +252,34 @@ function main(): void {
     popCtx.fillText(`${last.alive} (max ${popMax})`, cw - 3, 1);
     popCtx.textAlign = 'left';
   }
-  // Unicode block-character bar chart. All 8 levels (▁ minimum
-  // through █ full) are in the U+2580 Block Elements range —
-  // guaranteed same width in any monospace font. Empty buckets
-  // map to ▁ (a small baseline, not a tall pipe) so the
-  // histogram has a continuous visible footprint without empty
-  // positions sticking up. Magnitudes scaled to the in-frame max
-  // so a flat-zero histogram still has stable width.
-  const BLOCKS = '▁▂▃▄▅▆▇█';
-  const renderBars = (buckets: ArrayLike<number>): string => {
+  // Histograms drawn into <canvas> so their pixel widths are
+  // exactly fixed (text-based block chars varied slightly in
+  // width across fonts, making the HUD wobble). 12 bars × 10 px
+  // wide = 120 px canvas; bar heights scale to in-frame max.
+  const ageCanvas = document.getElementById('h-age-cv') as HTMLCanvasElement;
+  const ageCtx = ageCanvas.getContext('2d')!;
+  const energyCanvas = document.getElementById('h-energy-cv') as HTMLCanvasElement;
+  const energyCtx = energyCanvas.getContext('2d')!;
+  function drawHisto(ctx: CanvasRenderingContext2D, buckets: ArrayLike<number>): void {
+    const cw = ctx.canvas.width;
+    const ch = ctx.canvas.height;
+    ctx.clearRect(0, 0, cw, ch);
     let max = 1;
     for (let i = 0; i < buckets.length; i++) {
       const v = buckets[i]!;
       if (v > max) max = v;
     }
-    let out = '';
-    for (let i = 0; i < buckets.length; i++) {
+    const n = buckets.length;
+    const slot = cw / n;
+    const barW = Math.max(1, Math.floor(slot - 1));
+    ctx.fillStyle = '#7bcda0';
+    for (let i = 0; i < n; i++) {
       const t = buckets[i]! / max;
-      out += BLOCKS[Math.min(7, Math.max(0, Math.round(t * 7)))];
+      const h = Math.max(1, Math.round(t * (ch - 1)));
+      const x = Math.round(i * slot);
+      ctx.fillRect(x, ch - h, barW, h);
     }
-    return out;
-  };
+  }
   const hudMinBtn = document.getElementById('hud-min')!;
   hudMinBtn.addEventListener('click', () => {
     hud.classList.toggle('minimized');
@@ -780,8 +785,8 @@ function main(): void {
       if (snap.hud.carryFood) stateParts.push(`Cf${snap.hud.carryFood}`);
       if (snap.hud.necroCarry) stateParts.push(`N${snap.hud.necroCarry}`);
       hudEls.states.textContent = stateParts.join(' ') || '—';
-      hudEls.age.textContent = `young → old ${renderBars(snap.hud.ageBuckets)}`;
-      hudEls.energy.textContent = `low → full ${renderBars(snap.hud.energyBuckets)}`;
+      drawHisto(ageCtx, snap.hud.ageBuckets);
+      drawHisto(energyCtx, snap.hud.energyBuckets);
       // Selected-ant inspector. Hidden when no ant is selected; pins
       // id, role, position, energy, heading. State is shown by code
       // matching the diag glossary (W/C/R/F/Cf/N/Q/E/L) so the row
@@ -835,8 +840,11 @@ function main(): void {
           `#${id} ${stateCode} (${ex},${ey}) e=${en} ${hd}°` +
           (pheroSummary ? ` · ${pheroSummary}` : '');
         hudEls.selRow.classList.remove('hidden');
-        // Update legend with values at this ant's cell.
-        setLegendValues(snap.pheromones ? [
+        // Update legend with values at this ant's cell. Skip the
+        // call when pheromones aren't in this snapshot (the worker
+        // throttles them every Nth frame to save bandwidth) — keeps
+        // the previous values on screen instead of flickering blank.
+        if (snap.pheromones) setLegendValues([
           snap.pheromones.dig[cellIdx] ?? 0,
           snap.pheromones.build[cellIdx] ?? 0,
           snap.pheromones.trail[cellIdx] ?? 0,
@@ -847,7 +855,7 @@ function main(): void {
           snap.pheromones.noEntry[cellIdx] ?? 0,
           snap.pheromones.granary[cellIdx] ?? 0,
           snap.pheromones.trunk[cellIdx] ?? 0,
-        ] : null);
+        ]);
       } else if (selectedCell !== null
                  && selectedCell.x >= 0 && selectedCell.x < snap.width
                  && selectedCell.y >= 0 && selectedCell.y < snap.height) {
@@ -887,8 +895,9 @@ function main(): void {
           `cell (${cx},${cy}) ${cellName} ${where}` +
           (cellPheroSummary ? ` · ${cellPheroSummary}` : '');
         hudEls.selRow.classList.remove('hidden');
-        // Update legend with values at this clicked cell.
-        setLegendValues(snap.pheromones ? [
+        // Update legend with values at this clicked cell. Same
+        // throttle-skip logic as the ant branch.
+        if (snap.pheromones) setLegendValues([
           snap.pheromones.dig[cIdx] ?? 0,
           snap.pheromones.build[cIdx] ?? 0,
           snap.pheromones.trail[cIdx] ?? 0,
@@ -899,7 +908,7 @@ function main(): void {
           snap.pheromones.noEntry[cIdx] ?? 0,
           snap.pheromones.granary[cIdx] ?? 0,
           snap.pheromones.trunk[cIdx] ?? 0,
-        ] : null);
+        ]);
       } else {
         hudEls.selRow.classList.add('hidden');
         setLegendValues(null);
