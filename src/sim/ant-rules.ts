@@ -3040,7 +3040,23 @@ export function step(
             : avgEnergy <= 0.2
               ? 0.1
               : 0.1 + 0.9 * ((avgEnergy - 0.2) / 0.2);
-        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation * hungerDigMul) {
+        // Nest-proximity gate. Workers far from established colony
+        // markers (queen pheromone or trunk-trail) dig at reduced
+        // rate. Real *P. barbatus* concentrates excavation around
+        // the nest core; lone ants exploring distant soil don't
+        // open random side-pockets. Without this, our 280×400 monitor
+        // produced ~77 short shaft stubs scattered laterally; real
+        // young nests have only ~20-40 narrow segments total.
+        // Entombed/stranded workers exempt — they dig out regardless.
+        const queenLocal = queenField ? queenField.sample(ax, ay) : 0;
+        const trunkLocal = trunkField ? trunkField.sample(ax, ay) : 0;
+        // queenField saturates at ~0.5 in chamber; falls to ~0.05 at
+        // nest edge, ~0 far away. trunkField runs ~0.0-0.3 along
+        // forager routes. Combine: any strong colony marker passes.
+        const colonyMarker = Math.max(queenLocal * 4, trunkLocal * 6);
+        const proxScale = (entombed || stranded) ? 1.0
+          : Math.max(0.30, Math.min(1.0, colonyMarker + 0.30));
+        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation * hungerDigMul * proxScale) {
           if (digCell(world, target.x, target.y, rng)) {
             // Track dig direction relative to the digger's cell, so
             // the diag can surface a vertical-vs-lateral histogram.

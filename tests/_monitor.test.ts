@@ -232,12 +232,25 @@ function reportCheckpoint(world: World, c: Colony, label: string,
       }
     }
   }
-  // Stats.
-  let shaftLenMax = 0;
+  // Stats. Distinguish "galleries" (real connecting tunnels, ≥5
+  // cells) from "stubs" (1-4 cell exploratory pockets). The
+  // earlier shaft count was misleading because it conflated real
+  // gallery passages with tiny side-pockets that aren't usable
+  // as connectors. Real young P. barbatus has ~3-10 galleries
+  // and ~20-40 stubs; mature has ~5-30 galleries.
+  const GALLERY_MIN_CELLS = 5;
+  let galleryCount = 0, stubCount = 0;
+  let galleryLenMax = 0;
   for (const s of shafts) {
     const len = s.maxY - s.minY + 1;
-    if (len > shaftLenMax) shaftLenMax = len;
+    if (s.cells >= GALLERY_MIN_CELLS) {
+      galleryCount++;
+      if (len > galleryLenMax) galleryLenMax = len;
+    } else {
+      stubCount++;
+    }
   }
+  const galleryLenCm = (galleryLenMax * 0.3).toFixed(1);
   let chamberCellsMax = 0, chamberWidthMax = 0, chamberHeightMax = 0;
   // Mean aspect ratio (height / width) — real chambers are flat
   // (h/w ≈ 0.2-0.4); a tall sim chamber would show h/w > 1.
@@ -263,7 +276,6 @@ function reportCheckpoint(world: World, c: Colony, label: string,
   }
   const meanAspect = aspectN > 0 ? aspectSum / aspectN : 0;
   const chamberWidthCm = (chamberWidthMax * 0.3).toFixed(1);
-  const shaftLenCm = (shaftLenMax * 0.3).toFixed(1);
 
   log(
     `\n${label} t=${world.tick.toLocaleString()}\n` +
@@ -272,10 +284,11 @@ function reportCheckpoint(world: World, c: Colony, label: string,
     `  energy: queen=${queenEnergy.toFixed(2)} workers=${meanWorkerE.toFixed(2)} larvae=${meanLarvaE.toFixed(2)} ` +
       `[C=${(cN > 0 ? cE / cN : 0).toFixed(2)} F=${(fN > 0 ? fE / fN : 0).toFixed(2)} Cf=${(cfN > 0 ? cfE / cfN : 0).toFixed(2)} W=${(wN > 0 ? wE / wN : 0).toFixed(2)}]\n` +
     `  nest:   cells=${nestVol} grains=${grains} food=${foodCount} corpses=${corpses} depth=${maxDepth}\n` +
-    `  arch:   shafts=${shafts.length} (max ${shaftLenMax}c=${shaftLenCm}cm) chambers=${chambers.length} ` +
+    `  arch:   galleries=${galleryCount} (max ${galleryLenMax}c=${galleryLenCm}cm) ` +
+      `stubs=${stubCount} chambers=${chambers.length} ` +
       `(max ${chamberCellsMax}c, ${chamberWidthMax}×${chamberHeightMax} = ${chamberWidthCm}×${(chamberHeightMax * 0.3).toFixed(1)}cm) ` +
       `mean h/w=${meanAspect.toFixed(2)}\n` +
-    `  arch-ref: real *P. barbatus* — chambers 17-50c wide × 7-17c tall (h/w ≈ 0.2-0.4), galleries 100-700c long, ratio chambers:shafts 3-20×\n` +
+    `  arch-ref: real *P. barbatus* — chambers 17-50c wide × 7-17c tall (h/w ≈ 0.2-0.4), galleries ~3-10 young / ~5-30 mature, gallery length 100-700c\n` +
     `  arch-depth (d0-d4): ${archDepthBins.join('|')}\n` +
     `  depth-hist (above|d1|d2|d3|d4|d5): ${depthBins.join('|')}\n` +
     `  food-near-worker: ${foodWithWorkerNearby}/${foodCount}\n` +
