@@ -112,16 +112,16 @@ function main(): void {
       <canvas id="h-pop-canvas" width="220" height="56"></canvas>
     </div>
     <div class="legend" id="h-legend" style="display:none">
-      <div><span class="swatch" style="background:#00dcdc"></span>dig</div>
-      <div><span class="swatch" style="background:#dc00dc"></span>build</div>
-      <div><span class="swatch" style="background:#f0dc3c"></span>trail</div>
-      <div><span class="swatch" style="background:#ff1e1e"></span>alarm</div>
-      <div><span class="swatch" style="background:#6e46c8"></span>queen</div>
-      <div><span class="swatch" style="background:#ffb4b4"></span>brood</div>
-      <div><span class="swatch" style="background:#8c8232"></span>necromone</div>
-      <div><span class="swatch" style="background:#8c96aa"></span>no-entry</div>
-      <div><span class="swatch" style="background:#ffa03c"></span>granary</div>
-      <div><span class="swatch" style="background:#c8aa1e"></span>trunk</div>
+      <div><span class="swatch" style="background:#00dcdc"></span><span id="leg-dig">dig</span></div>
+      <div><span class="swatch" style="background:#dc00dc"></span><span id="leg-build">build</span></div>
+      <div><span class="swatch" style="background:#f0dc3c"></span><span id="leg-trail">trail</span></div>
+      <div><span class="swatch" style="background:#ff1e1e"></span><span id="leg-alarm">alarm</span></div>
+      <div><span class="swatch" style="background:#6e46c8"></span><span id="leg-queen">queen</span></div>
+      <div><span class="swatch" style="background:#ffb4b4"></span><span id="leg-brood">brood</span></div>
+      <div><span class="swatch" style="background:#8c8232"></span><span id="leg-necro">necromone</span></div>
+      <div><span class="swatch" style="background:#8c96aa"></span><span id="leg-noEntry">no-entry</span></div>
+      <div><span class="swatch" style="background:#ffa03c"></span><span id="leg-granary">granary</span></div>
+      <div><span class="swatch" style="background:#c8aa1e"></span><span id="leg-trunk">trunk</span></div>
     </div>
   `;
   const hudEls = {
@@ -139,7 +139,43 @@ function main(): void {
     sel: document.getElementById('h-sel')!,
     selRow: document.getElementById('h-sel-row')!,
     fps: document.getElementById('h-fps')!,
+    legDig: document.getElementById('leg-dig')!,
+    legBuild: document.getElementById('leg-build')!,
+    legTrail: document.getElementById('leg-trail')!,
+    legAlarm: document.getElementById('leg-alarm')!,
+    legQueen: document.getElementById('leg-queen')!,
+    legBrood: document.getElementById('leg-brood')!,
+    legNecro: document.getElementById('leg-necro')!,
+    legNoEntry: document.getElementById('leg-noEntry')!,
+    legGranary: document.getElementById('leg-granary')!,
+    legTrunk: document.getElementById('leg-trunk')!,
   };
+  const LEG_NAMES: ReadonlyArray<readonly [string, string]> = [
+    ['legDig', 'dig'],
+    ['legBuild', 'build'],
+    ['legTrail', 'trail'],
+    ['legAlarm', 'alarm'],
+    ['legQueen', 'queen'],
+    ['legBrood', 'brood'],
+    ['legNecro', 'necromone'],
+    ['legNoEntry', 'no-entry'],
+    ['legGranary', 'granary'],
+    ['legTrunk', 'trunk'],
+  ];
+  /** Update the legend labels to show pheromone values at the
+   *  given cell. If `values` is null (no selection), reset to
+   *  bare names. */
+  function setLegendValues(values: ReadonlyArray<number> | null): void {
+    for (let i = 0; i < LEG_NAMES.length; i++) {
+      const [k, name] = LEG_NAMES[i]!;
+      const el = (hudEls as Record<string, HTMLElement>)[k]!;
+      if (values === null) {
+        el.textContent = name;
+      } else {
+        el.textContent = `${name}: ${values[i]!.toFixed(2)}`;
+      }
+    }
+  }
   // Population graph. Adaptive-decimation ring buffer: the most
   // recent samples stay fine-grained; once the buffer is full, every
   // other sample is dropped and the push interval doubles. End
@@ -799,6 +835,19 @@ function main(): void {
           `#${id} ${stateCode} (${ex},${ey}) e=${en} ${hd}°` +
           (pheroSummary ? ` · ${pheroSummary}` : '');
         hudEls.selRow.classList.remove('hidden');
+        // Update legend with values at this ant's cell.
+        setLegendValues(snap.pheromones ? [
+          snap.pheromones.dig[cellIdx] ?? 0,
+          snap.pheromones.build[cellIdx] ?? 0,
+          snap.pheromones.trail[cellIdx] ?? 0,
+          snap.pheromones.alarm[cellIdx] ?? 0,
+          snap.pheromones.queen[cellIdx] ?? 0,
+          snap.pheromones.brood[cellIdx] ?? 0,
+          snap.pheromones.necro[cellIdx] ?? 0,
+          snap.pheromones.noEntry[cellIdx] ?? 0,
+          snap.pheromones.granary[cellIdx] ?? 0,
+          snap.pheromones.trunk[cellIdx] ?? 0,
+        ] : null);
       } else if (selectedCell !== null
                  && selectedCell.x >= 0 && selectedCell.x < snap.width
                  && selectedCell.y >= 0 && selectedCell.y < snap.height) {
@@ -838,8 +887,22 @@ function main(): void {
           `cell (${cx},${cy}) ${cellName} ${where}` +
           (cellPheroSummary ? ` · ${cellPheroSummary}` : '');
         hudEls.selRow.classList.remove('hidden');
+        // Update legend with values at this clicked cell.
+        setLegendValues(snap.pheromones ? [
+          snap.pheromones.dig[cIdx] ?? 0,
+          snap.pheromones.build[cIdx] ?? 0,
+          snap.pheromones.trail[cIdx] ?? 0,
+          snap.pheromones.alarm[cIdx] ?? 0,
+          snap.pheromones.queen[cIdx] ?? 0,
+          snap.pheromones.brood[cIdx] ?? 0,
+          snap.pheromones.necro[cIdx] ?? 0,
+          snap.pheromones.noEntry[cIdx] ?? 0,
+          snap.pheromones.granary[cIdx] ?? 0,
+          snap.pheromones.trunk[cIdx] ?? 0,
+        ] : null);
       } else {
         hudEls.selRow.classList.add('hidden');
+        setLegendValues(null);
       }
       hudEls.fps.textContent = `${renderFps} fps`;
     }
