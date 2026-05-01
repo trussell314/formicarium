@@ -841,7 +841,31 @@ export class Renderer {
       };
       const sunPos = bodyScreenPos(thetaSun);
       const moonPos = bodyScreenPos(thetaMoon);
+      // Plant occlusion clip helper. Builds a path that includes
+      // only cells in the disc area NOT covered by a foreground or
+      // background plant; subsequent draws inside the clip skip
+      // plant-covered pixels entirely. Result: trees render on top
+      // of sun/moon as they should, without requiring sun/moon to
+      // move into the GL pass.
+      const clipDiscOutsidePlants = (cx: number, cy: number, r: number): void => {
+        const bb = Math.ceil(r / scale + 1);
+        const cellX = Math.floor((cx - ox) / scale);
+        const cellY = Math.floor((cy - oy) / scale);
+        this.ctx.save();
+        this.ctx.beginPath();
+        for (let dy = -bb; dy <= bb; dy++) {
+          for (let dx = -bb; dx <= bb; dx++) {
+            const wx = cellX + dx;
+            const wy = cellY + dy;
+            if (wx < 0 || wy < 0 || wx >= this.world.width || wy >= this.world.height) continue;
+            if (plantCovers(this.world, wx, wy)) continue;
+            this.ctx.rect(ox + wx * scale, oy + wy * scale, scale + 0.5, scale + 0.5);
+          }
+        }
+        this.ctx.clip();
+      };
       if (sunPos.visible) {
+        clipDiscOutsidePlants(sunPos.x, sunPos.y, bodyR * 3.5);
         // Soft halo + bright disc. The halo is a radial gradient that
         // fades the warm tint into transparency over 3× the disc
         // radius — sells the "atmospheric scatter" without costing
@@ -858,8 +882,10 @@ export class Renderer {
         this.ctx.beginPath();
         this.ctx.arc(sunPos.x, sunPos.y, bodyR, 0, Math.PI * 2);
         this.ctx.fill();
+        this.ctx.restore();
       }
       if (moonPos.visible) {
+        clipDiscOutsidePlants(moonPos.x, moonPos.y, bodyR * 1.5);
         // One sphere lit from the side. Drawn as a moon disc with a
         // shadow disc on top, both clipped to the moon's outline so
         // the shadow can never render outside the lit body. Without
@@ -920,6 +946,9 @@ export class Renderer {
           0, Math.PI * 2,
         );
         this.ctx.fill();
+        this.ctx.restore();
+        // Match the clipDiscOutsidePlants save() at the top of
+        // the moon block.
         this.ctx.restore();
       }
       this.ctx.restore();
