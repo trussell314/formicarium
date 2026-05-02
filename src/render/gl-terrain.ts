@@ -387,6 +387,11 @@ void main() {
       // Tunnel: depth fade + dig-glow tint for recently excavated.
       float depth = clamp(float(cell.y - surf) / max(1.0, uH - float(surf)), 0.0, 1.0);
       col = mix(TUNNEL_NEAR, TUNNEL_DEEP, clamp(depth * 1.4, 0.0, 1.0));
+      // Apply the same multi-octave noise that SOIL gets so chamber
+      // air reads as packed-soil interior rather than a flat tan
+      // panel. Done before the fresh-dig glow so the highlight
+      // still reads cleanly on top of the textured base.
+      col *= (1.0 + multiNoise);
       int age = uTick - sampleI32(uDigTick, cell);
       if (age >= 0 && age < 120) {
         float t = 1.0 - float(age) / 120.0;
@@ -475,15 +480,19 @@ void main() {
   }
 
   // Per-sub-cell luminance variation. Hash uses subOff packed into
-  // a single index that's stable across SUB values. Only applied to
-  // SOIL/GRAIN — on AIR (sky and tunnel) the perturbation has no
-  // material to texture and shows up as a paper-grain speckle that's
-  // particularly visible against the bright daytime sky.
-  if (k != 0) {
+  // a single index that's stable across SUB values. Applied to
+  // SOIL / GRAIN / tunnel-AIR — only sky-AIR (above the natural
+  // surface) skips it, since the hash shows up as paper-grain
+  // speckle against the bright daytime sky. Tunnel air shares the
+  // same packed-soil context as the surrounding walls so the grain
+  // reads correctly there. Bumped 0.10 → 0.20 to match the canvas
+  // path's per-subcell amplitude.
+  bool isSky = (k == 0 && cell.y < surf);
+  if (!isSky) {
     int subI = subOff.y * uSub + subOff.x;
     int subBase = (noiseByte + subI * 67) & 0xff;
     float subN = float(subBase) / 255.0 - 0.5;
-    col *= (1.0 + subN * 0.10);
+    col *= (1.0 + subN * 0.20);
   }
 
   // Pheromone overlay (additive composition).

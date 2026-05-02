@@ -496,6 +496,15 @@ export class Renderer {
             const depth = (y - sy) / Math.max(1, h - sy);
             const tunnel = lerp3(TUNNEL_NEAR, TUNNEL_DEEP, Math.min(1, depth * 1.4));
             r = tunnel[0]; g = tunnel[1]; b = tunnel[2];
+            // Apply the same per-cell noise perturbation that SOIL
+            // gets, so chamber air has the speckled "dust / grit"
+            // look of an excavated tunnel rather than a flat tan
+            // panel. Done before the fresh-dig glow so the highlight
+            // still reads cleanly on top of the textured base.
+            const tn = (noise[idx]! / 255 - 0.5) * 0.36;
+            r = r * (1 + tn);
+            g = g * (1 + tn);
+            b = b * (1 + tn);
             // Fresh dig: cells excavated within the last ~120 ticks
             // glow slightly lighter so the user can see WHERE the
             // colony is currently working.
@@ -576,20 +585,22 @@ export class Renderer {
           const t = Math.min(1, Math.max(0.4, age / 1000));
           r = 70 * t; g = 230 * t; b = 50 * t;
         }
-        // Write SUB×SUB sub-pixels for this sim cell. SOIL/GRAIN get
-        // a per-sub-cell luminance perturbation derived from the
-        // per-cell soilNoise plus the sub-cell index — adds intra-
-        // cell texture that breaks up the blocky look without
-        // changing sim resolution. AIR cells (sky and tunnel) skip
-        // the perturbation: they have no material to texture and the
-        // hash showed up as a paper-grain speckle on the daytime sky.
+        // Write SUB×SUB sub-pixels for this sim cell. SOIL / GRAIN /
+        // tunnel-AIR all get per-sub-cell luminance perturbation
+        // derived from the per-cell soilNoise plus the sub-cell
+        // index — adds intra-cell texture that breaks up the blocky
+        // look. Only sky-AIR (above natural surface) skips it: the
+        // hash showed up as paper-grain speckle on the daytime sky
+        // background. Tunnel air has the same packed-soil context as
+        // the surrounding chamber walls so the same grain reads
+        // correctly there.
         const SUB = this.SUB;
         const subBase = noise[idx]!;
-        const isAir = k === CELL_AIR;
+        const isSky = k === CELL_AIR && y < surfRow[x]!;
         for (let sy = 0; sy < SUB; sy++) {
           for (let sx = 0; sx < SUB; sx++) {
             let sr: number, sg: number, sb: number;
-            if (isAir) {
+            if (isSky) {
               sr = r; sg = g; sb = b;
             } else {
               const subI = sy * SUB + sx;
