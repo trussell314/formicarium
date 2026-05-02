@@ -197,14 +197,10 @@
   <body>
     <canvas id="screen"></canvas>
     <div id="hud"></div>
-    <div id="dials" role="group" aria-label="speed and time-scale dials">
+    <div id="dials" role="group" aria-label="simulation speed">
       <label for="dial-speed">
         <span class="lbl-row"><span class="lbl-name">Speed</span><span class="lbl-val" id="dial-speed-val">1×</span></span>
         <input type="range" id="dial-speed" min="-3" max="13" step="1" value="0" aria-label="simulation speed multiplier" />
-      </label>
-      <label for="dial-comp">
-        <span class="lbl-row"><span class="lbl-name">Time scale</span><span class="lbl-val" id="dial-comp-val">1×</span></span>
-        <input type="range" id="dial-comp" min="0" max="3" step="0.05" value="0" aria-label="time compression — bio time per real time" />
       </label>
     </div>
     <div id="ctrls" role="toolbar" aria-label="simulation controls">

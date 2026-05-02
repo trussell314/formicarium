@@ -26,7 +26,6 @@ export type ToWorker =
   | { kind: 'pause' }
   | { kind: 'resume' }
   | { kind: 'setSpeed'; speedMul: number }
-  | { kind: 'setCompression'; compression: number }
   | { kind: 'reseed'; settings: SaveSettings }
   | { kind: 'requestSnapshot'; includePheromones: boolean }
   | { kind: 'captureForSave' }
