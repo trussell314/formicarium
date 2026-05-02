@@ -47,8 +47,14 @@ export class Pheromone {
    *  in one tick. 0.10–0.20 is the typical literature range. */
   readonly diffuse: number;
   /** Multiplier applied per cell per tick. evap ∈ (0, 1). 0.99 gives
-   *  a half-life of ~69 ticks. */
-  readonly evaporate: number;
+   *  a half-life of ~69 ticks. Mutable: setDecayScale() adjusts this
+   *  to compensate for the time-compression dial's scaling of forager
+   *  rate and walk speed. The baseline is preserved in
+   *  `baseEvaporate` so re-scaling is reversible. */
+  evaporate: number;
+  /** Calibration-baseline evaporate, immutable. Used by setDecayScale
+   *  to recompute `evaporate` from the current scale factor. */
+  readonly baseEvaporate: number;
   /** WASM kernel handle when this instance is using the SIMD path,
    *  null otherwise. step() consults this to pick a backend. */
   private wasmHandle: WasmFieldHandle | null;
@@ -76,6 +82,7 @@ export class Pheromone {
     this.height = height;
     this.diffuse = diffuse;
     this.evaporate = evaporate;
+    this.baseEvaporate = evaporate;
     this.permeable = permeable;
     // Permeable fields skip the WASM allocator — the kernel can't
     // express through-soil diffusion without recompilation, so we
@@ -124,6 +131,23 @@ export class Pheromone {
    * Sub-1e-6 values clamp to zero to keep sparse regions sparse
    * and avoid denormal-float drag.
    */
+  /** Adjust the per-tick decay coefficient to compensate for changes
+   *  in deposit rate caused by the time-compression dial. At higher
+   *  compression, more foragers fire per tick AND each covers more
+   *  cells per tick, so per-cell deposit rate scales as
+   *  `ms × walkScale`. Without compensation, steady-state field
+   *  intensity scales the same way (visibly saturates the overlay).
+   *
+   *  Steady-state intensity = D / (1 - α). Holding it constant
+   *  requires (1 - α) ∝ D, i.e., the per-tick decay-deficit scales
+   *  with `ms × walkScale` too. Clamps non-negative so very high
+   *  compression of an already-fast field doesn't go below zero. */
+  setDecayScale(scale: number): void {
+    const baseDecayDeficit = 1 - this.baseEvaporate;
+    const newDecayDeficit = Math.min(1, baseDecayDeficit * scale);
+    this.evaporate = Math.max(0, 1 - newDecayDeficit);
+  }
+
   step(cells?: Uint8Array): void {
     // Provably-empty fast path. A field with no live concentration
     // anywhere produces zero output cell-by-cell (zero in → zero

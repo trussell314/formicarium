@@ -21,7 +21,7 @@ import {
 } from '../sim/persist';
 import { RNG } from '../sim/rng';
 import { HARVESTER, type AntSpecies } from '../sim/species';
-import { CELL_AIR, daylight, setTimeCompression, TICK_MS, World } from '../sim/world';
+import { CELL_AIR, daylight, MACRO_BASELINE, setTimeCompression, TICK_MS, TIME_COMPRESSION, WALK_SPEED_CAP, World } from '../sim/world';
 import type { FromWorker, RenderSnapshot, SaveSettings, ToWorker } from './protocol';
 // WASM module URL — Vite resolves this at build time and serves the
 // compiled bytes at the resulting URL. Worker fetches the bytes
@@ -195,6 +195,30 @@ function buildBundle(s: SaveSettings, restoreBlob: string | null): SimBundle {
     broodField, necroField, noEntryField, granaryField, trunkField,
     particles, species: HARVESTER,
   };
+}
+
+/** Recompute and apply the per-tick decay scale to every pheromone
+ *  field whenever TIME_COMPRESSION changes. Per-tick deposit rate
+ *  scales as `ms × walkScale`; matching the decay deficit to that
+ *  factor holds steady-state field intensity ≈ constant across the
+ *  dial. Without this, the pheromone overlay saturates at high
+ *  compression because foragers fire and walk faster (more deposits
+ *  per tick) while decay-per-tick is unchanged. */
+function applyPheromoneDecayScale(): void {
+  if (!bundle) return;
+  const ms = TIME_COMPRESSION / MACRO_BASELINE;
+  const walkScale = Math.min(WALK_SPEED_CAP, Math.max(1, ms));
+  const scale = ms * walkScale;
+  bundle.digField.setDecayScale(scale);
+  bundle.buildField.setDecayScale(scale);
+  bundle.trailField.setDecayScale(scale);
+  bundle.alarmField.setDecayScale(scale);
+  bundle.queenField.setDecayScale(scale);
+  bundle.broodField.setDecayScale(scale);
+  bundle.necroField.setDecayScale(scale);
+  bundle.noEntryField.setDecayScale(scale);
+  bundle.granaryField.setDecayScale(scale);
+  bundle.trunkField.setDecayScale(scale);
 }
 
 function drive(now: number): void {
@@ -468,6 +492,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       // and then all subsequent ticks proceed synchronously.
       wasmReady.then(() => {
         bundle = buildBundle(msg.settings, msg.restoreBlob);
+        applyPheromoneDecayScale();
         paused = false;
         extinct = false;
         bioAccum = 0;
@@ -488,6 +513,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       break;
     case 'setCompression':
       setTimeCompression(msg.compression);
+      applyPheromoneDecayScale();
       break;
     case 'reseed':
     case 'loadSave': {
@@ -514,6 +540,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       })();
       wasmReady.then(() => {
         bundle = buildBundle(msg.settings, restoreBlob);
+        applyPheromoneDecayScale();
         extinct = false;
         bioAccum = 0;
         lastDriveMs = performance.now();
