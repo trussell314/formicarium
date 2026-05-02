@@ -1108,6 +1108,8 @@ export function step(
                 const queenToLarva = donorState === STATE_QUEEN && recipState === STATE_LARVA;
                 const tropAmount = species.trophallaxisAmount * ms * (queenToLarva ? 4 : 1);
                 const give = Math.min(tropAmount, want, surplus);
+                // TEMP debug — count queen→larva trophallaxis events.
+                if (queenToLarva) (globalThis as any).__qlTrophCount = ((globalThis as any).__qlTrophCount || 0) + 1;
                 if (give > 0) {
                   colony.energy[recip] = recipE + give;
                   // Queens feeding larvae draw on non-modelled wing-
