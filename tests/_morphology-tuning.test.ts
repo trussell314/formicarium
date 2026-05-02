@@ -211,6 +211,12 @@ function runScenario(name: string, mode: Mode, target: number, capTicks: number)
   let reason = 'cap';
   const SNAP = 50_000;
   const STALL = 1.05;
+  // Stall warmup. Founding-only colonies need ~75k+ ticks for the
+  // first worker to eclose (egg + larva + pupa development); before
+  // that, cells stays at the initial pocket count and any 5%-growth
+  // gate would falsely fire. Skip stall checks until the first
+  // workers have had time to emerge AND start digging.
+  const STALL_WARMUP = 150_000;
   while (ticks < capTicks) {
     runStep(s);
     ticks++;
@@ -219,7 +225,7 @@ function runScenario(name: string, mode: Mode, target: number, capTicks: number)
       const dt = ((Date.now() - t0) / 1000).toFixed(1);
       log(`tick=${ticks} cells=${cells} (${dt}s wall)`);
       if (cells >= target) { reason = 'target'; break; }
-      if (cells < prevCells * STALL) {
+      if (ticks >= STALL_WARMUP && cells < prevCells * STALL) {
         log(`stall: ${prevCells} → ${cells}`);
         reason = 'stall';
         break;
