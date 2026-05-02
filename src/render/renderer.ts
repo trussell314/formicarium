@@ -845,17 +845,15 @@ export class Renderer {
       // position when below the horizon (needed for moon-shadow
       // direction).
       // True circular path: the body traces a circle centered at
-      // (ow/2, horizonY) with radius CIRCLE_R. CIRCLE_R is chosen so
-      // the apex (noon / midnight) sits well above the canvas top —
-      // the body is "off the top of the world" most of the day, only
-      // visible during the rise and set arcs near the horizon. This
-      // matches a real observer's mental model better than the
-      // squashed parabolic arc and avoids the artificial "noon = peak
-      // of sky band" compression that put the sun near the trees.
+      // (canvas-x mid, horizonY) with radius CIRCLE_R. CIRCLE_R is
+      // sized to half the visible world width so the rise/set limbs
+      // land at the world's left/right edges. Because R ≫ horizonY,
+      // the apex sits far above the canvas top — the body is "above
+      // the world" most of the day, with only the wide low rise/set
+      // arcs visible. The visible chord of the circle is wide and
+      // shallow; the full circle (mostly off-screen) is symmetric.
       const cxBody = ox + ow * 0.5;
-      // Use horizonY + a margin so the visible arc covers a meaningful
-      // sweep across the sky band before going off-canvas.
-      const CIRCLE_R = horizonY + skyHeightPx * 0.6;
+      const CIRCLE_R = ow * 0.5;
       const bodyScreenPos = (theta: number): { x: number; y: number; visible: boolean } => {
         const tn = Math.atan2(Math.sin(theta), Math.cos(theta)); // wrap to [-π, π]
         // tn=0  → noon  → x at center, y high above horizon (off-canvas)
