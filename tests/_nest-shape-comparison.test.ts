@@ -46,11 +46,11 @@ function buildSim(seed: number, compression: number, w = 400, h = 250): Sim {
   colony.spawn(cx + 0.5, cy + 0.5, 0, rng, DEFAULT_PARAMS);
   colony.setState(0, STATE_QUEEN);
   colony.energy[0] = 1.0;
-  // 25 starting workers scattered through the founding pocket so the
+  // 10 starting workers scattered through the founding pocket so the
   // run doesn't have to wait for the egg→adult pipeline before any
   // digging happens. Bypassing claustral founding lets us focus on
   // excavation behaviour itself.
-  for (let n = 0; n < 25; n++) {
+  for (let n = 0; n < 10; n++) {
     const x = cx + (rng.next() - 0.5) * (halfW * 1.6);
     const y = cy - rng.next() * (depth - 1);
     colony.spawn(x, y, rng.range(0, Math.PI * 2), rng, DEFAULT_PARAMS);
@@ -243,76 +243,92 @@ function asciiMap(world: World, cols = 80, rows = 60): string {
 function runScenario(name: string, compression: number, target: number, capTicks: number): {
   metrics: NestMetrics;
   ascii: string;
+  exitReason: 'target' | 'stall' | 'cap';
 } {
   const s = buildSim(7, compression);
   let cells = 0;
   let ticks = 0;
-  let lastProgressTick = 0;
-  // process.stderr.write bypasses vitest's per-test stdout buffer so
-  // long scenarios surface progress in real time. Prefix with the
-  // scenario name for clarity in the live tail.
+  let exitReason: 'target' | 'stall' | 'cap' = 'cap';
+  // Sample cell count every 10k ticks. Stall rule: if the new sample
+  // is less than 5% above the previous sample, declare stalled and
+  // return whatever shape we have. Stall window doesn't trigger on
+  // the very first sample (need a previous to compare to).
+  const SNAPSHOT = 10_000;
+  const STALL_GROWTH = 1.05;  // require ≥5% growth per snapshot
+  let prevCells = countNestCells(s.world);   // initial nest cells (founding pocket)
   const log = (msg: string): void => { process.stderr.write(`[${name}] ${msg}\n`); };
-  log(`start (compression=${compression}, target=${target}, cap=${capTicks})`);
+  log(`start (compression=${compression}, target=${target}, cap=${capTicks}, init=${prevCells})`);
   const t0 = Date.now();
-  while (cells < target && ticks < capTicks) {
+  while (ticks < capTicks) {
     runStep(s);
     ticks++;
-    if (ticks % 5000 === 0) {
+    if (ticks % SNAPSHOT === 0) {
       cells = countNestCells(s.world);
-      if (ticks - lastProgressTick >= 50000) {
-        const dt = ((Date.now() - t0) / 1000).toFixed(1);
-        log(`tick=${ticks} cells=${cells} (${dt}s wall)`);
-        lastProgressTick = ticks;
+      const dt = ((Date.now() - t0) / 1000).toFixed(1);
+      log(`tick=${ticks} cells=${cells} prev=${prevCells} (${dt}s wall)`);
+      if (cells >= target) { exitReason = 'target'; break; }
+      // Stall test: growth ratio over last snapshot.
+      if (cells < prevCells * STALL_GROWTH) {
+        log(`stall: ${prevCells} → ${cells} (${((cells / prevCells - 1) * 100).toFixed(1)}% < 5% threshold)`);
+        exitReason = 'stall';
+        break;
       }
+      prevCells = cells;
     }
   }
   cells = countNestCells(s.world);
   const dt = ((Date.now() - t0) / 1000).toFixed(1);
-  const reachedTarget = cells >= target;
-  log(`done: ticks=${ticks} cells=${cells} reachedTarget=${reachedTarget} wall=${dt}s`);
+  log(`done: ticks=${ticks} cells=${cells} reason=${exitReason} wall=${dt}s`);
   const metrics = computeMetrics(s.world, ticks);
   const ascii = asciiMap(s.world);
-  return { metrics, ascii };
+  return { metrics, ascii, exitReason };
 }
 
 describe('nest shape across compression', () => {
-  it('compares 1× / 10× / 100× / 1000× scenarios at 500-cell target', () => {
-    const TARGET = 300;
-    // Fastest-first ordering. Caps sized so 1000× should reach 300
-    // cells (reference run: 183 cells at tick 127k, so ~210k for 300),
-    // 100× has a chance to reach 300 (~2M ticks expected if dig rate
-    // scales with walkScale), and the slower scenarios produce
-    // informative partial data.
+  it('compares 1× / 10× / 100× / 1000× scenarios at 100-cell target', () => {
+    const TARGET = 100;
+    // Fastest-first ordering. Each scenario stops at 100 cells OR on
+    // a stall (10k tick window grew < 5%). Caps are a safety net only.
     const SCENARIOS = [
-      { name: '1000×', compression: 1000, cap:   400_000 },
-      { name: '100×',  compression: 100,  cap: 2_500_000 },
-      { name: '10×',   compression: 10,   cap: 1_500_000 },
-      { name: '1×',    compression: 1,    cap: 1_000_000 },
+      { name: '1000×', compression: 1000, cap: 5_000_000 },
+      { name: '100×',  compression: 100,  cap: 5_000_000 },
+      { name: '10×',   compression: 10,   cap: 5_000_000 },
+      { name: '1×',    compression: 1,    cap: 5_000_000 },
     ];
-    const results: { name: string; metrics: NestMetrics; ascii: string }[] = [];
+    const results: { name: string; metrics: NestMetrics; ascii: string; exitReason: string }[] = [];
+    // Print metrics + ASCII immediately after each scenario so partial
+    // data is preserved if the test gets interrupted mid-run.
+    const dumpScenario = (name: string, m: NestMetrics, ascii: string, exitReason: string): void => {
+      process.stderr.write(
+        `\n========== [${name}] result (${exitReason}) ==========\n` +
+        `cells=${m.cells} ticks=${m.ticks} maxDepth=${m.maxDepth} ` +
+        `meanDepth=${m.meanDepth.toFixed(1)} width=${m.width} aspect=${m.aspect.toFixed(2)} ` +
+        `chambers=${m.chambers} largest=${m.largestChamber} ` +
+        `shaft=${m.shaftCells} depthSizeSlope=${m.depthSizeSlope.toFixed(3)}\n` +
+        `${ascii}\n`,
+      );
+    };
     for (const sc of SCENARIOS) {
       const r = runScenario(sc.name, sc.compression, TARGET, sc.cap);
       results.push({ name: sc.name, ...r });
+      dumpScenario(sc.name, r.metrics, r.ascii, r.exitReason);
     }
-    // Final report.
-    console.log('\n========== summary ==========');
-    console.log('| scenario | cells | ticks   | depth | width | aspect | chambers | largest | shaft | slope  |');
-    console.log('|----------|------:|--------:|------:|------:|-------:|---------:|--------:|------:|-------:|');
+    // Final summary table — duplicates the per-scenario dumps but in
+    // a single comparison view.
+    process.stderr.write('\n========== summary ==========\n');
+    process.stderr.write('| scenario | cells | ticks   | depth | width | aspect | chambers | largest | shaft | slope  | reason |\n');
+    process.stderr.write('|----------|------:|--------:|------:|------:|-------:|---------:|--------:|------:|-------:|--------|\n');
     for (const r of results) {
       const m = r.metrics;
-      console.log(
+      process.stderr.write(
         `| ${r.name.padEnd(8)} | ${String(m.cells).padStart(5)} | ` +
         `${String(m.ticks).padStart(7)} | ${String(m.maxDepth).padStart(5)} | ` +
         `${String(m.width).padStart(5)} | ${m.aspect.toFixed(2).padStart(6)} | ` +
         `${String(m.chambers).padStart(8)} | ${String(m.largestChamber).padStart(7)} | ` +
-        `${String(m.shaftCells).padStart(5)} | ${m.depthSizeSlope.toFixed(3).padStart(6)} |`
+        `${String(m.shaftCells).padStart(5)} | ${m.depthSizeSlope.toFixed(3).padStart(6)} | ` +
+        `${r.exitReason.padEnd(6)} |\n`
       );
     }
-    for (const r of results) {
-      console.log(`\n========== ${r.name} cross-section ==========`);
-      console.log(r.ascii);
-    }
-    // No assertions — this is a comparison/observation harness.
     expect(results.length).toBe(4);
   });
 });
