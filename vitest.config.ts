@@ -24,6 +24,7 @@ export default defineConfig({
       'tests/_brood-pipeline-diag.test.ts',
       'tests/_morphology-tuning.test.ts',
       'tests/_compaction-tuning.test.ts',
+      'tests/_dig-spread-diag.test.ts',
     ],
   },
 });
