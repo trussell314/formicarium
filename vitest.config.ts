@@ -18,6 +18,7 @@ export default defineConfig({
       'tests/_monitor.test.ts',
       'tests/_smoke-compression.test.ts',
       'tests/_nest-shape-comparison.test.ts',
+      'tests/_one-x-long.test.ts',
     ],
   },
 });
