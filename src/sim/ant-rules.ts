@@ -3180,7 +3180,13 @@ export function step(
         }
         const cleanupBoost = airNbrs >= 6 ? 8.0 : 1.0;
         if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation * hungerDigMul * proxScale * cleanupBoost) {
-          if (digCell(world, target.x, target.y, rng)) {
+          // When the cleanup boost fires (target SOIL has ≥6 AIR
+          // neighbours), bypass digCell's anti-island check. The
+          // anti-island rule normally protects against creating
+          // small isolated bits during chamber widening; cleanup
+          // digs are *removing* already-isolated bits and refusing
+          // them would freeze the orphan in place forever.
+          if (digCell(world, target.x, target.y, rng, airNbrs >= 6)) {
             // Track dig direction relative to the digger's cell, so
             // the diag can surface a vertical-vs-lateral histogram.
             // Order [N, S, E, W] = [-y, +y, +x, -x] from (ax, ay) to
