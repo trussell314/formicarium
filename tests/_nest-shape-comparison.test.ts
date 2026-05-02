@@ -227,21 +227,36 @@ function asciiMap(world: World, cols = 80, rows = 60): string {
   return lines.join('\n');
 }
 
-function runScenario(compression: number, target: number, capTicks: number): {
+function runScenario(name: string, compression: number, target: number, capTicks: number): {
   metrics: NestMetrics;
   ascii: string;
 } {
   const s = buildSim(7, compression);
   let cells = 0;
   let ticks = 0;
+  let lastProgressTick = 0;
+  // process.stderr.write bypasses vitest's per-test stdout buffer so
+  // long scenarios surface progress in real time. Prefix with the
+  // scenario name for clarity in the live tail.
+  const log = (msg: string): void => { process.stderr.write(`[${name}] ${msg}\n`); };
+  log(`start (compression=${compression}, target=${target}, cap=${capTicks})`);
+  const t0 = Date.now();
   while (cells < target && ticks < capTicks) {
     runStep(s);
     ticks++;
-    if (ticks % 1000 === 0) {
+    if (ticks % 5000 === 0) {
       cells = countNestCells(s.world);
+      if (ticks - lastProgressTick >= 50000) {
+        const dt = ((Date.now() - t0) / 1000).toFixed(1);
+        log(`tick=${ticks} cells=${cells} (${dt}s wall)`);
+        lastProgressTick = ticks;
+      }
     }
   }
   cells = countNestCells(s.world);
+  const dt = ((Date.now() - t0) / 1000).toFixed(1);
+  const reachedTarget = cells >= target;
+  log(`done: ticks=${ticks} cells=${cells} reachedTarget=${reachedTarget} wall=${dt}s`);
   const metrics = computeMetrics(s.world, ticks);
   const ascii = asciiMap(s.world);
   return { metrics, ascii };
@@ -250,23 +265,21 @@ function runScenario(compression: number, target: number, capTicks: number): {
 describe('nest shape across compression', () => {
   it('compares 1× / 10× / 100× / 1000× scenarios at 500-cell target', () => {
     const TARGET = 500;
+    // Fastest-first ordering so visible results land early and we
+    // don't burn the whole timeout on the slow compression=1 scenario.
+    // Caps tuned to target ~2 min wall per scenario at this hardware:
+    // a tight scenario (1000×) finishes in tens of thousands of ticks,
+    // a slow scenario (1×) won't reach 500 cells but its partial
+    // result is itself informative.
     const SCENARIOS = [
-      { name: '1×',    compression: 1,    cap: 5_000_000 },
-      { name: '10×',   compression: 10,   cap: 2_000_000 },
-      { name: '100×',  compression: 100,  cap: 1_000_000 },
-      { name: '1000×', compression: 1000, cap: 500_000 },
+      { name: '1000×', compression: 1000, cap: 200_000 },
+      { name: '100×',  compression: 100,  cap: 500_000 },
+      { name: '10×',   compression: 10,   cap: 1_500_000 },
+      { name: '1×',    compression: 1,    cap: 2_500_000 },
     ];
     const results: { name: string; metrics: NestMetrics; ascii: string }[] = [];
     for (const sc of SCENARIOS) {
-      console.log(`\n[scenario ${sc.name}] running compression=${sc.compression}, cap=${sc.cap}…`);
-      const r = runScenario(sc.compression, TARGET, sc.cap);
-      console.log(
-        `  cells=${r.metrics.cells} ticks=${r.metrics.ticks} ` +
-        `depth=${r.metrics.maxDepth} width=${r.metrics.width} ` +
-        `aspect=${r.metrics.aspect.toFixed(2)} chambers=${r.metrics.chambers} ` +
-        `largest=${r.metrics.largestChamber} shaft=${r.metrics.shaftCells} ` +
-        `depthSizeSlope=${r.metrics.depthSizeSlope.toFixed(3)}`
-      );
+      const r = runScenario(sc.name, sc.compression, TARGET, sc.cap);
       results.push({ name: sc.name, ...r });
     }
     // Final report.
