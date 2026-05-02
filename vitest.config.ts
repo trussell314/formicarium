@@ -22,6 +22,7 @@ export default defineConfig({
       'tests/_nest-shape-tuning.test.ts',
       'tests/_queen-only-milestones.test.ts',
       'tests/_brood-pipeline-diag.test.ts',
+      'tests/_morphology-tuning.test.ts',
     ],
   },
 });
