@@ -181,14 +181,21 @@ function wrapAngle(a: number): number {
 }
 
 /**
- * True if a nurse-aged worker (or, in claustral founding, the queen
- * herself) is within `radius` cells of the brood at `targetIdx`.
- * Brood depend on nurses to be physically transported between
- * depths — without one nearby, the egg / larva can't migrate. Real
- * nurses pick up brood with their mandibles (Hölldobler & Wilson
- * 1990 ch. 9). Founding queens nurse their own first brood from
- * wing-muscle reserves (H&W 1990 ch. 5), so the queen counts as a
- * valid attendant whenever she's adjacent.
+ * True if a nurse-aged worker is within `radius` cells of the brood
+ * at `targetIdx`. Brood depend on nurses to be physically transported
+ * between depths — without one nearby, the egg / larva can't migrate.
+ * Real nurses pick up brood with their mandibles and walk it to the
+ * target chamber (Hölldobler & Wilson 1990 ch. 9).
+ *
+ * Queens are NOT counted as nurses for migration purposes during
+ * claustral founding. Real foundresses don't move brood around the
+ * chamber — they pile their first cohort at one spot and stay with
+ * them (H&W 1990 ch. 5; Tschinkel 1988 on P. badius founding).
+ * Migration is a worker-mediated behaviour that emerges once the
+ * first nanitics eclose. Counting the queen as a nurse caused the
+ * brood pile to drift downward toward broodMaxDepth one cell per
+ * migration interval, eventually escaping the trophallaxis radius
+ * and starving the larvae before any worker could emerge.
  *
  * O(N) per call. Brood-migration runs at most every
  * species.broodMigrateInterval ticks per brood, so the amortised
@@ -204,10 +211,8 @@ function nurseNearby(
     if (j === targetIdx) continue;
     const sj = colony.state[j]!;
     if (sj === STATE_DEAD || sj === STATE_EGG || sj === STATE_LARVA
-        || sj === STATE_PUPA) continue;
-    // Queens count as attendants (claustral founding); workers
-    // count only when nurse-aged.
-    if (sj !== STATE_QUEEN && colony.age[j]! > ageCutoff) continue;
+        || sj === STATE_PUPA || sj === STATE_QUEEN) continue;
+    if (colony.age[j]! > ageCutoff) continue;
     const dx = colony.posX[j]! - tx;
     const dy = colony.posY[j]! - ty;
     if (dx * dx + dy * dy < r2) return true;
@@ -1096,20 +1101,7 @@ export function step(
                 const surplus = (recipIsStarvingLarva || donorIsFoodCarrier)
                   ? Math.max(0, donorE - PRIORITY_DONOR_FLOOR)
                   : donorE - species.trophallaxisDonorThreshold;
-                // Queen-to-larva trophallaxis is an order of magnitude
-                // richer than worker-to-larva: the foundress secretes
-                // larval food from labial glands and produces trophic
-                // eggs (Hölldobler & Wilson 1990 Ch. 5; Tschinkel 1988
-                // on P. badius founding). The worker-calibrated rate
-                // can't sustain larvae without nurse attendants — it's
-                // why the diagnostic showed founding colonies starving
-                // larvae before any worker emerges. Bump 4× to model
-                // the founding-queen feeding mode.
-                const queenToLarva = donorState === STATE_QUEEN && recipState === STATE_LARVA;
-                const tropAmount = species.trophallaxisAmount * ms * (queenToLarva ? 4 : 1);
-                const give = Math.min(tropAmount, want, surplus);
-                // TEMP debug — count queen→larva trophallaxis events.
-                if (queenToLarva) (globalThis as any).__qlTrophCount = ((globalThis as any).__qlTrophCount || 0) + 1;
+                const give = Math.min(species.trophallaxisAmount * ms, want, surplus);
                 if (give > 0) {
                   colony.energy[recip] = recipE + give;
                   // Queens feeding larvae draw on non-modelled wing-

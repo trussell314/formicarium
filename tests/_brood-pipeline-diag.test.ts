@@ -87,27 +87,18 @@ describe('brood-pipeline diagnostic', () => {
         }
       }
       const meanLarvaE = larvaCount > 0 ? (larvaESum / larvaCount).toFixed(2) : '—';
-      void pupaESum; void pupaCount;
+      const meanPupaE = pupaCount > 0 ? (pupaESum / pupaCount).toFixed(2) : '—';
       const cells = countNest();
-      const qlTroph = (globalThis as any).__qlTrophCount || 0;
-      // Find queen position + first larva position for distance check.
-      let qx = -1, qy = -1, lx = -1, ly = -1;
-      for (let i = 0; i < colony.count; i++) {
-        if (colony.state[i] === STATE_QUEEN) { qx = colony.posX[i]!; qy = colony.posY[i]!; }
-        if (colony.state[i] === STATE_LARVA && lx < 0) { lx = colony.posX[i]!; ly = colony.posY[i]!; }
-      }
-      const dist = (lx >= 0 && qx >= 0)
-        ? Math.hypot(lx - qx, ly - qy).toFixed(1)
-        : '—';
       process.stderr.write(
         `[diag] t=${String(tick).padStart(7)} ` +
         `cells=${String(cells).padStart(3)} ` +
-        `Q=${counts.Q}@(${qx.toFixed(0)},${qy.toFixed(0)}) qE=${queenE >= 0 ? queenE.toFixed(2) : '—'} ` +
-        `EGG=${counts.EGG} LRV=${counts.LARVA}@(${lx >= 0 ? lx.toFixed(0) : '?'},${ly >= 0 ? ly.toFixed(0) : '?'}) ` +
-        `(eL=${meanLarvaE}) dist=${dist} ` +
-        `PUP=${counts.PUPA} ` +
+        `Q=${counts.Q} qE=${queenE >= 0 ? queenE.toFixed(2) : '—'} ` +
+        `EGG=${counts.EGG} LRV=${counts.LARVA} (eL=${meanLarvaE}) ` +
+        `PUP=${counts.PUPA} (eP=${meanPupaE}) ` +
+        `WND=${counts.WANDER} REST=${counts.REST} FRG=${counts.FORAGE} ` +
+        `CARRY=${counts.CARRY} CF=${counts.CARRY_FOOD} ` +
         `DEAD=${counts.DEAD} ` +
-        `born=${totalBorn} died=${totalDied} qlT=${qlTroph} ` +
+        `born=${totalBorn} died=${totalDied} ` +
         `(${dt}s)\n`,
       );
     }
