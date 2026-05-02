@@ -108,7 +108,7 @@ function lerp3(a: [number, number, number], b: [number, number, number], t: numb
  *  Mirrors the GL fragment shader's two plant-render scans so the
  *  Canvas2D star-occlusion path picks the same pixels the shader
  *  paints over. */
-function plantCovers(world: RenderableWorld, cellX: number, cellY: number): boolean {
+function plantCovers(world: RenderableWorld, cellX: number, cellY: number, includeDistantBg = false): boolean {
   const w = world.width;
   // Foreground scan — kind-based radii, matches GL FG branch.
   for (let dx = -5; dx <= 5; dx++) {
@@ -130,9 +130,11 @@ function plantCovers(world: RenderableWorld, cellX: number, cellY: number): bool
     const absDx = dx < 0 ? -dx : dx;
     if (absDx <= reqRadius) return true;
   }
-  // Background scan — only the NEAR BG plants (distClass 0-1) occlude
-  // stars; far ones (distClass 2-3) are too hazy to block. Matches the
-  // GL BG branch's distance-modulated rendering.
+  // Background scan. Stars only count NEAR BG plants (distClass 0-1) as
+  // occluders — far ones (distClass 2-3) are too hazy to block faint
+  // stars. But the SUN/MOON are bright solid bodies that should clearly
+  // render BEHIND even hazy distant plants; pass includeDistantBg=true
+  // for the celestial-disc clip so the full BG plant range occludes.
   for (let dx = -8; dx <= 8; dx++) {
     const nx = cellX + dx;
     if (nx < 0 || nx >= w) continue;
@@ -141,7 +143,7 @@ function plantCovers(world: RenderableWorld, cellX: number, cellY: number): bool
     const h = world.bgPlantHeight[nx]!;
     if (h === 0) continue;
     const distClass = (world.soilNoise[nx]! >> 4) & 3;
-    if (distClass >= 2) continue;
+    if (!includeDistantBg && distClass >= 2) continue;
     const surf = world.naturalSurface[nx]!;
     const base = surf - 1 + distClass;
     const top = surf - h + distClass;
@@ -812,9 +814,7 @@ export class Renderer {
       // below horizon. screen-x increases with sin(θ) (rising on
       // left, setting on right); screen-y is high near apex via
       // cos(θ).
-      const skyTop = oy;
       const skyBottom = oy + skyHeightPx;
-      const peakY = skyTop + skyHeightPx * 0.15;
       const horizonY = skyBottom - skyHeightPx * 0.05;
       const bodyR = Math.max(6, Math.min(skyHeightPx * 0.07, ow * 0.025));
       // Lunar cycle: 28 sim days. Uses world.tick directly (rather
@@ -844,17 +844,30 @@ export class Renderer {
       // for the visible-bodies path and to compute the sun's virtual
       // position when below the horizon (needed for moon-shadow
       // direction).
+      // True circular path: the body traces a circle centered at
+      // (ow/2, horizonY) with radius CIRCLE_R. CIRCLE_R is chosen so
+      // the apex (noon / midnight) sits well above the canvas top —
+      // the body is "off the top of the world" most of the day, only
+      // visible during the rise and set arcs near the horizon. This
+      // matches a real observer's mental model better than the
+      // squashed parabolic arc and avoids the artificial "noon = peak
+      // of sky band" compression that put the sun near the trees.
+      const cxBody = ox + ow * 0.5;
+      // Use horizonY + a margin so the visible arc covers a meaningful
+      // sweep across the sky band before going off-canvas.
+      const CIRCLE_R = horizonY + skyHeightPx * 0.6;
       const bodyScreenPos = (theta: number): { x: number; y: number; visible: boolean } => {
         const tn = Math.atan2(Math.sin(theta), Math.cos(theta)); // wrap to [-π, π]
-        const altitude = Math.cos(tn); // +1 overhead, -1 below
-        // Linear horizontal sweep east→overhead→west, scaled to ow.
-        // Use sin for the screen-x so apex sits at ow/2 and limbs at
-        // 0 / ow regardless of altitude sign.
-        const x = ox + ow * (Math.sin(tn) * 0.5 + 0.5);
-        // Parabolic-ish y: at altitude 0 → horizonY, at altitude 1 →
-        // peakY. Negative altitudes extend below horizon for the
-        // virtual-sun calculation.
-        const y = horizonY + (peakY - horizonY) * altitude;
+        // tn=0  → noon  → x at center, y high above horizon (off-canvas)
+        // tn=±π/2 → horizon → x at limbs, y at horizonY
+        // tn=±π → midnight → x at center, y below horizon
+        const x = cxBody + CIRCLE_R * Math.sin(tn);
+        const y = horizonY - CIRCLE_R * Math.cos(tn);
+        // visible only when above horizon (altitude > 0); the canvas
+        // crops off whatever portion is above the screen top, which is
+        // exactly what we want — the body disappears off the top
+        // around noon and reappears near sunset.
+        const altitude = Math.cos(tn);
         return { x, y, visible: altitude > 0 };
       };
       const sunPos = bodyScreenPos(thetaSun);
@@ -876,7 +889,7 @@ export class Renderer {
             const wx = cellX + dx;
             const wy = cellY + dy;
             if (wx < 0 || wy < 0 || wx >= this.world.width || wy >= this.world.height) continue;
-            if (plantCovers(this.world, wx, wy)) continue;
+            if (plantCovers(this.world, wx, wy, true)) continue;
             this.ctx.rect(ox + wx * scale, oy + wy * scale, scale + 0.5, scale + 0.5);
           }
         }
