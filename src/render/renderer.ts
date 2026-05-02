@@ -75,8 +75,14 @@ const SKY_BOTTOM_DAY: [number, number, number] = [185, 195, 215];
 // looked like ink stains. TUNNEL_NEAR is what air close to the
 // surface looks like; TUNNEL_DEEP is the deep-tunnel color the depth
 // fog blends toward.
-const TUNNEL_NEAR: [number, number, number] = [148, 110, 78];
-const TUNNEL_DEEP: [number, number, number] = [42, 28, 20];
+// Darkened to ~40% of the way between SOIL and the original tan
+// values: original near=(148,110,78) → soil_top=(56,35,18) lerp 0.4
+// = (93,65,42); original deep=(42,28,20) → soil_bottom=(32,18,9)
+// lerp 0.4 = (36,22,13). Brings tunnel cells closer to the soil
+// palette so chambers read as packed-soil interior rather than open
+// open-air voids; matches cross-section nest photos better.
+const TUNNEL_NEAR: [number, number, number] = [93, 65, 42];
+const TUNNEL_DEEP: [number, number, number] = [36, 22, 13];
 // Solid soil — single dark palette. GRAIN cells (excavated spoil)
 // share this palette: a real Pogonomyrmex mound and the undisturbed
 // substrate around it are made of the same earth and look visually
@@ -846,14 +852,16 @@ export class Renderer {
       // direction).
       // True circular path: the body traces a circle centered at
       // (canvas-x mid, horizonY) with radius CIRCLE_R. CIRCLE_R is
-      // sized to half the visible world width so the rise/set limbs
-      // land at the world's left/right edges. Because R ≫ horizonY,
-      // the apex sits far above the canvas top — the body is "above
-      // the world" most of the day, with only the wide low rise/set
-      // arcs visible. The visible chord of the circle is wide and
-      // shallow; the full circle (mostly off-screen) is symmetric.
+      // sized so the apex sits moderately above the canvas top — the
+      // body is "above the world" through the middle of the day but
+      // visible during meaningful rise and set arcs (~30% of each
+      // half-day). Setting R too big (e.g. ow/2) made the visible
+      // window only ~3% of the day on each side, so the user only
+      // ever caught it briefly at sunset, never seeing the rise.
+      // 2× horizonY puts the noon apex one full sky-band-height
+      // above the canvas while keeping the rise/set arcs unhurried.
       const cxBody = ox + ow * 0.5;
-      const CIRCLE_R = ow * 0.5;
+      const CIRCLE_R = horizonY * 2;
       const bodyScreenPos = (theta: number): { x: number; y: number; visible: boolean } => {
         const tn = Math.atan2(Math.sin(theta), Math.cos(theta)); // wrap to [-π, π]
         // tn=0  → noon  → x at center, y high above horizon (off-canvas)
