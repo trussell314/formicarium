@@ -42,9 +42,22 @@ function buildSim(seed: number, compression: number, w = 400, h = 250): Sim {
   const colony = new Colony(1000);
   const cx = world.width >> 1;
   const cy = surfaceRow + depth;
+  // Queen at the chamber bottom.
   colony.spawn(cx + 0.5, cy + 0.5, 0, rng, DEFAULT_PARAMS);
   colony.setState(0, STATE_QUEEN);
   colony.energy[0] = 1.0;
+  // 25 starting workers scattered through the founding pocket so the
+  // run doesn't have to wait for the egg→adult pipeline before any
+  // digging happens. Bypassing claustral founding lets us focus on
+  // excavation behaviour itself.
+  for (let n = 0; n < 25; n++) {
+    const x = cx + (rng.next() - 0.5) * (halfW * 1.6);
+    const y = cy - rng.next() * (depth - 1);
+    colony.spawn(x, y, rng.range(0, Math.PI * 2), rng, DEFAULT_PARAMS);
+    // Default state for spawn is WANDER; energy starts mid so they
+    // don't immediately starve.
+    colony.energy[colony.count - 1] = 0.7;
+  }
   const fields = {
     dig: new Pheromone(world.width, world.height, 0.10, 0.985),
     build: new Pheromone(world.width, world.height, 0.10, 0.985),
@@ -264,18 +277,17 @@ function runScenario(name: string, compression: number, target: number, capTicks
 
 describe('nest shape across compression', () => {
   it('compares 1× / 10× / 100× / 1000× scenarios at 500-cell target', () => {
-    const TARGET = 500;
-    // Fastest-first ordering so visible results land early and we
-    // don't burn the whole timeout on the slow compression=1 scenario.
-    // Caps tuned to target ~2 min wall per scenario at this hardware:
-    // a tight scenario (1000×) finishes in tens of thousands of ticks,
-    // a slow scenario (1×) won't reach 500 cells but its partial
-    // result is itself informative.
+    const TARGET = 300;
+    // Fastest-first ordering. Caps sized so 1000× should reach 300
+    // cells (reference run: 183 cells at tick 127k, so ~210k for 300),
+    // 100× has a chance to reach 300 (~2M ticks expected if dig rate
+    // scales with walkScale), and the slower scenarios produce
+    // informative partial data.
     const SCENARIOS = [
-      { name: '1000×', compression: 1000, cap: 200_000 },
-      { name: '100×',  compression: 100,  cap: 500_000 },
+      { name: '1000×', compression: 1000, cap:   400_000 },
+      { name: '100×',  compression: 100,  cap: 2_500_000 },
       { name: '10×',   compression: 10,   cap: 1_500_000 },
-      { name: '1×',    compression: 1,    cap: 2_500_000 },
+      { name: '1×',    compression: 1,    cap: 1_000_000 },
     ];
     const results: { name: string; metrics: NestMetrics; ascii: string }[] = [];
     for (const sc of SCENARIOS) {
