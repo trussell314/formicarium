@@ -1096,7 +1096,18 @@ export function step(
                 const surplus = (recipIsStarvingLarva || donorIsFoodCarrier)
                   ? Math.max(0, donorE - PRIORITY_DONOR_FLOOR)
                   : donorE - species.trophallaxisDonorThreshold;
-                const give = Math.min(species.trophallaxisAmount * ms, want, surplus);
+                // Queen-to-larva trophallaxis is an order of magnitude
+                // richer than worker-to-larva: the foundress secretes
+                // larval food from labial glands and produces trophic
+                // eggs (Hölldobler & Wilson 1990 Ch. 5; Tschinkel 1988
+                // on P. badius founding). The worker-calibrated rate
+                // can't sustain larvae without nurse attendants — it's
+                // why the diagnostic showed founding colonies starving
+                // larvae before any worker emerges. Bump 4× to model
+                // the founding-queen feeding mode.
+                const queenToLarva = donorState === STATE_QUEEN && recipState === STATE_LARVA;
+                const tropAmount = species.trophallaxisAmount * ms * (queenToLarva ? 4 : 1);
+                const give = Math.min(tropAmount, want, surplus);
                 if (give > 0) {
                   colony.energy[recip] = recipE + give;
                   // Queens feeding larvae draw on non-modelled wing-
