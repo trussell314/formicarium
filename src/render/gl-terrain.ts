@@ -107,8 +107,8 @@ const vec3 SKY_TOP_DAY   = vec3(120.0, 145.0, 180.0) / 255.0;
 const vec3 SKY_BOT_DAY   = vec3(185.0, 195.0, 215.0) / 255.0;
 const vec3 TUNNEL_NEAR   = vec3(148.0, 110.0,  78.0) / 255.0;
 const vec3 TUNNEL_DEEP   = vec3( 42.0,  28.0,  20.0) / 255.0;
-const vec3 SOIL_TOP      = vec3( 70.0,  44.0,  22.0) / 255.0;
-const vec3 SOIL_BOT      = vec3( 42.0,  24.0,  12.0) / 255.0;
+const vec3 SOIL_TOP      = vec3( 56.0,  35.0,  18.0) / 255.0;
+const vec3 SOIL_BOT      = vec3( 32.0,  18.0,   9.0) / 255.0;
 const vec3 FRESH_DIG     = vec3( 78.0,  56.0,  38.0) / 255.0;
 const vec3 FOOD_FRESH    = vec3( 90.0, 220.0,  70.0) / 255.0;
 const vec3 FOOD_WORN     = vec3( 30.0,  80.0,  24.0) / 255.0;
@@ -161,7 +161,11 @@ void main() {
   float n1 = (float(hashA) / 255.0 - 0.5);
   float n2 = (float(hashB) / 255.0 - 0.5);
   float n3 = (float(hashC) / 255.0 - 0.5);
-  float multiNoise = (n1 * 0.10 + n2 * 0.06 + n3 * 0.04);
+  // Stronger texture (was 0.10/0.06/0.04 → 0.20/0.12/0.08): the
+  // darker palette absorbed too much noise contrast, so soil read
+  // as a uniform dark slab. Doubled noise amplitudes restore visible
+  // grain/striation across all three octaves.
+  float multiNoise = (n1 * 0.20 + n2 * 0.12 + n3 * 0.08);
 
   // Cell-neighbour samples for rim-light + AO (#6, #7). Cheap:
   // 4 extra texelFetches.

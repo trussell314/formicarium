@@ -82,8 +82,8 @@ const TUNNEL_DEEP: [number, number, number] = [42, 28, 20];
 // substrate around it are made of the same earth and look visually
 // indistinguishable; the only cue that something is "mound" rather
 // than "ground" is its position above the natural surface row.
-const SOIL_TOP: [number, number, number] = [70, 44, 22];
-const SOIL_BOTTOM: [number, number, number] = [42, 24, 12];
+const SOIL_TOP: [number, number, number] = [56, 35, 18];
+const SOIL_BOTTOM: [number, number, number] = [32, 18, 9];
 // Food (seeds) — bright green when freshly delivered (moves = 0,
 // surface seed rain), darkening as ants pick up and re-deposit.
 const FOOD_FRESH: [number, number, number] = [90, 220, 70];
@@ -510,7 +510,12 @@ export class Renderer {
           const sy = surfRow[x]!;
           const t = (y - sy) / Math.max(1, h - sy);
           const soil = lerp3(SOIL_TOP, SOIL_BOTTOM, Math.min(1, t));
-          const n = (noise[idx]! / 255 - 0.5) * 0.18;
+          // Per-cell luminance perturbation. Stronger (±18%) than the
+          // legacy ±9% so the soil reads as visibly textured rather
+          // than uniformly dark. Combined with the per-subcell noise
+          // below, this gives chamber walls a granular look closer
+          // to a packed-soil cross-section photo.
+          const n = (noise[idx]! / 255 - 0.5) * 0.36;
           r = soil[0] * (1 + n);
           g = soil[1] * (1 + n);
           b = soil[2] * (1 + n);
@@ -537,7 +542,7 @@ export class Renderer {
           const sy = surfRow[x]!;
           const t = (y - sy) / Math.max(1, h - sy);
           const soil = lerp3(SOIL_TOP, SOIL_BOTTOM, Math.min(1, t));
-          const n = (noise[idx]! / 255 - 0.5) * 0.18;
+          const n = (noise[idx]! / 255 - 0.5) * 0.36;
           r = soil[0] * (1 + n);
           g = soil[1] * (1 + n);
           b = soil[2] * (1 + n);
@@ -589,7 +594,10 @@ export class Renderer {
             } else {
               const subI = sy * SUB + sx;
               const subN = ((subBase + subI * 67) & 0xff) / 255 - 0.5;
-              const PERT = 0.10;
+              // Bumped 0.10 → 0.20 so per-subcell variation reads
+              // as visible grain (sand-grit) at typical zoom rather
+              // than just slight luminance noise.
+              const PERT = 0.20;
               sr = r * (1 + subN * PERT);
               sg = g * (1 + subN * PERT);
               sb = b * (1 + subN * PERT);
