@@ -47,7 +47,7 @@ import { Pheromone, uploadPheromoneCells } from './pheromone';
 import { digCell, pickGrain, placeGrain, recomputeMound, settle, tryStep } from './physics';
 import type { RNG } from './rng';
 import { type AntSpecies, HARVESTER } from './species';
-import { CELL_AIR, CELL_GRAIN, CELL_SOIL, DAY_TICKS, daylight, macroScale, PLANT_MAX_HEIGHT, World } from './world';
+import { CELL_AIR, CELL_GRAIN, CELL_SOIL, DAY_TICKS, daylight, macroScale, PLANT_MAX_HEIGHT, WALK_SPEED_CAP, World } from './world';
 
 export interface SimParams {
   /** Cells/tick walking speed. Sub-stepped so soil contacts aren't skipped. */
@@ -862,7 +862,20 @@ export function step(
   // walkSpeed, geotaxis, and the deposit amounts stay as colony-wide
   // constants; the per-ant heterogeneity (digProb, pickProb,
   // stigmergy, turnNoise) is sampled at spawn into Colony arrays.
-  const { walkSpeed, geotaxis, digDeposit, buildDeposit } = params;
+  const { walkSpeed: walkSpeedBase, geotaxis, digDeposit, buildDeposit } = params;
+  // Effective walk speed scales UP with compression above the
+  // calibration baseline so foragers can still cross the world in
+  // one trip at high time-compression. Below baseline (compression ≤
+  // 100), walk speed is unchanged — at compression=1 (1:1 biology
+  // mode) ants already walk at real biological speed. Above 100,
+  // scale by ms so trip distance stays roughly constant in wall-time
+  // (and grows in bio-time, matching the "ants moving at real bio
+  // speed" goal). Capped at WALK_SPEED_CAP so the substep budget
+  // stays bounded; above the cap, biological reach per trip starts
+  // to shrink and very-high-compression mode is no longer realistic
+  // for foraging (acknowledged design limit).
+  const walkScale = Math.max(1, ms);
+  const walkSpeed = Math.min(WALK_SPEED_CAP, walkSpeedBase * walkScale);
   const subSteps = Math.max(2, Math.ceil(walkSpeed));
   const stepLen = walkSpeed / subSteps;
   // Count alive non-brood workers for colony-size-dependent caste
@@ -3134,7 +3147,27 @@ export function step(
         const colonyMarker = Math.max(queenLocal * 4, trunkLocal * 6);
         const proxScale = (entombed || stranded) ? 1.0
           : Math.max(0.30, Math.min(1.0, colonyMarker + 0.30));
-        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation * hungerDigMul * proxScale) {
+        // Island-cleanup boost. A SOIL cell with ≥6 of its 8
+        // neighbours non-soil/non-grain (i.e. AIR — out-of-bounds is
+        // treated as solid since the world wall is implicit) is a
+        // near-orphan: only 1-2 connections to the surrounding soil.
+        // Real ants chew these stragglers down to keep chamber walls
+        // contiguous (and the anti-island dig rule will refuse cases
+        // where removing this cell would leave a smaller island
+        // behind). Strong multiplier so cleanup is the dominant
+        // behaviour when an ant is adjacent to an exposed bit.
+        let airNbrs = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = target.x + dx;
+            const ny = target.y + dy;
+            if (nx < 0 || ny < 0 || nx >= world.width || ny >= world.height) continue;
+            if (world.cells[ny * world.width + nx]! === CELL_AIR) airNbrs++;
+          }
+        }
+        const cleanupBoost = airNbrs >= 6 ? 8.0 : 1.0;
+        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation * hungerDigMul * proxScale * cleanupBoost) {
           if (digCell(world, target.x, target.y, rng)) {
             // Track dig direction relative to the digger's cell, so
             // the diag can surface a vertical-vs-lateral histogram.

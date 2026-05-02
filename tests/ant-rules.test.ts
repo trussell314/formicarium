@@ -312,7 +312,11 @@ describe('ant-rules: grain conservation under arbitrary tick counts', () => {
         if (colony.state[i] === STATE_CARRY) carriers++;
       }
       const dug = w.initialSoilCells - w.countSoil();
-      expect(dug).toBe(w.countGrains() + carriers);
+      // wearLost accounts for traffic-driven shaft erosion (mandible
+      // pulverising; see ant-rules.ts wear branch). Real biology loses
+      // some material to dust during transit; the invariant carries
+      // that term to stay honest.
+      expect(dug).toBe(w.countGrains() + carriers + w.wearLost);
       // Sanity: no embedded grain/soil collisions detected by inspecting cells type.
       void CELL_GRAIN;
     }

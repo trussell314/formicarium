@@ -77,6 +77,17 @@ export let DAY_TICKS = (SECONDS_PER_DAY / TIME_COMPRESSION) * TICKS_PER_SEC;
  *  biological calendar (lifespan, foraging cadence, etc.). */
 export let SECONDS_PER_TICK_BIO = TIME_COMPRESSION / TICKS_PER_SEC;
 
+/** Hard ceiling on effective walk speed in cells/tick. Below this
+ *  cap, the time-compression dial scales walk speed so foragers
+ *  cover the same biological distance per bio-second at any
+ *  compression. Above the cap (compression > ~10× the calibrated
+ *  base walkSpeed), trips are still bounded — there's a "broken
+ *  zone" at very high compression where biological reach starts to
+ *  shrink — but the cap keeps the per-tick substep budget bounded.
+ *  Each substep is one tryStep + a handful of pheromone ops; cap×
+ *  substeps × num-ants is the per-tick cost. */
+export const WALK_SPEED_CAP = 10;
+
 /** Per-tick macro-rate scale factor. Multiply Bernoulli probabilities,
  *  per-tick energy drains, and per-tick rate counts by this. Divide
  *  interval thresholds by this. Returns 1 at the baseline (no scaling
