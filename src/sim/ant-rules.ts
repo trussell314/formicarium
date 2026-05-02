@@ -1508,6 +1508,18 @@ export function step(
     let stateIn: AntState = colony.state[i] as AntState;
     const ix = colony.posX[i]! | 0;
     const iy = colony.posY[i]! | 0;
+    // Below-surface adhesion. Workers cling to chamber walls and
+    // ceilings via tarsal claws + arolia (see Federle/Endlein on
+    // ant attachment safety factors). Our 2D slice can't render
+    // which 3D surface a worker is currently clinging to, so any
+    // "mid-air" cell inside a chamber is really still in contact
+    // with a surface we don't model. Below ground, workers ignore
+    // gravity and the unsupported-locomotion gate. Above ground
+    // (foraging on the mound) they fall normally — that's a real
+    // 2D surface there. Queen and brood fall in any case (queens
+    // sit at chamber bottoms during founding; eggs/larvae/pupae
+    // can't cling).
+    const adheres = iy >= world.naturalSurface[ix]!;
 
     // Per-ant aging.
     colony.age[i]!++;
@@ -1755,7 +1767,7 @@ export function step(
         for (let s = 0; s < subSteps; s++) {
           const dx = Math.cos(h) * stepLen;
           const dy = Math.sin(h) * stepLen;
-          const r = tryStep(world, nx, ny, dx, dy);
+          const r = tryStep(world, nx, ny, dx, dy, adheres);
           nx = r.x; ny = r.y;
           if (r.hitSoil) {
             // Wall-following: see thigmotaxis comment in the main
@@ -1898,7 +1910,7 @@ export function step(
         for (let s = 0; s < subSteps; s++) {
           const dx = Math.cos(h) * stepLen;
           const dy = Math.sin(h) * stepLen;
-          const r = tryStep(world, nx, ny, dx, dy);
+          const r = tryStep(world, nx, ny, dx, dy, adheres);
           nx = r.x; ny = r.y;
           if (r.hitSoil) {
             // Wall-following: see thigmotaxis comment in the main
@@ -2050,7 +2062,7 @@ export function step(
       for (let s = 0; s < subSteps; s++) {
         const dx = Math.cos(h) * stepLen;
         const dy = Math.sin(h) * stepLen;
-        const r = tryStep(world, nx, ny, dx, dy);
+        const r = tryStep(world, nx, ny, dx, dy, adheres);
         nx = r.x; ny = r.y;
         if (r.hitSoil) {
           cfHitSoil = true;
@@ -2213,7 +2225,7 @@ export function step(
       for (let s = 0; s < subSteps; s++) {
         const dx = Math.cos(h) * stepLen;
         const dy = Math.sin(h) * stepLen;
-        const r = tryStep(world, nx, ny, dx, dy);
+        const r = tryStep(world, nx, ny, dx, dy, adheres);
         nx = r.x; ny = r.y;
         if (r.hitSoil) {
           const _sign = (i & 1) === 0 ? -1 : 1;
@@ -2654,7 +2666,7 @@ export function step(
     for (let s = 0; s < subSteps; s++) {
       const dx = Math.cos(h) * stepLen;
       const dy = Math.sin(h) * stepLen;
-      const r = tryStep(world, nx, ny, dx, dy);
+      const r = tryStep(world, nx, ny, dx, dy, adheres);
       nx = r.x;
       ny = r.y;
       if (r.hitSoil) {
@@ -3566,7 +3578,11 @@ export function step(
         || sG === STATE_LARVA || sG === STATE_PUPA) continue;
     const sx = colony.posX[i]! | 0;
     const sy = colony.posY[i]! | 0;
-    const settled = settle(world, sx, sy);
+    // Workers below the natural surface adhere — extricate from any
+    // fresh soil but skip the unsupported-drop step (see tryStep
+    // comment above for the biological rationale).
+    const sAdheres = sy >= world.naturalSurface[sx]!;
+    const settled = settle(world, sx, sy, sAdheres);
     // Shift posY by the cell delta the settle picked, preserving
     // the sub-cell fractional part. Snapping to settled+0.5 used to
     // produce visible "jumps" in the renderer interpolation when an

@@ -66,13 +66,17 @@ export interface StepResult {
  */
 export function tryStep(
   world: World, x: number, y: number, dx: number, dy: number,
+  adheres = false,
 ): StepResult {
   const cx = x | 0;
   const cy = y | 0;
-  if (!isSupported(world, cx, cy)) {
+  if (!adheres && !isSupported(world, cx, cy)) {
     // Free fall — locomotion is suppressed; settle handles vertical
     // motion. Returning the original position keeps this an env-level
-    // primitive so the agent layer can't bypass it.
+    // primitive so the agent layer can't bypass it. Below-ground
+    // workers pass adheres=true: in 3D they're clinging to a chamber
+    // wall/ceiling that the 2D slice can't show, so apparent "mid-
+    // air" cells here aren't really mid-air.
     return { x, y, hitSoil: false };
   }
   const nx = x + dx;
@@ -116,15 +120,23 @@ export function tryStep(
  * cell first (the cell may have just become solid under it), then
  * drop one row if unsupported. Walking off a ledge produces a
  * visible falling arc rather than a teleport to the floor.
+ *
+ * The extrication half always runs (a buried worker must climb up
+ * out of fresh soil regardless). The drop-if-unsupported half is
+ * gated by `adheres` — below-ground workers cling to chamber
+ * surfaces that the 2D slice doesn't render, so an "unsupported"
+ * grid cell isn't really empty space and they don't fall.
  */
-export function settle(world: World, ix: number, iy: number): number {
+export function settle(
+  world: World, ix: number, iy: number, adheres = false,
+): number {
   while (iy >= 0 && iy < world.height) {
     const k = world.cells[iy * world.width + ix]!;
     if (k !== CELL_SOIL && k !== CELL_GRAIN) break;
     iy--;
   }
   if (iy < 0) iy = 0;
-  if (iy + 1 < world.height && !isSupported(world, ix, iy)) iy++;
+  if (!adheres && iy + 1 < world.height && !isSupported(world, ix, iy)) iy++;
   return iy;
 }
 
