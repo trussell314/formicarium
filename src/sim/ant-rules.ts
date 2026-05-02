@@ -3072,12 +3072,25 @@ export function step(
       // Substrate compaction (Tschinkel 2004): bulk density of soil
       // increases with depth, so dig probability decreases. Linear
       // ramp from 1.0 at surface down to species.compactionFloor at
-      // species.compactionDepth cells, flat below that. Real
-      // P. barbatus still digs deep, just slower than at the surface.
-      const depthBelowSurf = Math.max(0, ay - world.naturalSurface[ax]!);
+      // an effective compaction depth, flat below that.
+      //
+      // species.compactionDepth (333 cells = 1 m at 3 mm/cell) is the
+      // calibrated real-biology value, but it exceeds our typical
+      // world's soil column (~210 cells in the default 250-cell
+      // world). With the static value the ramp barely engages within
+      // achievable depth — chambers don't stack and the colony just
+      // drives a single deep shaft. Scale the effective depth to half
+      // the per-column soil column so the ramp actually bites within
+      // the world's vertical extent. naturalSurface is the original
+      // surface row (preserved across excavation), so this is stable.
+      // Will revisit when worlds become auto-expanding.
+      const colSurf = world.naturalSurface[ax]!;
+      const colSoil = Math.max(1, world.height - colSurf);
+      const effCompactionDepth = Math.min(species.compactionDepth, Math.floor(colSoil * 0.5));
+      const depthBelowSurf = Math.max(0, ay - colSurf);
       const compactionFactor = Math.max(
         species.compactionFloor,
-        1 - depthBelowSurf / species.compactionDepth,
+        1 - depthBelowSurf / effCompactionDepth,
       );
       // For the surface-stranded bypass we force the target to be
       // directly below the ant: heading on the surface is usually
@@ -3336,10 +3349,14 @@ export function step(
       // halves the time to a sustainable crater geometry.
       // Compaction also slows wall erosion at depth — same biology
       // as the dig-roll factor. Compacted soil is harder to chip.
+      // Use the world-scaled effective depth (see main dig-roll
+      // comment above for rationale).
       const wearDepth = Math.max(0, py - surf);
+      const wearSoil = Math.max(1, world.height - surf);
+      const wearEffDepth = Math.min(species.compactionDepth, Math.floor(wearSoil * 0.5));
       const wearCompaction = Math.max(
         species.compactionFloor,
-        1 - wearDepth / species.compactionDepth,
+        1 - wearDepth / wearEffDepth,
       );
       const WEAR_PROB = 0.002 * wearCompaction;
       if (!aboveSurface && cellIsAir && rng.next() < WEAR_PROB) {
