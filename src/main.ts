@@ -12,7 +12,7 @@ import {
   STATE_NECRO_CARRY, STATE_QUEEN, STATE_REST, STATE_WANDER,
 } from './sim/colony';
 import {
-  clearSavedSnapshot, readSavedBlob, saveToLocalStorage,
+  clearSavedSnapshot, readSavedBlob, readSavedDescriptor, saveToLocalStorage,
 } from './sim/persist';
 import { DAY_TICKS, SECONDS_PER_TICK_BIO, TICK_MS } from './sim/world';
 import { Renderer } from './render/renderer';
@@ -43,10 +43,17 @@ function readSettings(): Settings {
     const n = Number(v);
     return Number.isFinite(n) ? n : d;
   };
+  // Auto-resume from the last save: peek at the persisted descriptor
+  // (if any) and use its seed / dimensions as the defaults so the
+  // worker's restoreSnapshot can match. URL params still override —
+  // pass `?seed=N` to ignore the save and start fresh, or click the
+  // 🎲 reseed button (which also clears the save). On parse error,
+  // missing save, or wrong schema, falls through to a fresh sim.
+  const saved = readSavedDescriptor();
   return {
-    seed: num('seed', (Date.now() & 0xffffffff) >>> 0),
-    width: Math.max(40, num('width', 400) | 0),
-    height: Math.max(30, num('height', 250) | 0),
+    seed: num('seed', saved?.seed ?? ((Date.now() & 0xffffffff) >>> 0)),
+    width: Math.max(40, num('width', saved?.width ?? 400) | 0),
+    height: Math.max(30, num('height', saved?.height ?? 250) | 0),
     ants: Math.max(0, num('ants', 0) | 0),
     speedMul: Math.max(0.125, num('speed', 8)),
     screensaver: p.get('screensaver') === '1',

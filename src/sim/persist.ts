@@ -236,6 +236,33 @@ export function readSavedBlob(): string | null {
   }
 }
 
+/** Lightweight peek at the save envelope to extract the seed and
+ *  world dimensions WITHOUT actually restoring. Used at boot to
+ *  reconcile URL settings with what's on disk: if no explicit URL
+ *  params and a save exists, we adopt the save's seed / dims so
+ *  restoreSnapshot can match and the sim continues from the last
+ *  state. Returns null on missing save, parse error, or wrong
+ *  schema version. */
+export function readSavedDescriptor(): {
+  seed: number; width: number; height: number; capacity: number;
+} | null {
+  const blob = readSavedBlob();
+  if (blob === null) return null;
+  try {
+    const raw = JSON.parse(blob) as Partial<SaveStateV14>;
+    if (!raw || raw.v !== SAVE_VERSION) return null;
+    if (
+      typeof raw.seed !== 'number' ||
+      typeof raw.width !== 'number' ||
+      typeof raw.height !== 'number' ||
+      typeof raw.capacity !== 'number'
+    ) return null;
+    return { seed: raw.seed, width: raw.width, height: raw.height, capacity: raw.capacity };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Reverse of captureSnapshot. Mutates the provided world / colony /
  * pheromone fields / rng IN PLACE — the caller has already constructed
