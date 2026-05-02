@@ -21,6 +21,7 @@ export default defineConfig({
       'tests/_one-x-long.test.ts',
       'tests/_nest-shape-tuning.test.ts',
       'tests/_queen-only-milestones.test.ts',
+      'tests/_brood-pipeline-diag.test.ts',
     ],
   },
 });
