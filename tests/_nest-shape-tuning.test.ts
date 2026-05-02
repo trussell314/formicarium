@@ -273,8 +273,8 @@ function runScenario(name: string, mode: Mode, target: number, capTicks: number)
 
 describe('nest-shape tuning', () => {
   it('compares control vs lever1 (geotaxis) vs lever2 (dig decay)', () => {
-    const TARGET = 100;
-    const CAP = 500_000;
+    const TARGET = 400;
+    const CAP = 1_000_000;
     const SCENARIOS: { name: string; mode: Mode }[] = [
       { name: 'control', mode: 'control' },
       { name: 'lever1',  mode: 'lever1' },
