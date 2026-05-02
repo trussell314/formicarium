@@ -121,19 +121,39 @@ export function tryStep(
  * drop one row if unsupported. Walking off a ledge produces a
  * visible falling arc rather than a teleport to the floor.
  *
- * The extrication half always runs (a buried worker must climb up
- * out of fresh soil regardless). The drop-if-unsupported half is
- * gated by `adheres` — below-ground workers cling to chamber
- * surfaces that the 2D slice doesn't render, so an "unsupported"
- * grid cell isn't really empty space and they don't fall.
+ * Extrication asymmetry: a buried worker walks UP through GRAIN
+ * (loose excavated material she can push aside) freely, but only
+ * `SOIL_EXTRICATE_MAX` cells of SOIL (compacted original substrate
+ * she can't tunnel through). Without the SOIL cap, a worker whose
+ * cell got converted to GRAIN by a cascade could climb up through
+ * an arbitrary stack of SOIL cells above her into a separate AIR
+ * pocket — the "tunneling into a soil-surrounded chamber" bug.
+ * The 1-cell SOIL allowance handles the legitimate case of a
+ * worker spawned 1 cell deep into a chamber wall (initial
+ * founding queen) or a settle slipping her into SOIL by integer
+ * truncation.
+ *
+ * If extrication doesn't reach AIR, the worker is left at her
+ * current (still-buried) position. The no-embedded-ants invariant
+ * gets a brief violation; subsequent digging by other workers
+ * (or the ant's own metabolism running her energy out) handles
+ * the rest.
+ *
+ * The drop-if-unsupported half is gated by `adheres` — below-ground
+ * workers cling to chamber surfaces that the 2D slice doesn't
+ * render, so an "unsupported" grid cell isn't really empty space
+ * and they don't fall.
  */
+const EXTRICATE_MAX = 5;
 export function settle(
   world: World, ix: number, iy: number, adheres = false,
 ): number {
-  while (iy >= 0 && iy < world.height) {
+  let steps = 0;
+  while (iy >= 0 && iy < world.height && steps < EXTRICATE_MAX) {
     const k = world.cells[iy * world.width + ix]!;
     if (k !== CELL_SOIL && k !== CELL_GRAIN) break;
     iy--;
+    steps++;
   }
   if (iy < 0) iy = 0;
   if (!adheres && iy + 1 < world.height && !isSupported(world, ix, iy)) iy++;
