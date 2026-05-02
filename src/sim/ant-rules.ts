@@ -2650,7 +2650,23 @@ export function step(
       }
     } else if (stateIn === STATE_WANDER) {
       if (iy < world.naturalSurface[ix]!) {
+        // Above surface: positive geotaxis pulls heading DOWN, but
+        // the surface SOIL row blocks vertical movement, so workers
+        // end up walking horizontally on the surface. Without a
+        // horizontal homing bias they drift random-walk style and
+        // sometimes wander dozens of cells from the entrance shaft
+        // before they happen to align downward at a column where
+        // the surface is AIR (i.e. the entrance). Add an entrance-
+        // column homing bias so above-surface WANDER workers funnel
+        // back to the established shaft instead of starting new ones.
+        // Same mechanism as the CARRY_FOOD homing fix earlier.
         h += wrapAngle(Math.PI / 2 - h) * geotaxis;
+        const entranceCx = world.width >> 1;
+        const dxToEntrance = entranceCx - ix;
+        if (Math.abs(dxToEntrance) > 1) {
+          const want = dxToEntrance > 0 ? 0 : Math.PI;
+          h += wrapAngle(want - h) * 0.5;
+        }
       } else {
         // Below-surface depth-bias scaled by age caste: nurses
         // (young) get the strongest pull toward the brood pile,
