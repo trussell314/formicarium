@@ -3162,15 +3162,27 @@ export function step(
         // nest edge, ~0 far away. trunkField runs ~0.0-0.3 along
         // forager routes. Combine: any strong colony marker passes.
         const colonyMarker = Math.max(queenLocal * 4, trunkLocal * 6);
-        // Tighter floor (0.30 → 0.05). Diagnostic showed above-ground
-        // workers were starting satellite excavations at columns 60+
-        // cells from the entrance because the 0.30 floor lets them
-        // dig at 30% rate even with no queen-pheromone presence.
-        // 0.05 keeps a tiny non-zero rate for genuinely-stranded
-        // workers (entombed/stranded exempted to 1.0 anyway) while
-        // letting the colony-marker gate dominate everywhere else.
-        const proxScale = (entombed || stranded) ? 1.0
-          : Math.max(0.05, Math.min(1.0, colonyMarker + 0.30));
+        // Above-surface workers without queen-pheromone presence are
+        // wanderers who shouldn't be starting new excavations: real
+        // ants funnel construction through the established entrance.
+        // Below-surface workers are by-definition inside the colony,
+        // so they don't need the gate (and we want them digging
+        // chambers freely).
+        //
+        // Old formula `max(0.30, min(1.0, colonyMarker + 0.30))` was
+        // applied unconditionally, with a de-facto 0.30 floor (the
+        // outer max was redundant — the +0.30 offset already floored
+        // it). That floor let above-ground workers dig at 30% rate
+        // even with no queen-pheromone presence and accumulated
+        // satellite excavations 60+ cells from the entrance.
+        //
+        // Restrict the gate to above-surface diggers only, AND drop
+        // the +0.30 offset so colonyMarker dominates there. Workers
+        // beneath the surface get full dig rate; entombed / stranded
+        // workers always get full rate too (they need to dig out).
+        const aboveSurface = ay < world.naturalSurface[ax]!;
+        const proxScale = (entombed || stranded || !aboveSurface) ? 1.0
+          : Math.max(0.05, Math.min(1.0, colonyMarker));
         // Island-cleanup boost. A SOIL cell with ≥6 of its 8
         // neighbours non-soil/non-grain (i.e. AIR — out-of-bounds is
         // treated as solid since the world wall is implicit) is a
