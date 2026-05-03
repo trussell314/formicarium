@@ -791,6 +791,54 @@ export function step(
     }
   }
 
+  // Grain hardness sweep. Real ant walls reinforce over time —
+  // tamping (Tschinkel 2004), saliva / cement secretion (Hölldobler
+  // & Wilson 1990 Ch. 7), and time-based geotechnical consolidation.
+  // Each GRAIN cell gains hardness per tick: +1 base for sitting
+  // unmoved, +1 per cardinal solid neighbour (the "tamping by
+  // context" — wedged grains compress against their neighbours
+  // faster than loose pile material). Saturates at 255; pickGrain's
+  // probability is gated by (1 − hardness/255), so old hardened
+  // walls resist re-excavation while loose mound grains stay
+  // reshufflable. Sweep every 50 ticks to amortise; the per-cell
+  // accrual is small so the cadence doesn't materially affect the
+  // saturation timing.
+  if (world.tick % 50 === 0) {
+    const hsW = world.width;
+    const hsH = world.height;
+    for (let y = 0; y < hsH; y++) {
+      const row = y * hsW;
+      for (let x = 0; x < hsW; x++) {
+        const idx = row + x;
+        if (world.cells[idx]! !== CELL_GRAIN) continue;
+        let bonus = 0;
+        if (x > 0) {
+          const k = world.cells[idx - 1]!;
+          if (k === CELL_SOIL || k === CELL_GRAIN) bonus++;
+        }
+        if (x < hsW - 1) {
+          const k = world.cells[idx + 1]!;
+          if (k === CELL_SOIL || k === CELL_GRAIN) bonus++;
+        }
+        if (y > 0) {
+          const k = world.cells[idx - hsW]!;
+          if (k === CELL_SOIL || k === CELL_GRAIN) bonus++;
+        }
+        if (y < hsH - 1) {
+          const k = world.cells[idx + hsW]!;
+          if (k === CELL_SOIL || k === CELL_GRAIN) bonus++;
+        }
+        // Per-sweep increment: 50 ticks × (1 base + bonus) ≈ 50–250
+        // hardness per sweep. Saturates in 1–5 sweeps (50–250 ticks)
+        // depending on context. Lone grain on chamber floor (bonus 0)
+        // takes ~5 sweeps; wedged grain (bonus 4) saturates in 1.
+        const inc = 50 * (1 + bonus);
+        const cur = world.grainHardness[idx]!;
+        world.grainHardness[idx] = Math.min(255, cur + inc);
+      }
+    }
+  }
+
   // Seed germination + sprout decay sweep. Tschinkel (1999): some
   // stored seeds in granaries occasionally sprout instead of being
   // eaten. We sweep the food field once per germinationSweepInterval
@@ -3353,8 +3401,16 @@ export function step(
     // already become CARRY this tick (one transition per tick).
     if (colony.state[i] === STATE_WANDER) {
       const target = adjacentGrain(world, ax, ay, rng);
-      if (target !== null && rng.next() < colony.pickProb[i]!) {
-        const pickedMoves = pickGrain(world, target.x, target.y, rng);
+      if (target !== null) {
+        // Reinforcement gate: scale pickProb by (1 − hardness/255).
+        // Fresh grain (hardness 0) picks at the calibrated rate;
+        // fully-hardened wall material (hardness 255) is effectively
+        // un-pickable, so chamber walls and old mound material
+        // don't dissolve under incidental pickup events.
+        const tIdx = target.y * world.width + target.x;
+        const hardFactor = 1 - world.grainHardness[tIdx]! / 255;
+        if (rng.next() < colony.pickProb[i]! * hardFactor) {
+          const pickedMoves = pickGrain(world, target.x, target.y, rng);
         if (pickedMoves >= 0) {
           // No teleport — same reasoning as digCell above: the ant's
           // body stays at its current cell, mandibles reach into the
@@ -3382,6 +3438,7 @@ export function step(
               );
             }
           }
+        }
         }
       }
     }

@@ -213,8 +213,12 @@ export function settleGrain(world: World, x: number, y: number, rng: RNG): { x: 
       const moves = world.grainMoves[srcIdx]!;
       world.cells[srcIdx] = CELL_AIR;
       world.grainMoves[srcIdx] = 0;
+      world.grainHardness[srcIdx] = 0;
       world.cells[belowIdx] = CELL_GRAIN;
       world.grainMoves[belowIdx] = moves;
+      // Cascade reset — a falling grain isn't "set". Hardness has
+      // to re-accrue at the new resting position.
+      world.grainHardness[belowIdx] = 0;
       y++;
       continue;
     }
@@ -237,15 +241,18 @@ export function settleGrain(world: World, x: number, y: number, rng: RNG): { x: 
     const moves = world.grainMoves[srcIdx]!;
     world.cells[srcIdx] = CELL_AIR;
     world.grainMoves[srcIdx] = 0;
+    world.grainHardness[srcIdx] = 0;
     if (goLeft) {
       const destIdx = (y + 1) * w + x - 1;
       world.cells[destIdx] = CELL_GRAIN;
       world.grainMoves[destIdx] = moves;
+      world.grainHardness[destIdx] = 0;
       x -= 1;
     } else {
       const destIdx = (y + 1) * w + x + 1;
       world.cells[destIdx] = CELL_GRAIN;
       world.grainMoves[destIdx] = moves;
+      world.grainHardness[destIdx] = 0;
       x += 1;
     }
     y += 1;
@@ -292,6 +299,10 @@ export function placeGrain(
   // placement IS another move). settleGrain will transfer the value
   // along with the grain if the cascade slides it.
   world.grainMoves[idx] = Math.min(255, moves);
+  // Fresh deposit — hardness starts at 0 (loose grain). The per-
+  // tick sweep in ant-rules will harden it as it sits unmoved and
+  // accumulates tamping bonus from solid neighbours.
+  world.grainHardness[idx] = 0;
   const final = settleGrain(world, x, y, rng);
   recomputeMound(world, x);
   if (final.x !== x) recomputeMound(world, final.x);
@@ -444,6 +455,7 @@ export function pickGrain(world: World, x: number, y: number, rng: RNG): number 
   const moves = world.grainMoves[idx]!;
   world.cells[idx] = CELL_AIR;
   world.grainMoves[idx] = 0;
+  world.grainHardness[idx] = 0;
   // Re-settle the entire grain stack above. The previous code
   // cascaded only the cell directly above, so a 3+ tall stack
   // would have its bottom lifted out and the upper cells left

@@ -35,7 +35,8 @@ const SAVE_KEY = 'formicarium:save';
 // v14 dropped the root marker — bg plants are intended to be
 // distant, so per-cell root state under them was inconsistent.
 // v15 added per-cell corpse tick (timestamp-based decomposition).
-const SAVE_VERSION = 15;
+// v16 added per-cell grain hardness (wall reinforcement).
+const SAVE_VERSION = 16;
 
 // Chunked btoa to avoid argument-list length limits on very large arrays.
 function bytesToB64(view: ArrayBufferView): string {
@@ -55,8 +56,8 @@ function b64ToBytes(s: string): Uint8Array {
   return out;
 }
 
-interface SaveStateV15 {
-  v: 15;
+interface SaveStateV16 {
+  v: 16;
   foodCap: number;
   clumpAccum: number;
   // Settings — needed to validate that a save matches the requested run.
@@ -79,6 +80,7 @@ interface SaveStateV15 {
   mound: string;
   soilNoise: string;
   grainMoves: string;
+  grainHardness: string;
   food: string;
   foodMoves: string;
   corpse: string;
@@ -143,7 +145,7 @@ export function captureSnapshot(
   granaryField: Pheromone, trunkField: Pheromone,
   rng: RNG, settings: SaveSettings,
 ): string | null {
-  const state: SaveStateV15 = {
+  const state: SaveStateV16 = {
     v: SAVE_VERSION,
     seed: settings.seed,
     width: settings.width,
@@ -163,6 +165,7 @@ export function captureSnapshot(
     mound: bytesToB64(world.mound),
     soilNoise: bytesToB64(world.soilNoise),
     grainMoves: bytesToB64(world.grainMoves),
+    grainHardness: bytesToB64(world.grainHardness),
     food: bytesToB64(world.food),
     foodMoves: bytesToB64(world.foodMoves),
     corpse: bytesToB64(world.corpse),
@@ -252,7 +255,7 @@ export function readSavedDescriptor(): {
   const blob = readSavedBlob();
   if (blob === null) return null;
   try {
-    const raw = JSON.parse(blob) as Partial<SaveStateV15>;
+    const raw = JSON.parse(blob) as Partial<SaveStateV16>;
     if (!raw || raw.v !== SAVE_VERSION) return null;
     if (
       typeof raw.seed !== 'number' ||
@@ -289,7 +292,7 @@ export function restoreSnapshot(
 ): boolean {
   let raw: unknown;
   try { raw = JSON.parse(blob); } catch { return false; }
-  const s = raw as Partial<SaveStateV15>;
+  const s = raw as Partial<SaveStateV16>;
   if (
     !s ||
     s.v !== SAVE_VERSION ||
@@ -332,6 +335,7 @@ export function restoreSnapshot(
     copyBytes(s.mound!, world.mound);
     copyBytes(s.soilNoise!, world.soilNoise);
     copyBytes(s.grainMoves!, world.grainMoves);
+    if (s.grainHardness) copyBytes(s.grainHardness, world.grainHardness);
     copyBytes(s.food!, world.food);
     copyBytes(s.foodMoves!, world.foodMoves);
     copyBytes(s.corpse!, world.corpse);

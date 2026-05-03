@@ -144,6 +144,18 @@ export class World {
    *  that has been picked up and re-deposited many times has been
    *  "worked over" and reads visually paler. Zero in non-grain cells. */
   readonly grainMoves: Uint8Array;
+  /** Per-cell GRAIN hardness, 0 (fresh) → 255 (set). Models real ant
+   *  wall reinforcement: tamping (Tschinkel 2004), saliva / cement
+   *  secretion (Hölldobler & Wilson 1990 Ch. 7), and time-based
+   *  consolidation. A per-tick sweep increments grainHardness on
+   *  GRAIN cells: +1 base, +1 per cardinal solid neighbour (the
+   *  "tamping by context" — a grain wedged between solids hardens
+   *  faster than a loose pile). pickGrain's pickup probability is
+   *  scaled by (1 − hardness/255), so old hardened walls resist
+   *  re-excavation while loose mound grains are easily reshuffled.
+   *  Reset to 0 by placeGrain (fresh deposit) and by settleGrain
+   *  cascades (a falling grain isn't set). Zero in non-grain cells. */
+  readonly grainHardness: Uint8Array;
   /** Per-cell food (seed) presence. 0 = none, 1 = a seed sits here.
    *  Surface seeds spawn stochastically on intact natural-surface
    *  rows; foragers pick them up and CARRY_FOOD ants deposit them
@@ -297,6 +309,7 @@ export class World {
     this.mound = new Uint16Array(width);
     this.soilNoise = new Uint8Array(width * height);
     this.grainMoves = new Uint8Array(width * height);
+    this.grainHardness = new Uint8Array(width * height);
     this.food = new Uint8Array(width * height);
     this.foodMoves = new Uint8Array(width * height);
     this.corpse = new Uint8Array(width * height);
