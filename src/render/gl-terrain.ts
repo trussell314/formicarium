@@ -79,6 +79,7 @@ uniform sampler2D uSoilNoise;    // R8: per-cell hash
 uniform usampler2D uSurf;        // R16UI: per-column natural surface
 uniform sampler2D uFood;         // R8: per-cell food count
 uniform sampler2D uFoodMoves;    // R8: per-cell move counter
+uniform sampler2D uHardness;     // R8: per-cell grain hardness (0=loose, 255=set)
 uniform sampler2D uCorpse;       // R8: per-cell corpse marker
 uniform sampler2D uSprout;       // R8: per-cell sprout marker
 uniform isampler2D uSproutTick;  // R32I: per-cell sprout tick
@@ -429,12 +430,15 @@ void main() {
       col += vec3(0.7, 0.5, 0.3) * (queenLight + broodLight) * 0.18 * darkness;
     }
   } else {
-    // Soil or grain: identical palette (real spoil mounds are the
-    // same earth as undisturbed substrate). Multi-octave noise +
-    // depth-fog darkening below 55%.
+    // Soil or grain: shared palette (real spoil mounds are the
+    // same earth as undisturbed substrate), but loose grain reads
+    // a touch lighter than tamped/consolidated wall via uHardness.
+    // Multi-octave noise + depth-fog darkening below 55%.
     float depth = clamp(float(cell.y - surf) / max(1.0, uH - float(surf)), 0.0, 1.0);
     col = mix(SOIL_TOP, SOIL_BOT, depth);
-    col *= (1.0 + multiNoise);
+    float hard = float(sampleU8(uHardness, cell)) / 255.0;
+    float looseLift = 0.12 * (1.0 - hard);
+    col *= (1.0 + multiNoise + looseLift);
     if (depth > 0.55) {
       float f = (depth - 0.55) / 0.45;
       col *= (1.0 - 0.55 * f);
@@ -570,6 +574,7 @@ export interface GLTerrainState {
   naturalSurface: Uint16Array;
   food: Uint8Array;
   foodMoves: Uint8Array;
+  grainHardness: Uint8Array;
   corpse: Uint8Array;
   sprout: Uint8Array;
   sproutTick: Int32Array;
@@ -668,7 +673,7 @@ export class GLTerrainRenderer {
     this.uniforms = {};
     for (const name of [
       'uW', 'uH', 'uTick', 'uSub', 'uShowPhero', 'uDaylight',
-      'uCells', 'uSoilNoise', 'uSurf', 'uFood', 'uFoodMoves', 'uCorpse',
+      'uCells', 'uSoilNoise', 'uSurf', 'uFood', 'uFoodMoves', 'uHardness', 'uCorpse',
       'uSprout', 'uSproutTick', 'uDigTick', 'uPlant', 'uPlantHeight',
       'uPPack0', 'uPPack1', 'uPPack2',
     ]) {
@@ -697,6 +702,7 @@ export class GLTerrainRenderer {
     addSlot('soilNoise', gl.R8, gl.RED, gl.UNSIGNED_BYTE);
     addSlot('food', gl.R8, gl.RED, gl.UNSIGNED_BYTE);
     addSlot('foodMoves', gl.R8, gl.RED, gl.UNSIGNED_BYTE);
+    addSlot('hardness', gl.R8, gl.RED, gl.UNSIGNED_BYTE);
     addSlot('corpse', gl.R8, gl.RED, gl.UNSIGNED_BYTE);
     addSlot('sprout', gl.R8, gl.RED, gl.UNSIGNED_BYTE);
     addSlot('sproutTick', gl.R32I, gl.RED_INTEGER, gl.INT);
@@ -756,6 +762,7 @@ export class GLTerrainRenderer {
     this.uploadGrid('soilNoise', world.soilNoise, w, h);
     this.uploadGrid('food', world.food, w, h);
     this.uploadGrid('foodMoves', world.foodMoves, w, h);
+    this.uploadGrid('hardness', world.grainHardness, w, h);
     this.uploadGrid('corpse', world.corpse, w, h);
     this.uploadGrid('sprout', world.sprout, w, h);
     this.uploadGrid('sproutTick', world.sproutTick, w, h);
@@ -819,6 +826,7 @@ export class GLTerrainRenderer {
     this.bindSampler('uSurf', 'surf');
     this.bindSampler('uFood', 'food');
     this.bindSampler('uFoodMoves', 'foodMoves');
+    this.bindSampler('uHardness', 'hardness');
     this.bindSampler('uCorpse', 'corpse');
     this.bindSampler('uSprout', 'sprout');
     this.bindSampler('uSproutTick', 'sproutTick');

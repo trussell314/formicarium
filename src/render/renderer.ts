@@ -28,6 +28,7 @@ export interface RenderableWorld {
   naturalSurface: Uint16Array;
   food: Uint8Array;
   foodMoves: Uint8Array;
+  grainHardness: Uint8Array;
   corpse: Uint8Array;
   sprout: Uint8Array;
   sproutTick: Int32Array;
@@ -548,21 +549,23 @@ export class Renderer {
             b *= 1 - 0.55 * f;
           }
         } else {
-          // GRAIN — render with the SOIL palette. Real spoil mounds
-          // and undisturbed soil are made of the same earth and look
-          // visually indistinguishable; the previous fresh→worn
-          // lighter lerp made spoil heaps tan-coloured against the
-          // brown undisturbed substrate, which read as a different
-          // material. All soil stays brown forever; the only way to
-          // tell mound from undisturbed ground is its position above
-          // the natural surface row.
+          // GRAIN — render with the SOIL palette base, lightened by
+          // looseness: fresh grain (hardness=0) gets a small tan lift
+          // signalling "loose, recently placed"; set grain (255)
+          // blends into the soil palette indistinguishable from the
+          // undisturbed wall it's now part of. The lift gives visual
+          // feedback for the wall-reinforcement mechanism — the user
+          // can see the colour darken as a deposit ages and tamps.
           const sy = surfRow[x]!;
           const t = (y - sy) / Math.max(1, h - sy);
           const soil = lerp3(SOIL_TOP, SOIL_BOTTOM, Math.min(1, t));
           const n = (noise[idx]! / 255 - 0.5) * 0.36;
-          r = soil[0] * (1 + n);
-          g = soil[1] * (1 + n);
-          b = soil[2] * (1 + n);
+          const looseFrac = 1 - this.world.grainHardness[idx]! / 255;
+          // Up to +12 % brightness lift on fresh grain; 0 % when set.
+          const looseLift = 0.12 * looseFrac;
+          r = soil[0] * (1 + n + looseLift);
+          g = soil[1] * (1 + n + looseLift);
+          b = soil[2] * (1 + n + looseLift);
         }
         // Food overlay. Food sits on top of (or inside) AIR cells,
         // independent of cell type. Draw it after the substrate so

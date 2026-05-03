@@ -332,6 +332,7 @@ function buildSnapshot(includePheromones: boolean): RenderSnapshot {
     naturalSurface: world.naturalSurface.slice(),
     food: world.food.slice(),
     foodMoves: world.foodMoves.slice(),
+    grainHardness: world.grainHardness.slice(),
     corpse: world.corpse.slice(),
     sprout: world.sprout.slice(),
     sproutTick: world.sproutTick.slice(),
@@ -414,7 +415,7 @@ function collectSnapshotBuffers(snap: RenderSnapshot): ArrayBuffer[] {
   const ab = (a: { buffer: ArrayBufferLike }): ArrayBuffer => a.buffer as ArrayBuffer;
   const bufs: ArrayBuffer[] = [
     ab(snap.cells), ab(snap.soilNoise), ab(snap.naturalSurface),
-    ab(snap.food), ab(snap.foodMoves), ab(snap.corpse),
+    ab(snap.food), ab(snap.foodMoves), ab(snap.grainHardness), ab(snap.corpse),
     ab(snap.sprout), ab(snap.sproutTick), ab(snap.digTick),
     ab(snap.plant), ab(snap.plantHeight),
     ab(snap.bgPlant), ab(snap.bgPlantHeight),

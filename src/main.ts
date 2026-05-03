@@ -65,6 +65,7 @@ function makePlaceholderWorld(s: Settings): {
   cells: Uint8Array; soilNoise: Uint8Array;
   naturalSurface: Uint16Array;
   food: Uint8Array; foodMoves: Uint8Array;
+  grainHardness: Uint8Array;
   corpse: Uint8Array; sprout: Uint8Array; sproutTick: Int32Array;
   digTick: Int32Array;
   plant: Uint8Array;
@@ -83,6 +84,7 @@ function makePlaceholderWorld(s: Settings): {
     soilNoise: new Uint8Array(sz),
     naturalSurface: new Uint16Array(s.width),
     food: new Uint8Array(sz), foodMoves: new Uint8Array(sz),
+    grainHardness: new Uint8Array(sz),
     corpse: new Uint8Array(sz),
     sprout: new Uint8Array(sz), sproutTick: new Int32Array(sz),
     digTick: new Int32Array(sz),

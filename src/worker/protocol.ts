@@ -48,6 +48,7 @@ export type RenderSnapshot = {
   naturalSurface: Uint16Array;
   food: Uint8Array;
   foodMoves: Uint8Array;
+  grainHardness: Uint8Array;
   corpse: Uint8Array;
   sprout: Uint8Array;
   sproutTick: Int32Array;
