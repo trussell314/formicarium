@@ -3145,21 +3145,32 @@ export function step(
       // would pick a lateral mound cell most of the time. The whole
       // point of the bypass is to drill DOWN through intact ground,
       // so we override.
-      // Excavator-caste downward override (test #4). Mid-age workers
-      // are the dig specialists (digMult bell curve peaks at
-      // ageFrac=0.5). Override their target preference toward DOWN
-      // when a soil cell exists directly below — this drives the
-      // gallery-shaft formation that real ant nests rely on for
-      // stacking chambers at multiple depths. Falls back to the
-      // normal heading-aligned target if no soil is directly below.
-      const isExcavator = ageFrac >= 0.4 && ageFrac <= 0.7;
-      const downSoil = ay + 1 < world.height
-        && world.cells[(ay + 1) * world.width + ax]! === CELL_SOIL
-        ? { x: ax, y: ay + 1 }
-        : null;
+      // Downward target preference for workers at a chamber FLOOR.
+      // A worker with SOIL directly below AND at least one lateral
+      // neighbour AIR (so she's standing on the floor of a chamber,
+      // not pressed against a tunnel wall) preferentially digs the
+      // floor rather than a heading-aligned lateral target. This
+      // drives gallery-shaft formation: chambers deepen instead of
+      // sprawling sideways. Tschinkel (2004) nest casts show real
+      // P. barbatus / P. badius excavate downward dominantly across
+      // all worker ages — the age-gated "excavator caste" override
+      // we previously had under-fired in young founding colonies
+      // where most workers are below ageFrac 0.4, producing wide
+      // shallow bowls instead of the species-typical narrow shafts.
+      // The lateral-AIR gate keeps tunnel-tip diggers (no AIR to
+      // either side) from short-circuiting the dirBonus mechanism.
+      const wW3 = world.width;
+      const downIsSoil = ay + 1 < world.height
+        && world.cells[(ay + 1) * wW3 + ax]! === CELL_SOIL;
+      const leftIsAir = ax > 0
+        && world.cells[ay * wW3 + (ax - 1)]! === CELL_AIR;
+      const rightIsAir = ax < wW3 - 1
+        && world.cells[ay * wW3 + (ax + 1)]! === CELL_AIR;
+      const atChamberFloor = downIsSoil && (leftIsAir || rightIsAir);
+      const downSoil = atChamberFloor ? { x: ax, y: ay + 1 } : null;
       const target = stranded && neighbourSoil < 2
         ? { x: ax, y: ay + 1 }
-        : (isExcavator && downSoil !== null)
+        : (downSoil !== null)
           ? downSoil
           : adjacentSoil(world, ax, ay, h);
       if (target !== null) {
