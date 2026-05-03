@@ -853,29 +853,33 @@ export class Renderer {
       // for the visible-bodies path and to compute the sun's virtual
       // position when below the horizon (needed for moon-shadow
       // direction).
-      // True circular path: the body traces a circle centered at
-      // (canvas-x mid, horizonY) with radius CIRCLE_R. CIRCLE_R is
-      // sized so the apex sits moderately above the canvas top — the
-      // body is "above the world" through the middle of the day but
-      // visible during meaningful rise and set arcs (~30% of each
-      // half-day). Setting R too big (e.g. ow/2) made the visible
-      // window only ~3% of the day on each side, so the user only
-      // ever caught it briefly at sunset, never seeing the rise.
-      // 2× horizonY puts the noon apex one full sky-band-height
-      // above the canvas while keeping the rise/set arcs unhurried.
+      // Elliptical path: separate horizontal and vertical radii so
+      // rise/set positions are tied to the WORLD horizontal extent
+      // (not the screen-y of the horizon). With RISE_MARGIN_FRAC=0.05
+      // in a 400-cell world, sunrise lands at world cell ~20 and
+      // sunset at world cell ~380, REGARDLESS of zoom or pan — the
+      // celestial body always rises and sets at the same world
+      // coordinates. Vertical radius keeps the original "apex sits
+      // a sky-height above the canvas top" intent, so the body is
+      // visible during rise/set and off-canvas-overhead through the
+      // middle of the day. Earlier code used CIRCLE_R = horizonY * 2
+      // for BOTH axes; that made horizontal sweep depend on zoom
+      // (since horizonY = oy + 0.95·skyHeightPx, and oy goes
+      // negative when zoomed in). Result: rise/set drifted around
+      // the canvas instead of the world — invisible at default
+      // zoom for typical world dims, drifting to mid-screen when
+      // zoomed in.
+      const RISE_MARGIN_FRAC = 0.05;
       const cxBody = ox + ow * 0.5;
-      const CIRCLE_R = horizonY * 2;
+      const RX = ow * (0.5 - RISE_MARGIN_FRAC);
+      const RY = skyHeightPx * 1.9;
       const bodyScreenPos = (theta: number): { x: number; y: number; visible: boolean } => {
         const tn = Math.atan2(Math.sin(theta), Math.cos(theta)); // wrap to [-π, π]
-        // tn=0  → noon  → x at center, y high above horizon (off-canvas)
-        // tn=±π/2 → horizon → x at limbs, y at horizonY
-        // tn=±π → midnight → x at center, y below horizon
-        const x = cxBody + CIRCLE_R * Math.sin(tn);
-        const y = horizonY - CIRCLE_R * Math.cos(tn);
-        // visible only when above horizon (altitude > 0); the canvas
-        // crops off whatever portion is above the screen top, which is
-        // exactly what we want — the body disappears off the top
-        // around noon and reappears near sunset.
+        // tn=0  → noon  → x at world centre, y high above horizon (off-canvas)
+        // tn=±π/2 → horizon → x at world's RISE_MARGIN_FRAC limbs, y at horizonY
+        // tn=±π → midnight → x at world centre, y below horizon
+        const x = cxBody + RX * Math.sin(tn);
+        const y = horizonY - RY * Math.cos(tn);
         const altitude = Math.cos(tn);
         return { x, y, visible: altitude > 0 };
       };
