@@ -295,8 +295,18 @@ function adjacentGrain(world: World, ix: number, iy: number, rng: RNG): { x: num
  * next iteration's grain. settleGrain itself iterates downward
  * within a column, so this outer order just stops one cell from
  * blocking another in the same column.
+ *
+ * Ant pre-evacuation: settleGrain doesn't check for ant occupancy,
+ * so an ant standing under the island would get a grain dropped
+ * into her cell — the embedded-ants bug. Before the cascade we
+ * scan the colony for any ant whose cell would be hit by the
+ * falling grain (same column as an island cell, between the island
+ * cell and the first SOIL below) and lift them to the first AIR
+ * cell ABOVE the island top in their column. That row is open
+ * (the island was unsupported, so the rows above are AIR by
+ * definition), so the lift is always safe.
  */
-function collapseFloatingIslands(world: World, rng: RNG): void {
+function collapseFloatingIslands(world: World, colony: Colony, rng: RNG): void {
   const w = world.width;
   const h = world.height;
   const visited = new Uint8Array(w * h);
@@ -355,16 +365,58 @@ function collapseFloatingIslands(world: World, rng: RNG): void {
         }
       }
       if (anchored) continue;
-      // Subsurface floating island. Re-type to loose grain and
-      // settle each cell. Sorting by y descending means we process
-      // the bottom row first; within a column settleGrain handles
-      // its own cascade.
+      // Subsurface floating island. Build per-column min/max-y
+      // ranges first so we can find the impact zone (every row
+      // from the island's top to the first SOIL below) and lift
+      // any ants out of it before the cascade.
+      const colTopY = new Map<number, number>();
+      const colBotY = new Map<number, number>();
+      for (let i = 0; i < compIdx.length; i++) {
+        const ci = compIdx[i]!;
+        const cy = (ci / w) | 0;
+        const cx = ci - cy * w;
+        const top = colTopY.get(cx);
+        const bot = colBotY.get(cx);
+        if (top === undefined || cy < top) colTopY.set(cx, cy);
+        if (bot === undefined || cy > bot) colBotY.set(cx, cy);
+      }
+      // Pre-evacuation: any ant whose cell lies in the cascade's
+      // impact column (column of an island cell, row >= island
+      // top, row < first solid below) is lifted to the first AIR
+      // cell ABOVE the island in her column. That row is open by
+      // construction (the island was unsupported, so cells above
+      // are AIR).
+      for (let aI = 0; aI < colony.count; aI++) {
+        const ax = colony.posX[aI]! | 0;
+        const ay = colony.posY[aI]! | 0;
+        const islandTop = colTopY.get(ax);
+        if (islandTop === undefined) continue;
+        if (ay < islandTop) continue;
+        // Find the first SOIL below the island in this column —
+        // that's the cascade's terminus. Any AIR row strictly above
+        // it is in the impact zone.
+        let terminus = h;
+        for (let py = colBotY.get(ax)! + 1; py < h; py++) {
+          const k = world.cells[py * w + ax]!;
+          if (k === CELL_SOIL || k === CELL_GRAIN) { terminus = py; break; }
+        }
+        if (ay >= terminus) continue;
+        // Ant is in the impact zone. Lift to islandTop - 1 (or
+        // higher if that cell isn't AIR for some reason).
+        let lift = islandTop - 1;
+        while (lift >= 0 && world.cells[lift * w + ax]! !== CELL_AIR) lift--;
+        if (lift < 0) continue; // No safe cell up; let the cascade hit (degenerate).
+        colony.posY[aI] = lift + 0.5;
+      }
+      // Re-type island cells to loose grain.
       for (let i = 0; i < compIdx.length; i++) {
         const ci = compIdx[i]!;
         world.cells[ci] = CELL_GRAIN;
         world.grainHardness[ci] = 0;
         world.grainMoves[ci] = 0;
       }
+      // Settle bottom-row-first so a tall stack falls cleanly:
+      // each settle vacates the cell above for the next iteration.
       compIdx.sort((a, b) => {
         const ay = (a / w) | 0;
         const by = (b / w) | 0;
@@ -762,7 +814,19 @@ export function step(
     const ecx = world.width >> 1;
     const esy = world.naturalSurface[ecx]!;
     const entranceIdx = esy * world.width + ecx;
-    if (isDuskWindow && world.cells[entranceIdx] === CELL_AIR) {
+    // Don't seal an entrance cell that has an ant in it — the
+    // grain would replace AIR underfoot and embed her. Wait for
+    // the next dusk-window tick when the cell is clear.
+    let entranceOccupied = false;
+    for (let aI = 0; aI < colony.count; aI++) {
+      const sa = colony.state[aI]!;
+      if (sa === STATE_DEAD) continue;
+      if ((colony.posX[aI]! | 0) === ecx && (colony.posY[aI]! | 0) === esy) {
+        entranceOccupied = true;
+        break;
+      }
+    }
+    if (isDuskWindow && !entranceOccupied && world.cells[entranceIdx] === CELL_AIR) {
       // Find the nearest mounded column with at least one surface
       // grain to donate.
       let donorIdx = -1;
@@ -1004,7 +1068,7 @@ export function step(
   // O(W·H) per sweep — same cadence as the hardness pass to keep the
   // amortised cost trivial.
   if (world.tick % 50 === 0) {
-    collapseFloatingIslands(world, rng);
+    collapseFloatingIslands(world, colony, rng);
   }
 
   // Seed germination + sprout decay sweep. Tschinkel (1999): some

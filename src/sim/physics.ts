@@ -121,39 +121,58 @@ export function tryStep(
  * drop one row if unsupported. Walking off a ledge produces a
  * visible falling arc rather than a teleport to the floor.
  *
- * Extrication asymmetry: a buried worker walks UP through GRAIN
- * (loose excavated material she can push aside) freely, but only
- * `SOIL_EXTRICATE_MAX` cells of SOIL (compacted original substrate
- * she can't tunnel through). Without the SOIL cap, a worker whose
- * cell got converted to GRAIN by a cascade could climb up through
- * an arbitrary stack of SOIL cells above her into a separate AIR
- * pocket — the "tunneling into a soil-surrounded chamber" bug.
- * The 1-cell SOIL allowance handles the legitimate case of a
- * worker spawned 1 cell deep into a chamber wall (initial
- * founding queen) or a settle slipping her into SOIL by integer
- * truncation.
+ * Extrication asymmetry — two distinct paths:
+ *   - START IN GRAIN: walk UP through contiguous GRAIN unbounded.
+ *     This is the cave-in / cascade case: a grain landed on top of
+ *     the worker (or the entire stack she sits in is loose). She
+ *     pushes the loose material aside and emerges at the top of
+ *     the stack. Stops at the first AIR (good) or SOIL (stuck
+ *     under cap-rock) cell. Unbounded depth is fine because real
+ *     loose grain doesn't stop a worker — only solid substrate
+ *     does.
+ *   - START IN SOIL: walk UP through SOIL up to SOIL_EXTRICATE_MAX
+ *     cells. This is the integer-truncation / spawn-in-wall edge
+ *     case (initial founding queen positioned slightly inside a
+ *     chamber wall). Capped so a worker can't tunnel through the
+ *     surrounding rock. If the worker is genuinely buried in deep
+ *     SOIL (more than 5 cells above her to AIR) she stays stuck;
+ *     the no-embedded-ants invariant accepts this — subsequent
+ *     digging by other workers (or her own metabolism running her
+ *     energy out into a corpse) eventually resolves it.
  *
- * If extrication doesn't reach AIR, the worker is left at her
- * current (still-buried) position. The no-embedded-ants invariant
- * gets a brief violation; subsequent digging by other workers
- * (or the ant's own metabolism running her energy out) handles
- * the rest.
+ * The two paths are explicitly NOT mixed: walking from GRAIN into
+ * SOIL or back stops the extrication. Without this, a worker who
+ * fell into a GRAIN pocket could walk up through the loose stack,
+ * then through the bounded SOIL allowance, into a hidden AIR
+ * pocket above — the "tunneling into a soil-surrounded chamber"
+ * bug.
  *
  * The drop-if-unsupported half is gated by `adheres` — below-ground
  * workers cling to chamber surfaces that the 2D slice doesn't
  * render, so an "unsupported" grid cell isn't really empty space
  * and they don't fall.
  */
-const EXTRICATE_MAX = 5;
+const SOIL_EXTRICATE_MAX = 5;
 export function settle(
   world: World, ix: number, iy: number, adheres = false,
 ): number {
-  let steps = 0;
-  while (iy >= 0 && iy < world.height && steps < EXTRICATE_MAX) {
-    const k = world.cells[iy * world.width + ix]!;
-    if (k !== CELL_SOIL && k !== CELL_GRAIN) break;
-    iy--;
-    steps++;
+  if (iy >= 0 && iy < world.height) {
+    const startK = world.cells[iy * world.width + ix]!;
+    if (startK === CELL_GRAIN) {
+      // Walk up through GRAIN unbounded; stop at AIR or SOIL.
+      while (iy >= 0 && world.cells[iy * world.width + ix] === CELL_GRAIN) {
+        iy--;
+      }
+    } else if (startK === CELL_SOIL) {
+      // Walk up through SOIL up to SOIL_EXTRICATE_MAX cells; stop
+      // at AIR or GRAIN or cap.
+      let soilSteps = 0;
+      while (iy >= 0 && soilSteps < SOIL_EXTRICATE_MAX
+             && world.cells[iy * world.width + ix] === CELL_SOIL) {
+        iy--;
+        soilSteps++;
+      }
+    }
   }
   if (iy < 0) iy = 0;
   if (!adheres && iy + 1 < world.height && !isSupported(world, ix, iy)) iy++;

@@ -12,7 +12,7 @@ import { Pheromone } from '../src/sim/pheromone';
 import { isSupported } from '../src/sim/physics';
 import { RNG } from '../src/sim/rng';
 import { CELL_GRAIN, CELL_SOIL, World } from '../src/sim/world';
-import { STATE_CARRY } from '../src/sim/colony';
+import { STATE_CARRY, STATE_DEAD } from '../src/sim/colony';
 
 function makeSim(seed: number) {
   const rng = new RNG(seed);
@@ -42,6 +42,32 @@ describe('sim invariants', () => {
         const k = world.cells[world.index(ix, iy)];
         expect(k).not.toBe(CELL_SOIL);
         expect(k).not.toBe(CELL_GRAIN);
+      }
+    }
+  });
+
+  it('no ant ends up embedded after a long run with floating-island collapses', () => {
+    // 10k ticks at the standard sim seed exercises every code path
+    // that mutates cells under ants — diel-seal, granary cascades,
+    // floating-island collapse, dig/place/pick, settle. Original
+    // 800-tick test passes even with embedding bugs because the
+    // window is too short to hit the rare cascade-into-ant pattern;
+    // the long run reproduces the user-observed "ants stuck in
+    // soil" failure reliably and asserts none happen post-fix.
+    const { rng, world, colony, dig, build } = makeSim(0xb00b1e5);
+    for (let t = 0; t < 10000; t++) {
+      step(world, colony, dig, build, rng, DEFAULT_PARAMS);
+      for (let i = 0; i < colony.count; i++) {
+        const sa = colony.state[i]!;
+        if (sa === STATE_DEAD) continue;
+        const ix = colony.posX[i]! | 0;
+        const iy = colony.posY[i]! | 0;
+        const k = world.cells[world.index(ix, iy)];
+        if (k === CELL_SOIL || k === CELL_GRAIN) {
+          throw new Error(
+            `ant ${i} (state=${sa}) embedded at (${ix}, ${iy}) cell=${k} on tick ${t}`,
+          );
+        }
       }
     }
   });
