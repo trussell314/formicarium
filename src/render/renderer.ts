@@ -11,7 +11,7 @@ import {
   STATE_CARRY, STATE_CARRY_FOOD, STATE_DEAD, STATE_EGG, STATE_FORAGE, STATE_LARVA,
   STATE_NECRO_CARRY, STATE_PUPA, STATE_QUEEN, STATE_REST,
 } from '../sim/colony';
-import { CELL_AIR, CELL_SOIL, DAY_TICKS } from '../sim/world';
+import { CELL_AIR, DAY_TICKS } from '../sim/world';
 import { GLTerrainRenderer } from './gl-terrain';
 
 // Renderer reads a structural subset of World/Colony — same field
@@ -524,19 +524,28 @@ export class Renderer {
               r = tint[0]; g = tint[1]; b = tint[2];
             }
           }
-        } else if (k === CELL_SOIL) {
+        } else {
+          // CELL_SOIL — single solid cell type. Hardness drives a
+          // brightness lift so loose deposits (hardness=0) read
+          // tan and fully consolidated wall (hardness=255) blends
+          // into the dark palette indistinguishable from undisturbed
+          // substrate. This is the visual feedback for the wall-
+          // reinforcement mechanism: the user can see a fresh
+          // deposit darken as it tamps.
           const sy = surfRow[x]!;
           const t = (y - sy) / Math.max(1, h - sy);
           const soil = lerp3(SOIL_TOP, SOIL_BOTTOM, Math.min(1, t));
           // Per-cell luminance perturbation. Stronger (±18%) than the
           // legacy ±9% so the soil reads as visibly textured rather
-          // than uniformly dark. Combined with the per-subcell noise
-          // below, this gives chamber walls a granular look closer
-          // to a packed-soil cross-section photo.
+          // than uniformly dark.
           const n = (noise[idx]! / 255 - 0.5) * 0.36;
-          r = soil[0] * (1 + n);
-          g = soil[1] * (1 + n);
-          b = soil[2] * (1 + n);
+          const looseFrac = 1 - this.world.grainHardness[idx]! / 255;
+          // Up to +12% brightness lift on fresh deposits; 0% on
+          // pristine / fully consolidated wall.
+          const looseLift = 0.12 * looseFrac;
+          r = soil[0] * (1 + n + looseLift);
+          g = soil[1] * (1 + n + looseLift);
+          b = soil[2] * (1 + n + looseLift);
           // Depth fog: darken substrate below ~80% of the world
           // height. Sells the cross-section as bottomless rather
           // than a hard floor. Only applied below a threshold so
@@ -548,24 +557,6 @@ export class Renderer {
             g *= 1 - 0.55 * f;
             b *= 1 - 0.55 * f;
           }
-        } else {
-          // GRAIN — render with the SOIL palette base, lightened by
-          // looseness: fresh grain (hardness=0) gets a small tan lift
-          // signalling "loose, recently placed"; set grain (255)
-          // blends into the soil palette indistinguishable from the
-          // undisturbed wall it's now part of. The lift gives visual
-          // feedback for the wall-reinforcement mechanism — the user
-          // can see the colour darken as a deposit ages and tamps.
-          const sy = surfRow[x]!;
-          const t = (y - sy) / Math.max(1, h - sy);
-          const soil = lerp3(SOIL_TOP, SOIL_BOTTOM, Math.min(1, t));
-          const n = (noise[idx]! / 255 - 0.5) * 0.36;
-          const looseFrac = 1 - this.world.grainHardness[idx]! / 255;
-          // Up to +12 % brightness lift on fresh grain; 0 % when set.
-          const looseLift = 0.12 * looseFrac;
-          r = soil[0] * (1 + n + looseLift);
-          g = soil[1] * (1 + n + looseLift);
-          b = soil[2] * (1 + n + looseLift);
         }
         // Food overlay. Food sits on top of (or inside) AIR cells,
         // independent of cell type. Draw it after the substrate so

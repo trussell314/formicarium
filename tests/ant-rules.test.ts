@@ -19,7 +19,16 @@ function flatWorld(width: number, height: number, surfRow: number): World {
   for (let x = 0; x < width; x++) {
     w.naturalSurface[x] = surfRow;
     for (let y = 0; y < height; y++) {
-      w.cells[w.index(x, y)] = y < surfRow ? CELL_AIR : CELL_SOIL;
+      const idx = w.index(x, y);
+      if (y < surfRow) {
+        w.cells[idx] = CELL_AIR;
+      } else {
+        // Pristine substrate is consolidated (hardness=255) — without
+        // this every cell would read as loose under the unified model
+        // and cascade on the next settleGrain pass.
+        w.cells[idx] = CELL_SOIL;
+        w.grainHardness[idx] = 255;
+      }
     }
   }
   w.initialSoilCells = w.countSoil();
@@ -294,11 +303,15 @@ describe('ant-rules: determinism', () => {
 });
 
 describe('ant-rules: grain conservation under arbitrary tick counts', () => {
-  it('initial soil = current soil + grains in world + carriers (CLAUDE.md §6)', () => {
+  it('initial soil = current soil + carriers + wearLost (CLAUDE.md §6, post-unification)', () => {
     // CLAUDE.md §6: hard invariant. Pin at multiple checkpoints to
     // catch a bug that only manifests after some specific transition
     // sequence (e.g. a CARRY ant phasing into REST should not drop
-    // its cargo silently).
+    // its cargo silently). After SOIL/GRAIN unification countSoil()
+    // includes BOTH consolidated wall AND loose deposits, so the
+    // formula collapses: a dug cell either rides on a carrier or got
+    // pulverised into wearLost; redeposited grain becomes solid
+    // again and is counted in countSoil().
     const rng = new RNG(0x808);
     const w = flatWorld(40, 30, 15);
     const colony = new Colony(8);
@@ -312,13 +325,7 @@ describe('ant-rules: grain conservation under arbitrary tick counts', () => {
         if (colony.state[i] === STATE_CARRY) carriers++;
       }
       const dug = w.initialSoilCells - w.countSoil();
-      // wearLost accounts for traffic-driven shaft erosion (mandible
-      // pulverising; see ant-rules.ts wear branch). Real biology loses
-      // some material to dust during transit; the invariant carries
-      // that term to stay honest.
-      expect(dug).toBe(w.countGrains() + carriers + w.wearLost);
-      // Sanity: no embedded grain/soil collisions detected by inspecting cells type.
-      void CELL_GRAIN;
+      expect(dug).toBe(carriers + w.wearLost);
     }
   });
 });

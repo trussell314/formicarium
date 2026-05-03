@@ -10,11 +10,34 @@ function blank(w: number, h: number): World {
   return wd;
 }
 
-/** Blank world with a soil floor at the bottom row, surface = h-1. */
+/** Set a CONSOLIDATED solid cell — hardness pegged at 255 so it
+ *  reads as pristine wall (blocks tryStep with hitSoil, refuses
+ *  pickGrain, doesn't cascade in settleGrain). Most of the legacy
+ *  test fixtures used `cells = CELL_SOIL` to mean "wall here", so
+ *  this helper restores that intent under the unified model. */
+function setSoil(wd: World, x: number, y: number): void {
+  const i = wd.index(x, y);
+  wd.cells[i] = CELL_SOIL;
+  wd.grainHardness[i] = 255;
+}
+
+/** Set a LOOSE solid cell — hardness=0 so it cascades, can be
+ *  picked, and tryStep treats it as a climbable mound. Replaces
+ *  the legacy `cells = CELL_GRAIN` writes one-for-one. */
+function setGrain(wd: World, x: number, y: number): void {
+  const i = wd.index(x, y);
+  wd.cells[i] = CELL_SOIL;
+  wd.grainHardness[i] = 0;
+}
+
+/** Blank world with a consolidated soil floor at the bottom row,
+ *  surface = h-1. Floor cells are pegged at hardness=255 so they
+ *  act as wall (no cascade, no pickup) for the gravity / settle
+ *  tests. */
 function withFloor(w: number, h: number): World {
   const wd = blank(w, h);
   for (let x = 0; x < w; x++) {
-    wd.cells[wd.index(x, h - 1)] = CELL_SOIL;
+    setSoil(wd, x, h - 1);
     wd.naturalSurface[x] = h - 1;
   }
   return wd;
@@ -28,7 +51,7 @@ describe('physics', () => {
 
   it('isSupported true with solid below', () => {
     const w = blank(20, 10);
-    w.cells[w.index(5, 6)] = CELL_SOIL;
+    setSoil(w, 5, 6);
     expect(isSupported(w, 5, 5)).toBe(true);
   });
 
@@ -39,8 +62,8 @@ describe('physics', () => {
 
   it('tryStep refuses solid and reports hitSoil only on SOIL', () => {
     const w = blank(20, 10);
-    w.cells[w.index(5, 5)] = CELL_SOIL;
-    w.cells[w.index(7, 5)] = CELL_GRAIN;
+    setSoil(w, 5, 5);
+    setGrain(w, 7, 5);
     const intoSoil = tryStep(w, 4.5, 5.5, 1, 0);
     expect(intoSoil.hitSoil).toBe(true);
     expect(intoSoil.x).toBe(4.5);
@@ -55,7 +78,7 @@ describe('physics', () => {
   it('settle drops a single cell when unsupported', () => {
     const w = blank(20, 10);
     // Floor at y=8.
-    for (let x = 0; x < w.width; x++) w.cells[w.index(x, 9)] = CELL_SOIL;
+    for (let x = 0; x < w.width; x++) setSoil(w, x, 9);
     // Ant in mid-air at y=4.
     const after = settle(w, 5, 4);
     expect(after).toBe(5);
@@ -63,8 +86,8 @@ describe('physics', () => {
 
   it('settle extricates from solid (e.g. just-dug spot collapsed)', () => {
     const w = blank(20, 10);
-    for (let x = 0; x < w.width; x++) w.cells[w.index(x, 9)] = CELL_SOIL;
-    w.cells[w.index(5, 8)] = CELL_SOIL;
+    for (let x = 0; x < w.width; x++) setSoil(w, x, 9);
+    setSoil(w, 5, 8);
     // Embedded at (5, 8). settle should pop it up.
     const after = settle(w, 5, 8);
     expect(after).toBe(7);
@@ -88,7 +111,7 @@ describe('tryStep — out of bounds and stair-step', () => {
     // the cell-above-the-obstacle is clear. A 1-cell grain at
     // (6, 5) with clearance above must produce a y reduction.
     const w = blank(20, 10);
-    w.cells[w.index(6, 5)] = CELL_GRAIN;
+    setGrain(w, 6, 5);
     const r = tryStep(w, 5.5, 5.5, 1, 0);
     expect(r.hitSoil).toBe(false);
     expect(r.x).toBe(6.5);
@@ -99,8 +122,8 @@ describe('tryStep — out of bounds and stair-step', () => {
     // MAX_CLIMB = 2 is hard-coded. A 2-cell stack must still be
     // walkable; a 3-cell stack must not (covered separately).
     const w = blank(20, 10);
-    w.cells[w.index(6, 5)] = CELL_GRAIN;
-    w.cells[w.index(6, 4)] = CELL_GRAIN;
+    setGrain(w, 6, 5);
+    setGrain(w, 6, 4);
     const r = tryStep(w, 5.5, 5.5, 1, 0);
     expect(r.hitSoil).toBe(false);
     expect(r.y).toBeLessThanOrEqual(3.5);
@@ -112,9 +135,9 @@ describe('tryStep — out of bounds and stair-step', () => {
     // pile to slump. If we lifted this, mound-shape physics would
     // degenerate.
     const w = blank(20, 10);
-    w.cells[w.index(6, 5)] = CELL_GRAIN;
-    w.cells[w.index(6, 4)] = CELL_GRAIN;
-    w.cells[w.index(6, 3)] = CELL_GRAIN;
+    setGrain(w, 6, 5);
+    setGrain(w, 6, 4);
+    setGrain(w, 6, 3);
     const r = tryStep(w, 5.5, 5.5, 1, 0);
     expect(r.x).toBe(5.5);
     expect(r.y).toBe(5.5);
@@ -124,8 +147,8 @@ describe('tryStep — out of bounds and stair-step', () => {
     // Even a 1-cell grain is unclimbable if the cell above it is
     // soil — the ant has nowhere to put its body after stepping up.
     const w = blank(20, 10);
-    w.cells[w.index(6, 5)] = CELL_GRAIN;
-    w.cells[w.index(6, 4)] = CELL_SOIL; // ceiling above the pile
+    setGrain(w, 6, 5);
+    setSoil(w, 6, 4); // ceiling above the pile
     const r = tryStep(w, 5.5, 5.5, 1, 0);
     expect(r.x).toBe(5.5);
     expect(r.y).toBe(5.5);
@@ -233,10 +256,10 @@ describe('pickGrain', () => {
     const w = withFloor(10, 10);
     const rng = new RNG(2);
     // Surround so the top grain has nowhere to slide diagonally.
-    w.cells[w.index(4, 8)] = CELL_GRAIN;
-    w.cells[w.index(6, 8)] = CELL_GRAIN;
-    w.cells[w.index(5, 8)] = CELL_GRAIN; // bottom of the stack
-    w.cells[w.index(5, 7)] = CELL_GRAIN; // top of the stack
+    setGrain(w, 4, 8);
+    setGrain(w, 6, 8);
+    setGrain(w, 5, 8); // bottom of the stack
+    setGrain(w, 5, 7); // top of the stack
     pickGrain(w, 5, 8, rng);
     // The grain that was at (5,7) must have fallen into (5,8).
     expect(w.cells[w.index(5, 7)]).toBe(CELL_AIR);
@@ -263,7 +286,7 @@ describe('digCell', () => {
     const rng = new RNG(1);
     expect(digCell(w, 5, 5, rng)).toBe(false);  // air
     expect(digCell(w, -1, 9, rng)).toBe(false); // OOB
-    w.cells[w.index(5, 5)] = CELL_GRAIN;
+    setGrain(w, 5, 5);
     expect(digCell(w, 5, 5, rng)).toBe(false);  // grain (use pickGrain instead)
   });
 
@@ -274,8 +297,8 @@ describe('digCell', () => {
     const w = withFloor(10, 10);
     const rng = new RNG(3);
     // Two stacked soils at (5, 8) and (5, 9), with a grain on top at (5, 7).
-    w.cells[w.index(5, 8)] = CELL_SOIL;
-    w.cells[w.index(5, 7)] = CELL_GRAIN;
+    setSoil(w, 5, 8);
+    setGrain(w, 5, 7);
     digCell(w, 5, 8, rng);
     // Grain that was at (5,7) must have fallen into (5,8) (the new void).
     expect(w.cells[w.index(5, 7)]).toBe(CELL_AIR);
@@ -289,7 +312,7 @@ describe('settleGrain edge cases', () => {
     // a grain on the floor is already at rest.
     const w = blank(10, 10);
     const rng = new RNG(1);
-    w.cells[w.index(5, 9)] = CELL_GRAIN;
+    setGrain(w, 5, 9);
     const r = settleGrain(w, 5, 9, rng);
     expect(r.x).toBe(5);
     expect(r.y).toBe(9);

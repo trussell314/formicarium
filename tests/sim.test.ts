@@ -11,7 +11,7 @@ import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { Pheromone } from '../src/sim/pheromone';
 import { isSupported } from '../src/sim/physics';
 import { RNG } from '../src/sim/rng';
-import { CELL_GRAIN, CELL_SOIL, World } from '../src/sim/world';
+import { CELL_GRAIN, CELL_SOIL, isLoose, World } from '../src/sim/world';
 import { STATE_CARRY, STATE_DEAD } from '../src/sim/colony';
 
 function makeSim(seed: number) {
@@ -72,7 +72,7 @@ describe('sim invariants', () => {
     }
   });
 
-  it('grain conservation: dug soil = grains in world + carriers + wearLost', () => {
+  it('grain conservation: dug soil = carriers + wearLost (post-unification)', () => {
     const { rng, world, colony, dig, build } = makeSim(0xfeedface);
     for (let t = 0; t < 800; t++) step(world, colony, dig, build, rng, DEFAULT_PARAMS);
     let carriers = 0;
@@ -80,13 +80,13 @@ describe('sim invariants', () => {
       if (colony.state[i] === STATE_CARRY) carriers++;
     }
     const dug = world.initialSoilCells - world.countSoil();
-    const grainsInWorld = world.countGrains();
-    // wearLost accounts for cells dug by traffic-driven shaft erosion
-    // (Hölldobler & Wilson 1990) which the cited model treats as
-    // pulverised dust, not loaded grain — so it doesn't end up in
-    // either of the other two terms. Without including it here, the
-    // invariant would falsely fail every time wear fires.
-    expect(dug).toBe(grainsInWorld + carriers + world.wearLost);
+    // After SOIL/GRAIN unification countSoil() includes both
+    // consolidated wall AND loose deposits, so the formula collapses:
+    // a dug cell either rides on a carrier (in CARRY state) or got
+    // pulverised into wearLost (traffic-driven shaft erosion,
+    // Hölldobler & Wilson 1990). Redeposited grain becomes solid
+    // again and shows up in countSoil().
+    expect(dug).toBe(carriers + world.wearLost);
   });
 
   it('the chamber visibly grows over time', () => {
@@ -210,21 +210,23 @@ describe('sim invariants', () => {
     expect(maxJump).toBeLessThanOrEqual(2.2);
   });
 
-  it('every grain sits on a solid support (sandpile invariant)', () => {
+  it('every loose grain sits on a solid support (sandpile invariant)', () => {
     const { rng, world, colony, dig, build } = makeSim(0xabcd1234);
     for (let t = 0; t < 1500; t++) step(world, colony, dig, build, rng, DEFAULT_PARAMS);
     for (let y = 0; y < world.height; y++) {
       for (let x = 0; x < world.width; x++) {
-        if (world.cells[world.index(x, y)] !== CELL_GRAIN) continue;
+        const idx = world.index(x, y);
+        // Only loose cells need to sit on a support — consolidated
+        // wall is anchored by hardness, not by gravity.
+        if (!isLoose(world, idx)) continue;
         if (y + 1 >= world.height) continue;
         const below = world.cells[world.index(x, y + 1)];
-        // Grains either rest on solid (soil or other grain) OR at
-        // the natural-surface horizon, where the surface acts as
-        // structural bedrock and a grain in row (surface − 1) does
-        // not cascade into an open entrance shaft below. Both are
-        // legitimate "supported" configurations.
+        // Loose grains either rest on a solid cell (any hardness)
+        // OR at the natural-surface horizon, where the surface
+        // acts as structural bedrock and a grain in row (surface − 1)
+        // does not cascade into an open entrance shaft below.
         const atSurface = (y + 1) === world.naturalSurface[x];
-        expect(below === CELL_SOIL || below === CELL_GRAIN || atSurface).toBe(true);
+        expect(below === CELL_SOIL || atSurface).toBe(true);
       }
     }
   });

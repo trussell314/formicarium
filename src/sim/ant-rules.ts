@@ -44,10 +44,10 @@ import {
 } from './colony';
 import type { ParticleSystem } from './particles';
 import { Pheromone, uploadPheromoneCells } from './pheromone';
-import { digCell, pickGrain, placeGrain, recomputeMound, settle, settleGrain, tryStep } from './physics';
+import { digCell, pickGrain, placeGrain, recomputeMound, settle, tryStep } from './physics';
 import type { RNG } from './rng';
 import { type AntSpecies, HARVESTER } from './species';
-import { CELL_AIR, CELL_GRAIN, CELL_SOIL, DAY_TICKS, daylight, macroScale, PLANT_MAX_HEIGHT, WALK_SPEED_CAP, World } from './world';
+import { CELL_AIR, CELL_SOIL, DAY_TICKS, daylight, isLoose, macroScale, PLANT_MAX_HEIGHT, WALK_SPEED_CAP, World } from './world';
 
 export interface SimParams {
   /** Cells/tick walking speed. Sub-stepped so soil contacts aren't skipped. */
@@ -272,166 +272,11 @@ function adjacentGrain(world: World, ix: number, iy: number, rng: RNG): { x: num
     const x = ix + dx;
     const y = iy + dy;
     if (x < 0 || y < 0 || x >= world.width || y >= world.height) continue;
-    if (world.cells[y * w + x] !== CELL_GRAIN) continue;
+    if (!isLoose(world, y * w + x)) continue;
     count++;
     if (rng.next() < 1 / count) { pickX = x; pickY = y; }
   }
   return pickX < 0 ? null : { x: pickX, y: pickY };
-}
-
-/**
- * Floating-island collapse. Walks every 4-connected component of
- * SOIL/GRAIN cells and detects subsurface "islands" — components
- * that live entirely below the natural surface AND don't reach the
- * world's left, right, or bottom edge. Such a component has no
- * support path back to the surrounding earth and is just hovering
- * in mid-air, which is what aggressive wall-thinning excavations
- * leave behind. We re-type the island's cells to loose GRAIN
- * (hardness=0) and call settleGrain on each, so the chunk cascades
- * to whatever floor sits below.
- *
- * Cells are settled bottom-row-first within the island so a tall
- * stack falls cleanly: each settle vacates the cell above for the
- * next iteration's grain. settleGrain itself iterates downward
- * within a column, so this outer order just stops one cell from
- * blocking another in the same column.
- *
- * Ant pre-evacuation: settleGrain doesn't check for ant occupancy,
- * so an ant standing under the island would get a grain dropped
- * into her cell — the embedded-ants bug. Before the cascade we
- * scan the colony for any ant whose cell would be hit by the
- * falling grain (same column as an island cell, between the island
- * cell and the first SOIL below) and lift them to the first AIR
- * cell ABOVE the island top in their column. That row is open
- * (the island was unsupported, so the rows above are AIR by
- * definition), so the lift is always safe.
- */
-function collapseFloatingIslands(world: World, colony: Colony, rng: RNG): void {
-  const w = world.width;
-  const h = world.height;
-  const visited = new Uint8Array(w * h);
-  const queue = new Int32Array(w * h);
-  const compIdx: number[] = [];
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const idx = y * w + x;
-      if (visited[idx]) continue;
-      const k = world.cells[idx]!;
-      if (k !== CELL_SOIL && k !== CELL_GRAIN) {
-        visited[idx] = 1;
-        continue;
-      }
-      // BFS this 4-connected solid component. Track whether any of
-      // its cells touch the world's lateral or bottom boundary or
-      // sit at/above the column's natural surface — either anchors
-      // the component to the main mass and disqualifies it from
-      // the floating-island rule.
-      let qh = 0;
-      let qt = 0;
-      queue[qt++] = idx;
-      visited[idx] = 1;
-      compIdx.length = 0;
-      compIdx.push(idx);
-      // A component is "anchored" (= part of the main mass, NOT a
-      // floating island) if any of its cells touches a lateral or
-      // bottom world boundary OR sits above the natural-surface row
-      // of its column. The above-surface case catches mounds and any
-      // component that spans the surface horizon (which would be
-      // connected to the main mass at the surface).
-      const checkAnchor = (cx: number, cy: number): boolean => {
-        if (cx === 0 || cx === w - 1 || cy === h - 1) return true;
-        return cy < world.naturalSurface[cx]!;
-      };
-      let anchored = checkAnchor(x, y);
-      while (qh < qt) {
-        const p = queue[qh++]!;
-        const py = (p / w) | 0;
-        const px = p - py * w;
-        const nbrs: ReadonlyArray<readonly [number, number]> = [
-          [1, 0], [-1, 0], [0, 1], [0, -1],
-        ];
-        for (const [dx, dy] of nbrs) {
-          const nx = px + dx;
-          const ny = py + dy;
-          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-          const ni = ny * w + nx;
-          if (visited[ni]) continue;
-          const nk = world.cells[ni]!;
-          if (nk !== CELL_SOIL && nk !== CELL_GRAIN) continue;
-          visited[ni] = 1;
-          queue[qt++] = ni;
-          compIdx.push(ni);
-          if (!anchored && checkAnchor(nx, ny)) anchored = true;
-        }
-      }
-      if (anchored) continue;
-      // Subsurface floating island. Build per-column min/max-y
-      // ranges first so we can find the impact zone (every row
-      // from the island's top to the first SOIL below) and lift
-      // any ants out of it before the cascade.
-      const colTopY = new Map<number, number>();
-      const colBotY = new Map<number, number>();
-      for (let i = 0; i < compIdx.length; i++) {
-        const ci = compIdx[i]!;
-        const cy = (ci / w) | 0;
-        const cx = ci - cy * w;
-        const top = colTopY.get(cx);
-        const bot = colBotY.get(cx);
-        if (top === undefined || cy < top) colTopY.set(cx, cy);
-        if (bot === undefined || cy > bot) colBotY.set(cx, cy);
-      }
-      // Pre-evacuation: any ant whose cell lies in the cascade's
-      // impact column (column of an island cell, row >= island
-      // top, row < first solid below) is lifted to the first AIR
-      // cell ABOVE the island in her column. That row is open by
-      // construction (the island was unsupported, so cells above
-      // are AIR).
-      for (let aI = 0; aI < colony.count; aI++) {
-        const ax = colony.posX[aI]! | 0;
-        const ay = colony.posY[aI]! | 0;
-        const islandTop = colTopY.get(ax);
-        if (islandTop === undefined) continue;
-        if (ay < islandTop) continue;
-        // Find the first SOIL below the island in this column —
-        // that's the cascade's terminus. Any AIR row strictly above
-        // it is in the impact zone.
-        let terminus = h;
-        for (let py = colBotY.get(ax)! + 1; py < h; py++) {
-          const k = world.cells[py * w + ax]!;
-          if (k === CELL_SOIL || k === CELL_GRAIN) { terminus = py; break; }
-        }
-        if (ay >= terminus) continue;
-        // Ant is in the impact zone. Lift to islandTop - 1 (or
-        // higher if that cell isn't AIR for some reason).
-        let lift = islandTop - 1;
-        while (lift >= 0 && world.cells[lift * w + ax]! !== CELL_AIR) lift--;
-        if (lift < 0) continue; // No safe cell up; let the cascade hit (degenerate).
-        colony.posY[aI] = lift + 0.5;
-      }
-      // Re-type island cells to loose grain.
-      for (let i = 0; i < compIdx.length; i++) {
-        const ci = compIdx[i]!;
-        world.cells[ci] = CELL_GRAIN;
-        world.grainHardness[ci] = 0;
-        world.grainMoves[ci] = 0;
-      }
-      // Settle bottom-row-first so a tall stack falls cleanly:
-      // each settle vacates the cell above for the next iteration.
-      compIdx.sort((a, b) => {
-        const ay = (a / w) | 0;
-        const by = (b / w) | 0;
-        return by - ay;
-      });
-      for (let i = 0; i < compIdx.length; i++) {
-        const ci = compIdx[i]!;
-        const cy = (ci / w) | 0;
-        const cx = ci - cy * w;
-        if (world.cells[ci] === CELL_GRAIN) {
-          settleGrain(world, cx, cy, rng);
-        }
-      }
-    }
-  }
 }
 
 export function step(
@@ -838,7 +683,7 @@ export function step(
           const ssurf = world.naturalSurface[sx]!;
           for (let py = ssurf - 1; py >= 0; py--) {
             const dIdx = py * world.width + sx;
-            if (world.cells[dIdx] === CELL_GRAIN) {
+            if (isLoose(world, dIdx)) {
               donorIdx = dIdx;
               donorCol = sx;
               break;
@@ -853,11 +698,12 @@ export function step(
         const moves = world.grainMoves[donorIdx]!;
         world.cells[donorIdx] = CELL_AIR;
         world.grainMoves[donorIdx] = 0;
-        world.cells[entranceIdx] = CELL_GRAIN;
+        world.cells[entranceIdx] = CELL_SOIL;
+        world.grainHardness[entranceIdx] = 0;
         world.grainMoves[entranceIdx] = Math.min(255, moves + 1);
         recomputeMound(world, donorCol);
       }
-    } else if (isDawnWindow && world.cells[entranceIdx] === CELL_GRAIN) {
+    } else if (isDawnWindow && isLoose(world, entranceIdx)) {
       // Re-open: pick up the seal grain and place it back on a
       // nearby mound column (settles via standard grain physics).
       const moves = world.grainMoves[entranceIdx]!;
@@ -876,11 +722,13 @@ export function step(
           placeGrain(world, sx, dropY, rng, moves + 1);
         } else {
           // Couldn't place — restore the seal so we don't lose grain.
-          world.cells[entranceIdx] = CELL_GRAIN;
+          world.cells[entranceIdx] = CELL_SOIL;
+          world.grainHardness[entranceIdx] = 0;
           world.grainMoves[entranceIdx] = moves;
         }
       } else {
-        world.cells[entranceIdx] = CELL_GRAIN;
+        world.cells[entranceIdx] = CELL_SOIL;
+        world.grainHardness[entranceIdx] = 0;
         world.grainMoves[entranceIdx] = moves;
       }
     }
@@ -1024,24 +872,15 @@ export function step(
       const row = y * hsW;
       for (let x = 0; x < hsW; x++) {
         const idx = row + x;
-        if (world.cells[idx]! !== CELL_GRAIN) continue;
+        // Only loose solid cells need accrual — pristine wall and
+        // already-consolidated deposits are pegged at 255.
+        if (world.cells[idx]! !== CELL_SOIL) continue;
+        if (world.grainHardness[idx]! >= 255) continue;
         let bonus = 0;
-        if (x > 0) {
-          const k = world.cells[idx - 1]!;
-          if (k === CELL_SOIL || k === CELL_GRAIN) bonus++;
-        }
-        if (x < hsW - 1) {
-          const k = world.cells[idx + 1]!;
-          if (k === CELL_SOIL || k === CELL_GRAIN) bonus++;
-        }
-        if (y > 0) {
-          const k = world.cells[idx - hsW]!;
-          if (k === CELL_SOIL || k === CELL_GRAIN) bonus++;
-        }
-        if (y < hsH - 1) {
-          const k = world.cells[idx + hsW]!;
-          if (k === CELL_SOIL || k === CELL_GRAIN) bonus++;
-        }
+        if (x > 0 && world.cells[idx - 1] === CELL_SOIL) bonus++;
+        if (x < hsW - 1 && world.cells[idx + 1] === CELL_SOIL) bonus++;
+        if (y > 0 && world.cells[idx - hsW] === CELL_SOIL) bonus++;
+        if (y < hsH - 1 && world.cells[idx + hsW] === CELL_SOIL) bonus++;
         // Per-sweep increment: 50 ticks × (1 base + bonus) ≈ 50–250
         // hardness per sweep. Saturates in 1–5 sweeps (50–250 ticks)
         // depending on context. Lone grain on chamber floor (bonus 0)
@@ -1051,24 +890,6 @@ export function step(
         world.grainHardness[idx] = Math.min(255, cur + inc);
       }
     }
-  }
-
-  // Floating-island collapse. Aggressive chamber widening (especially
-  // around tunnel intersections) can leave isolated subsurface chunks
-  // of SOIL/GRAIN suspended in mid-air with no support path back to
-  // the surrounding earth. Real soil obeys gravity: a ceiling fragment
-  // detached from the parent mass falls. We approximate by finding
-  // every solid 4-connected component that (a) lives entirely below
-  // the natural surface and (b) doesn't touch the world's left, right,
-  // or bottom boundary. Those cells get re-typed to loose GRAIN
-  // (hardness reset, so they cascade) and settled top-down so the
-  // pile lands in a stable angle-of-repose heap on whatever floor
-  // sits below.
-  //
-  // O(W·H) per sweep — same cadence as the hardness pass to keep the
-  // amortised cost trivial.
-  if (world.tick % 50 === 0) {
-    collapseFloatingIslands(world, colony, rng);
   }
 
   // Seed germination + sprout decay sweep. Tschinkel (1999): some

@@ -36,7 +36,7 @@ const SAVE_KEY = 'formicarium:save';
 // distant, so per-cell root state under them was inconsistent.
 // v15 added per-cell corpse tick (timestamp-based decomposition).
 // v16 added per-cell grain hardness (wall reinforcement).
-const SAVE_VERSION = 16;
+const SAVE_VERSION = 17;
 
 // Chunked btoa to avoid argument-list length limits on very large arrays.
 function bytesToB64(view: ArrayBufferView): string {
@@ -56,8 +56,8 @@ function b64ToBytes(s: string): Uint8Array {
   return out;
 }
 
-interface SaveStateV16 {
-  v: 16;
+interface SaveStateV17 {
+  v: 17;
   foodCap: number;
   clumpAccum: number;
   // Settings — needed to validate that a save matches the requested run.
@@ -146,7 +146,7 @@ export function captureSnapshot(
   granaryField: Pheromone, trunkField: Pheromone,
   rng: RNG, settings: SaveSettings,
 ): string | null {
-  const state: SaveStateV16 = {
+  const state: SaveStateV17 = {
     v: SAVE_VERSION,
     seed: settings.seed,
     width: settings.width,
@@ -257,7 +257,7 @@ export function readSavedDescriptor(): {
   const blob = readSavedBlob();
   if (blob === null) return null;
   try {
-    const raw = JSON.parse(blob) as Partial<SaveStateV16>;
+    const raw = JSON.parse(blob) as Partial<SaveStateV17>;
     if (!raw || raw.v !== SAVE_VERSION) return null;
     if (
       typeof raw.seed !== 'number' ||
@@ -294,7 +294,7 @@ export function restoreSnapshot(
 ): boolean {
   let raw: unknown;
   try { raw = JSON.parse(blob); } catch { return false; }
-  const s = raw as Partial<SaveStateV16>;
+  const s = raw as Partial<SaveStateV17>;
   if (
     !s ||
     s.v !== SAVE_VERSION ||
@@ -338,6 +338,27 @@ export function restoreSnapshot(
     copyBytes(s.soilNoise!, world.soilNoise);
     copyBytes(s.grainMoves!, world.grainMoves);
     if (s.grainHardness) copyBytes(s.grainHardness, world.grainHardness);
+    // SOIL/GRAIN unification migration. Pre-v17 saves stored cell
+    // value 2 for loose grain; v17 collapses to a single solid type
+    // (CELL_SOIL = 1) with hardness as the loose/consolidated
+    // distinguisher. Walk the cells once: any value-2 cell becomes
+    // value-1 with hardness=0 (loose). Pristine cells (value 1) get
+    // hardness=255 if grainHardness wasn't in the save (v15-and-
+    // earlier) — without it every pristine cell would read as loose
+    // and cascade on the next tick. Older v16 saves already carried
+    // hardness; we only top-up the case where the field is absent.
+    {
+      const cellsLen = world.cells.length;
+      const restored = !!s.grainHardness;
+      for (let i = 0; i < cellsLen; i++) {
+        if (world.cells[i] === 2) {
+          world.cells[i] = 1;
+          world.grainHardness[i] = 0;
+        } else if (world.cells[i] === 1 && !restored) {
+          world.grainHardness[i] = 255;
+        }
+      }
+    }
     copyBytes(s.food!, world.food);
     copyBytes(s.foodMoves!, world.foodMoves);
     if (s.foodTick) copyBytes(s.foodTick, world.foodTick);

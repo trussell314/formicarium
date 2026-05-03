@@ -31,7 +31,12 @@ function flatWorld(w = 40, h = 30, surf = 12): World {
   const world = new World(w, h);
   for (let x = 0; x < w; x++) world.naturalSurface[x] = surf;
   for (let y = surf; y < h; y++) {
-    for (let x = 0; x < w; x++) world.cells[world.index(x, y)] = CELL_SOIL;
+    for (let x = 0; x < w; x++) {
+      const idx = world.index(x, y);
+      world.cells[idx] = CELL_SOIL;
+      // Pristine substrate is consolidated under the unified model.
+      world.grainHardness[idx] = 255;
+    }
   }
   world.initialSoilCells = world.countSoil();
   return world;

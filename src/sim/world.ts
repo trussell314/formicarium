@@ -1,12 +1,42 @@
 // 2D vertical cross-section of the formicarium. Origin top-left, y grows down.
-// Cells are AIR / SOIL / GRAIN. The ant farm "glass" is implicit — cells
-// outside the grid are treated as solid in physics.
+// Cells are AIR / SOIL. The ant farm "glass" is implicit — cells outside the
+// grid are treated as solid in physics.
+//
+// Earlier the grid carried a third cell type CELL_GRAIN distinguishing loose
+// ant-deposited spoil from pristine substrate. With the per-cell grainHardness
+// field that role is subsumed: a cell with hardness < LOOSE_HARDNESS_THRESHOLD
+// is "loose" (cascades under gravity, easy to pick up), and a cell at full
+// hardness is "consolidated" (acts like the old pristine SOIL). Pristine soil
+// is initialised with hardness = 255 by World.generate so the conservation
+// invariant collapses to `initialSoilCells = countSoil() + carriers`.
 
 import type { RNG } from './rng';
 
 export const CELL_AIR = 0;
 export const CELL_SOIL = 1;
-export const CELL_GRAIN = 2;
+/** @deprecated alias kept so legacy test fixtures can still set cells
+ *  to "grain" without rewriting. Equivalent to CELL_SOIL (the unified
+ *  solid type); use it only in test scaffolding where it documents
+ *  intent ("place a loose grain here" → also set grainHardness = 0
+ *  if the test relies on cascade behaviour). New production code
+ *  should use CELL_SOIL with explicit hardness. */
+export const CELL_GRAIN = 1;
+
+/** Hardness below which a SOIL cell behaves as loose grain — cascades under
+ *  gravity (settleGrain), is easily picked up by foragers, and the renderer
+ *  paints it lighter. Above this threshold the cell is "consolidated" and
+ *  acts as a structural wall: doesn't cascade, and digProb's hardFactor
+ *  keeps pickup probability low. 64 chosen so a fresh deposit (hardness=0)
+ *  needs about one tamping sweep (≥ +50/sweep) before it consolidates. */
+export const LOOSE_HARDNESS_THRESHOLD = 64;
+
+/** Per-cell helper. Returns true iff the cell at (x, y) is solid (i.e.
+ *  cells === CELL_SOIL) AND its hardness has not yet consolidated. Used by
+ *  cascade gating (settleGrain), the foraging-mound count, and tests. */
+export function isLoose(world: World, idx: number): boolean {
+  return world.cells[idx] === CELL_SOIL
+    && world.grainHardness[idx]! < LOOSE_HARDNESS_THRESHOLD;
+}
 
 /** Mature plant height in cells, indexed by plant kind. Index 0 is
  *  unused (kind 0 = no plant). Calibrated for visual recognisability
@@ -366,10 +396,17 @@ export class World {
       const sy = Math.max(2, Math.min(this.height - 4, surfaceRow + wave));
       this.naturalSurface[x] = sy;
       for (let y = 0; y < this.height; y++) {
+        const idx = y * this.width + x;
         if (y < sy) {
-          this.cells[y * this.width + x] = CELL_AIR;
+          this.cells[idx] = CELL_AIR;
         } else {
-          this.cells[y * this.width + x] = CELL_SOIL;
+          this.cells[idx] = CELL_SOIL;
+          // Pristine substrate is fully consolidated. Without this
+          // every cell would read as "loose" (hardness=0 default
+          // from the Uint8Array fill) and would cascade on the next
+          // settleGrain pass, which would dump the entire world to
+          // the bottom row.
+          this.grainHardness[idx] = 255;
           soil++;
         }
       }
@@ -482,6 +519,12 @@ export class World {
 
   }
 
+  /** Total solid cells (consolidated wall + loose deposits). With the
+   *  unified type the conservation invariant is simply
+   *  `initialSoilCells === countSoil() + currentCarriers + wearLost`
+   *  — a dug cell either rides on a carrier ant or is pulverised
+   *  into wearLost; a deposited grain becomes solid again and shows
+   *  up in countSoil. */
   countSoil(): number {
     let n = 0;
     for (let i = 0; i < this.cells.length; i++) {
@@ -490,10 +533,16 @@ export class World {
     return n;
   }
 
+  /** Solid cells whose hardness is below the loose threshold —
+   *  cells the foragers (and the renderer) treat as "loose grain":
+   *  fresh deposits that haven't yet tamped/saturated into the
+   *  surrounding wall. Counted separately from total solid for
+   *  HUD display and tests. */
   countGrains(): number {
     let n = 0;
     for (let i = 0; i < this.cells.length; i++) {
-      if (this.cells[i] === CELL_GRAIN) n++;
+      if (this.cells[i] === CELL_SOIL
+          && this.grainHardness[i]! < LOOSE_HARDNESS_THRESHOLD) n++;
     }
     return n;
   }

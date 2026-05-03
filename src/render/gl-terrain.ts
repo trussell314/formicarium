@@ -74,7 +74,7 @@ uniform float uShowPhero;
 // Per-cell scalar fields. Integer textures (R16UI / R32I) MUST be
 // sampled with usampler2D / isampler2D respectively; using a plain
 // sampler2D returns implementation-defined garbage in WebGL2.
-uniform sampler2D uCells;        // R8: 0=AIR, 1=SOIL, 2=GRAIN
+uniform sampler2D uCells;        // R8: 0=AIR, 1=SOIL (hardness distinguishes loose vs consolidated)
 uniform sampler2D uSoilNoise;    // R8: per-cell hash
 uniform usampler2D uSurf;        // R16UI: per-column natural surface
 uniform sampler2D uFood;         // R8: per-cell food count

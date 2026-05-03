@@ -20,7 +20,14 @@ function flatWorld(width: number, height: number, surfRow: number): World {
   for (let x = 0; x < width; x++) {
     w.naturalSurface[x] = surfRow;
     for (let y = 0; y < height; y++) {
-      w.cells[w.index(x, y)] = y < surfRow ? CELL_AIR : CELL_SOIL;
+      const idx = w.index(x, y);
+      if (y < surfRow) {
+        w.cells[idx] = CELL_AIR;
+      } else {
+        w.cells[idx] = CELL_SOIL;
+        // Pristine substrate is consolidated.
+        w.grainHardness[idx] = 255;
+      }
     }
   }
   w.initialSoilCells = w.countSoil();
@@ -360,8 +367,14 @@ describe('substrate compaction with depth', () => {
       for (let x = 0; x < w.width; x++) {
         w.naturalSurface[x] = 5; // surface always at y=5
         for (let y = 0; y < w.height; y++) {
-          // Air above, single layer of pocket air at yPos, soil below.
-          w.cells[w.index(x, y)] = y < 5 ? CELL_AIR : CELL_SOIL;
+          const idx = w.index(x, y);
+          if (y < 5) {
+            w.cells[idx] = CELL_AIR;
+          } else {
+            w.cells[idx] = CELL_SOIL;
+            // Pristine substrate is consolidated.
+            w.grainHardness[idx] = 255;
+          }
         }
       }
       // Carve a 1-cell pocket at (20, yPos) so ants there have soil
