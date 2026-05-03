@@ -2223,16 +2223,29 @@ export function step(
           // 1998: the source location gets a heavier deposit than
           // the path, so the gradient sharpens at the food rather
           // than smearing along the trail. 1.0 vs 0.10 per-step.
+          //
+          // Above-surface ONLY, matching the per-step return-trip
+          // deposit below. trailField/trunkField are surface-
+          // foraging signals — underground recruitment uses dig
+          // pheromone. Without this gate, foragers picking up food
+          // from a chamber where a previous CARRY_FOOD ant dumped
+          // it lay a heavy anchor underground; the field diffuses
+          // up through the soil and reads as a bright recruitment
+          // hotspot above the chamber, drawing more foragers down
+          // and locking in a positive feedback loop on satellite
+          // tunnels that have nothing to do with surface food.
           if (trailField) {
             const fy = (fIdx / world.width) | 0;
             const fxx = fIdx - fy * world.width;
-            trailField.deposit(fxx, fy, 1.0);
-            // Trunk-trail: long-half-life persistent path. Each
-            // pickup contributes a small amount; over many trips
-            // the cumulative concentration on a stable food
-            // patch's path saturates and reads as a "highway"
-            // even after the volatile foraging trail has decayed.
-            if (trunkField) trunkField.deposit(fxx, fy, 0.10);
+            if (fy < world.naturalSurface[fxx]!) {
+              trailField.deposit(fxx, fy, 1.0);
+              // Trunk-trail: long-half-life persistent path. Each
+              // pickup contributes a small amount; over many trips
+              // the cumulative concentration on a stable food
+              // patch's path saturates and reads as a "highway"
+              // even after the volatile foraging trail has decayed.
+              if (trunkField) trunkField.deposit(fxx, fy, 0.10);
+            }
           }
           world.food[fIdx] = 0;
           world.foodMoves[fIdx] = 0;
