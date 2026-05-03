@@ -2,7 +2,7 @@
 // render loop (rAF, 60Hz) stays smooth even at high speed
 // multipliers. URL params:
 //   ?seed=N       fixed RNG seed (otherwise time-derived)
-//   ?speed=N      realtime multiplier (default 1; 1× = realtime)
+//   ?speed=N      realtime multiplier (default 8192 — slider max; 1× = realtime)
 //   ?ants=N       initial ant count
 //   ?width=N      world width (cells)
 //   ?height=N     world height (cells)
@@ -55,7 +55,7 @@ function readSettings(): Settings {
     width: Math.max(40, num('width', saved?.width ?? 400) | 0),
     height: Math.max(30, num('height', saved?.height ?? 250) | 0),
     ants: Math.max(0, num('ants', 0) | 0),
-    speedMul: Math.max(0.125, num('speed', 8)),
+    speedMul: Math.max(0.125, num('speed', 8192)),
     screensaver: p.get('screensaver') === '1',
   };
 }
