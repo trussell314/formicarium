@@ -205,6 +205,13 @@ export class World {
    *  ramp; the sim uses it for natural decay back to AIR after
    *  species.sproutLifetimeTicks. */
   readonly sproutTick: Int32Array;
+  /** Tick at which each cell's corpse was last deposited. The sim
+   *  uses (world.tick - corpseTick[idx]) for natural decomposition:
+   *  corpses older than CORPSE_LIFETIME_TICKS clear back to AIR via
+   *  beetle / fungal / bacterial action, the way real ant-midden
+   *  corpses break down on a ~weeks timescale. Without this,
+   *  middens accumulate immortal corpse markers forever. */
+  readonly corpseTick: Int32Array;
   /** Tick at which each cell was last carved (for "fresh dig" highlight). */
   readonly digTick: Int32Array;
   initialSoilCells = 0;
@@ -296,6 +303,8 @@ export class World {
     this.sprout = new Uint8Array(width * height);
     this.sproutTick = new Int32Array(width * height);
     this.sproutTick.fill(-1_000_000);
+    this.corpseTick = new Int32Array(width * height);
+    this.corpseTick.fill(-1_000_000);
     this.plant = new Uint8Array(width);
     this.plantHeight = new Uint16Array(width);
     this.bgPlant = new Uint8Array(width);

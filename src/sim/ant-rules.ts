@@ -763,6 +763,34 @@ export function step(
     }
   }
 
+  // Corpse decomposition sweep. Real ant-midden corpses break down
+  // on a ~weeks timescale via beetle / fungal / bacterial action
+  // (Hölldobler & Wilson 1990 Ch. 7). Without decay, corpses
+  // accumulate immortal markers at the midden forever. Sweep every
+  // 100 ticks (cheap O(W·H/100)) and clear corpses older than the
+  // lifetime. 30 sim-days at compression=100 (DAY_TICKS=8640) ≈
+  // 260,000 ticks, within real-biology range for surface decay.
+  const CORPSE_LIFETIME_TICKS = 260_000;
+  if (world.tick % 100 === 0) {
+    const wW = world.width;
+    const wH = world.height;
+    for (let y = 0; y < wH; y++) {
+      const row = y * wW;
+      for (let x = 0; x < wW; x++) {
+        const idx = row + x;
+        if (world.corpse[idx]! === 0) continue;
+        const ct = world.corpseTick[idx]!;
+        // Sentinel -1,000,000 = "never stamped" (legacy save, direct
+        // test set). Lazy-init to current tick so the corpse ages
+        // from now rather than getting cleared on first sweep.
+        if (ct === -1_000_000) { world.corpseTick[idx] = world.tick; continue; }
+        if (world.tick - ct > CORPSE_LIFETIME_TICKS) {
+          world.corpse[idx] = 0;
+        }
+      }
+    }
+  }
+
   // Seed germination + sprout decay sweep. Tschinkel (1999): some
   // stored seeds in granaries occasionally sprout instead of being
   // eaten. We sweep the food field once per germinationSweepInterval
@@ -838,6 +866,9 @@ export function step(
             world.food[bidx]! === 0
           ) {
             world.corpse[bidx] = 1;
+            // Cascade preserves corpse age — the body fell, didn't
+            // freshen — so carry the existing tick stamp with it.
+            world.corpseTick[bidx] = world.corpseTick[ridx]!;
             world.corpse[ridx] = 0;
           }
         }
@@ -1302,7 +1333,9 @@ export function step(
         const lx = colony.posX[i]! | 0;
         const ly = colony.posY[i]! | 0;
         if (lx >= 0 && ly >= 0 && lx < wW && ly < world.height) {
-          world.corpse[ly * wW + lx] = 1;
+          const lIdx = ly * wW + lx;
+          world.corpse[lIdx] = 1;
+          world.corpseTick[lIdx] = world.tick;
         }
         continue;
       }
@@ -1443,7 +1476,9 @@ export function step(
         const ix0 = colony.posX[i]! | 0;
         const iy0 = colony.posY[i]! | 0;
         if (ix0 >= 0 && iy0 >= 0 && ix0 < wW && iy0 < world.height) {
-          world.corpse[iy0 * wW + ix0] = 1;
+          const cIdx0 = iy0 * wW + ix0;
+          world.corpse[cIdx0] = 1;
+          world.corpseTick[cIdx0] = world.tick;
         }
         continue;
       }
@@ -1656,7 +1691,9 @@ export function step(
       colony.setState(i, STATE_DEAD);
       world.totalDied++;
       if (ix >= 0 && iy >= 0 && ix < wW && iy < world.height) {
-        world.corpse[iy * wW + ix] = 1;
+        const cIdxA = iy * wW + ix;
+        world.corpse[cIdxA] = 1;
+        world.corpseTick[cIdxA] = world.tick;
       }
       continue;
     }
@@ -1704,7 +1741,9 @@ export function step(
       colony.setState(i, STATE_DEAD);
       world.totalDied++;
       if (ix >= 0 && iy >= 0 && ix < wW && iy < world.height) {
-        world.corpse[iy * wW + ix] = 1;
+        const cIdxA = iy * wW + ix;
+        world.corpse[cIdxA] = 1;
+        world.corpseTick[cIdxA] = world.tick;
       }
       continue;
     }
@@ -2277,6 +2316,11 @@ export function step(
           rng.next() < 0.05
         ) {
           world.corpse[dIdx] = 1;
+          // Reset the age clock at drop: the lifetime represents how
+          // long the body has been at the midden where decomposition
+          // actually progresses (fungal / beetle action in the
+          // refuse environment). In-transit ticks don't count.
+          world.corpseTick[dIdx] = world.tick;
           colony.setState(i, STATE_WANDER);
           colony.heading[i] = Math.PI / 2 + rng.range(-0.3, 0.3);
         }
@@ -3577,12 +3621,40 @@ export function step(
         }
       }
       if (pDeposit > 0 && rng.next() < pDeposit) {
+        // Find an escape AIR cell BEFORE depositing — placeGrain
+        // converts the worker's current cell to GRAIN, embedding her
+        // in her own deposit. If she's near a chamber ceiling /
+        // corner where all cells above are solid, settle's bounded
+        // extrication can't pop her out and she suffocates several
+        // cells from the original wall. The user-observed "ants
+        // surrounded by soil after digging near a wall" was
+        // progressive burial via this path — each CARRY → deposit
+        // cycle filled an adjacent cell, walling her in.
+        const NEIGHBOR_OFFSETS: ReadonlyArray<readonly [number, number]> = [
+          [0, -1], [-1, -1], [1, -1], [-1, 0], [1, 0],
+          [0, 1], [-1, 1], [1, 1],
+        ];
+        let escape: { x: number; y: number } | null = null;
+        for (const [exoff, eyoff] of NEIGHBOR_OFFSETS) {
+          const enx = px + exoff;
+          const eny = py + eyoff;
+          if (enx < 0 || eny < 0 || enx >= world.width || eny >= world.height) continue;
+          if (world.cells[eny * world.width + enx]! === CELL_AIR) {
+            escape = { x: enx, y: eny };
+            break;
+          }
+        }
+        if (escape === null) continue; // No way to step out; don't deposit.
         // The grain has now been moved one more time. Stamp the
         // placed cell (and any cascade destination) with the
         // updated count so the renderer can fade it.
         const newMoves = colony.carryMoves[i]! + 1;
         const placed = placeGrain(world, px, py, rng, newMoves);
         if (placed !== null) {
+          // Step the ant into the escape cell so she's not embedded
+          // in her own deposit. Float to cell-centre.
+          colony.posX[i] = escape.x + 0.5;
+          colony.posY[i] = escape.y + 0.5;
           // Deadlock-fallback drops route to REST so the worker
           // takes a forced cool-off before being eligible to dig
           // again. Without this, ants who exit via the fallback

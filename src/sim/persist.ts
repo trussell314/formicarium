@@ -34,7 +34,8 @@ const SAVE_KEY = 'formicarium:save';
 // v13 added per-column background plant skyline (visual depth);
 // v14 dropped the root marker — bg plants are intended to be
 // distant, so per-cell root state under them was inconsistent.
-const SAVE_VERSION = 14;
+// v15 added per-cell corpse tick (timestamp-based decomposition).
+const SAVE_VERSION = 15;
 
 // Chunked btoa to avoid argument-list length limits on very large arrays.
 function bytesToB64(view: ArrayBufferView): string {
@@ -54,8 +55,8 @@ function b64ToBytes(s: string): Uint8Array {
   return out;
 }
 
-interface SaveStateV14 {
-  v: 14;
+interface SaveStateV15 {
+  v: 15;
   foodCap: number;
   clumpAccum: number;
   // Settings — needed to validate that a save matches the requested run.
@@ -81,6 +82,7 @@ interface SaveStateV14 {
   food: string;
   foodMoves: string;
   corpse: string;
+  corpseTick: string;
   sprout: string;
   sproutTick: string;
   digTick: string;
@@ -141,7 +143,7 @@ export function captureSnapshot(
   granaryField: Pheromone, trunkField: Pheromone,
   rng: RNG, settings: SaveSettings,
 ): string | null {
-  const state: SaveStateV14 = {
+  const state: SaveStateV15 = {
     v: SAVE_VERSION,
     seed: settings.seed,
     width: settings.width,
@@ -164,6 +166,7 @@ export function captureSnapshot(
     food: bytesToB64(world.food),
     foodMoves: bytesToB64(world.foodMoves),
     corpse: bytesToB64(world.corpse),
+    corpseTick: bytesToB64(new Uint8Array(world.corpseTick.buffer, world.corpseTick.byteOffset, world.corpseTick.byteLength)),
     sprout: bytesToB64(world.sprout),
     sproutTick: bytesToB64(world.sproutTick),
     digTick: bytesToB64(world.digTick),
@@ -249,7 +252,7 @@ export function readSavedDescriptor(): {
   const blob = readSavedBlob();
   if (blob === null) return null;
   try {
-    const raw = JSON.parse(blob) as Partial<SaveStateV14>;
+    const raw = JSON.parse(blob) as Partial<SaveStateV15>;
     if (!raw || raw.v !== SAVE_VERSION) return null;
     if (
       typeof raw.seed !== 'number' ||
@@ -286,7 +289,7 @@ export function restoreSnapshot(
 ): boolean {
   let raw: unknown;
   try { raw = JSON.parse(blob); } catch { return false; }
-  const s = raw as Partial<SaveStateV14>;
+  const s = raw as Partial<SaveStateV15>;
   if (
     !s ||
     s.v !== SAVE_VERSION ||
@@ -332,6 +335,7 @@ export function restoreSnapshot(
     copyBytes(s.food!, world.food);
     copyBytes(s.foodMoves!, world.foodMoves);
     copyBytes(s.corpse!, world.corpse);
+    copyBytes(s.corpseTick!, world.corpseTick);
     copyBytes(s.sprout!, world.sprout);
     copyBytes(s.sproutTick!, world.sproutTick);
     copyBytes(s.digTick!, world.digTick);
