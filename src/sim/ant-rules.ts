@@ -2447,14 +2447,32 @@ export function step(
         }
       }
       // Deposit if we're in a below-surface AIR cell with no food
-      // already there.
+      // already there AND either (a) the cell is in an established
+      // granary chamber (granary pheromone above threshold) or (b)
+      // the ant has been carrying long enough that the bootstrap
+      // fallback fires. Without (a), foragers dump in the first
+      // chamber they walk into and any accidental deposit anchors
+      // a new "granary"; with (a) only existing high-pheromone
+      // cells qualify, so deposits concentrate at the colony's
+      // first-established granary and the consistent-depth caches
+      // that Tschinkel (2004) observed in P. badius emerge via
+      // positive feedback. (b) is the bootstrap: the very first
+      // trips have no granary gradient anywhere, so they need to
+      // be allowed to deposit somewhere — once that happens the
+      // gradient takes over.
       const dxIdx = nx | 0;
       const dyIdx = ny | 0;
       const dIdx = dyIdx * world.width + dxIdx;
+      const GRANARY_DEPOSIT_THRESHOLD = 0.5;
+      const GRANARY_BOOTSTRAP_TICKS = 1500;
+      const localGranary = granaryField ? granaryField.sample(dxIdx, dyIdx) : 0;
+      const granaryQualified = localGranary >= GRANARY_DEPOSIT_THRESHOLD;
+      const bootstrapElapsed = colony.stateTicks[i]! >= GRANARY_BOOTSTRAP_TICKS;
       if (
         dyIdx > world.naturalSurface[dxIdx]! &&
         world.cells[dIdx] === CELL_AIR &&
-        world.food[dIdx] === 0
+        world.food[dIdx] === 0 &&
+        (granaryQualified || bootstrapElapsed || !granaryField)
       ) {
         world.food[dIdx] = 1;
         world.foodMoves[dIdx] = Math.min(255, colony.carryMoves[i]! + 1);
