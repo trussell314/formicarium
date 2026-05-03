@@ -13,9 +13,11 @@ import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { Pheromone } from '../src/sim/pheromone';
 import { RNG } from '../src/sim/rng';
 import { HARVESTER } from '../src/sim/species';
-import { CELL_AIR, CELL_GRAIN, CELL_SOIL, World } from '../src/sim/world';
+import { CELL_AIR, CELL_SOIL, isLoose, World } from '../src/sim/world';
 
-const TICKS_PER_CHECKPOINT = 30_000;
+const TICKS_PER_CHECKPOINT = process.env.MONITOR_TICKS
+  ? parseInt(process.env.MONITOR_TICKS, 10)
+  : 30_000;
 const NUM_CHECKPOINTS = process.env.MONITOR_CHECKPOINTS
   ? parseInt(process.env.MONITOR_CHECKPOINTS, 10)
   : 10; // 300k ticks default — early-game / starvation-onset window
@@ -109,11 +111,16 @@ function reportCheckpoint(world: World, c: Colony, label: string,
   const alive = wander + carry + rest + forage + carryFood + necro;
   const meanWorkerE = workerEnergyN > 0 ? workerEnergySum / workerEnergyN : 0;
   const meanLarvaE = larvaEnergyN > 0 ? larvaEnergySum / larvaEnergyN : 0;
+  // Post-unification: every solid cell is CELL_SOIL; loose deposits
+  // are the subset with hardness below the loose threshold. Total
+  // soil here means consolidated wall (i.e. solid AND not loose).
   let grains = 0, foodCount = 0, soilCount = 0, corpses = 0;
   for (let i = 0; i < world.cells.length; i++) {
     const k = world.cells[i]!;
-    if (k === CELL_SOIL) soilCount++;
-    else if (k === CELL_GRAIN) grains++;
+    if (k === CELL_SOIL) {
+      if (isLoose(world, i)) grains++;
+      else soilCount++;
+    }
     if (world.food[i]! > 0) foodCount++;
     if (world.corpse[i]! > 0) corpses++;
   }
@@ -358,7 +365,12 @@ function logAntWatch(world: World, c: Colony): void {
     const aboveSurface = iy < surf;
     const cellAt = ix >= 0 && ix < world.width && iy >= 0 && iy < world.height
       ? world.cells[iy * world.width + ix]! : -1;
-    const cellDesc = cellAt === CELL_AIR ? 'AIR' : cellAt === CELL_SOIL ? 'SOIL' : cellAt === CELL_GRAIN ? 'GRAIN' : '?';
+    const idxAt = ix >= 0 && ix < world.width && iy >= 0 && iy < world.height
+      ? iy * world.width + ix : -1;
+    const cellDesc = cellAt === CELL_AIR ? 'AIR'
+      : cellAt === CELL_SOIL
+        ? (idxAt >= 0 && isLoose(world, idxAt) ? 'GRAIN' : 'SOIL')
+        : '?';
     const e = c.energy[i]!.toFixed(2);
     const a = c.age[i]!;
     log(`    #${String(i).padStart(3)} ${stateName(c.state[i]!).padEnd(6)} @(${px},${py}) ${aboveSurface ? 'above' : `d${depth}`} ${cellDesc} age=${a} E=${e}`);
@@ -411,7 +423,7 @@ describe('claustral monitoring (post-IJ)', () => {
           if (k === CELL_AIR && y >= sy) {
             if (x < minX) minX = x; if (x > maxX) maxX = x;
             if (y < minY) minY = y; if (y > maxY) maxY = y;
-          } else if (k === CELL_GRAIN) {
+          } else if (k === CELL_SOIL && isLoose(world, idx)) {
             if (x < minX) minX = x; if (x > maxX) maxX = x;
             if (y < minY) minY = y; if (y > maxY) maxY = y;
           }
@@ -436,7 +448,7 @@ describe('claustral monitoring (post-IJ)', () => {
             const sy = world.naturalSurface[x]!;
             if (world.corpse[idx]! > 0) line += '+';
             else if (world.food[idx]! > 0) line += ':';
-            else if (k === CELL_GRAIN) line += '#';
+            else if (k === CELL_SOIL && isLoose(world, idx)) line += '#';
             else if (k === CELL_SOIL) line += '.';
             else if (y < sy) line += ' ';
             else line += '·'; // open air below surface (chamber/tunnel)
