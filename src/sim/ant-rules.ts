@@ -3938,16 +3938,51 @@ export function step(
   // Per-ant gravity (env). Runs after all per-ant decisions and any
   // grain cascades so an ant whose footing was just dug out falls
   // properly.
+  //
+  // Brood (egg/larva/pupa) is inert: real eggs don't cling to walls
+  // or float in mid-air. In a colony they're tended by attendants
+  // (queen + nurse-aged workers) who hold them in piles; without
+  // any attendant nearby they collapse onto the chamber floor like
+  // any other small object under gravity. Gate brood gravity on
+  // attendant proximity (3-cell radius, same as the nurse check the
+  // thermoreg migration uses): with an attendant nearby the brood
+  // is held/tended (no fall, thermoreg can shuffle them); abandoned
+  // brood falls.
+  //
+  // Workers and queen still adhere below the natural surface (in-
+  // chamber walking shouldn't produce a fall), matching the sim's
+  // "below-ground = 2D adhered surface" abstraction. Corpses are
+  // handled by the corpse-overlay gravity earlier in the tick —
+  // STATE_DEAD ants don't move themselves.
+  const ATTENDANT_RADIUS = 3;
+  const ATTENDANT_RADIUS_SQ = ATTENDANT_RADIUS * ATTENDANT_RADIUS;
   for (let i = 0; i < colony.count; i++) {
     const sG = colony.state[i];
-    if (sG === STATE_DEAD || sG === STATE_QUEEN || sG === STATE_EGG
-        || sG === STATE_LARVA || sG === STATE_PUPA) continue;
+    if (sG === STATE_DEAD) continue;
+    const isBrood = sG === STATE_EGG || sG === STATE_LARVA || sG === STATE_PUPA;
     const sx = colony.posX[i]! | 0;
     const sy = colony.posY[i]! | 0;
-    // Workers below the natural surface adhere — extricate from any
-    // fresh soil but skip the unsupported-drop step (see tryStep
-    // comment above for the biological rationale).
-    const sAdheres = sy >= world.naturalSurface[sx]!;
+    let sAdheres: boolean;
+    if (isBrood) {
+      // Look for any adult attendant (worker or queen) within
+      // ATTENDANT_RADIUS. A single nearby attendant is enough — the
+      // brood pile is collectively tended.
+      const bx = colony.posX[i]!;
+      const by = colony.posY[i]!;
+      let attended = false;
+      for (let j = 0; j < colony.count; j++) {
+        if (j === i) continue;
+        const sj = colony.state[j]!;
+        if (sj === STATE_DEAD || sj === STATE_EGG || sj === STATE_LARVA
+            || sj === STATE_PUPA) continue;
+        const dxA = colony.posX[j]! - bx;
+        const dyA = colony.posY[j]! - by;
+        if (dxA * dxA + dyA * dyA < ATTENDANT_RADIUS_SQ) { attended = true; break; }
+      }
+      sAdheres = attended;
+    } else {
+      sAdheres = sy >= world.naturalSurface[sx]!;
+    }
     const settled = settle(world, sx, sy, sAdheres);
     // Shift posY by the cell delta the settle picked, preserving
     // the sub-cell fractional part. Snapping to settled+0.5 used to

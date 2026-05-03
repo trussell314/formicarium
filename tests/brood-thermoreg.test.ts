@@ -8,7 +8,7 @@
 //   4. The migration is bounded — once at target, no further drift.
 
 import { describe, expect, it } from 'vitest';
-import { Colony, STATE_EGG, STATE_LARVA } from '../src/sim/colony';
+import { Colony, STATE_EGG, STATE_LARVA, STATE_REST } from '../src/sim/colony';
 import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { Pheromone } from '../src/sim/pheromone';
 import { RNG } from '../src/sim/rng';
@@ -64,6 +64,13 @@ function spawnNurse(c: Colony, x: number, y: number, rng: RNG): void {
   });
   c.age[idx] = 0; // pure nurse
   c.energy[idx] = 1;
+  // Stay put — without this the WANDER default walks the nurse out
+  // of attendant range within a few ticks, the brood is then
+  // unattended, gravity drops the egg to the chamber floor, and
+  // the thermoreg drift never gets a chance to assert itself.
+  // Real attendants don't wander away from a brood pile they're
+  // tending; STATE_REST holds them on the brood.
+  c.setState(idx, STATE_REST);
 }
 
 describe('brood thermoregulation', () => {
@@ -135,6 +142,13 @@ describe('brood thermoregulation', () => {
       // we revert it to keep daylight constant).
       w.tick = DAY_TICKS / 2 - 1;
       step(w, c, dig, build, rng, DEFAULT_PARAMS, undefined, FAST_MIGRATE);
+      // Teleport the nurse to follow the egg — mimics a real nurse
+      // picking the egg up and carrying it. Without this the nurse
+      // stays at the spawn cell, the migrating egg drifts out of
+      // attendant range, gravity kicks in, and the egg crashes to
+      // the chamber bottom.
+      c.posX[1] = c.posX[0]!;
+      c.posY[1] = c.posY[0]!;
     }
     const finalDepth = (c.posY[0]! | 0) - 10; // surface row = 10
     expect(finalDepth).toBeLessThanOrEqual(FAST_MIGRATE.broodMaxDepth + 1);
@@ -205,15 +219,19 @@ describe('brood thermoregulation', () => {
     expect(c.posY[0]! | 0).toBeGreaterThanOrEqual(30);
   });
 
-  it('an egg with no nurse nearby does not migrate', () => {
+  it('an egg with no nurse nearby does not migrate via thermoregulation', () => {
     // Real eggs cannot move themselves — they need a nurse worker
     // to physically carry them. Without a nurse-aged worker within
-    // ~3 cells, the migration step is gated off.
+    // ~3 cells, the thermoreg migration step is gated off. Spawn
+    // the egg on the chamber floor (world bottom row in this
+    // setup) so the new gravity rule has nothing to do; any motion
+    // here would have to come from thermoreg, which is exactly
+    // what the test asserts is gated off.
     const rng = new RNG(7);
     const w = deepChamberWorld();
     w.tick = DAY_TICKS / 2 - 1; // noon — would normally drift down
     const c = new Colony(1);
-    spawnEgg(c, 20.5, 12.5, rng);
+    spawnEgg(c, 20.5, w.height - 0.5, rng);
     const dig = new Pheromone(w.width, w.height, 0.12, 0.99);
     const build = new Pheromone(w.width, w.height, 0.10, 0.997);
     const startY = c.posY[0]! | 0;

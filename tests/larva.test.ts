@@ -84,7 +84,11 @@ describe('larva stage', () => {
     const rng = new RNG(3);
     const w = makeWorld();
     const colony = new Colony(2);
-    colony.spawn(20, 14, 0, rng, TRAITS);
+    // Spawn at the chamber floor (chamber rows 12-17, soil at 18)
+    // so the new brood-gravity rule has nothing to do; without a
+    // nurse this larva would otherwise fall to the floor first
+    // and the corpse would land at row 17, not 14.
+    colony.spawn(20, 17, 0, rng, TRAITS);
     colony.state[0] = STATE_LARVA;
     colony.stateTicks[0] = 0;
     colony.energy[0] = 0.01; // almost empty
@@ -102,7 +106,7 @@ describe('larva stage', () => {
     }
     expect(died).toBe(true);
     // Corpse marker placed at the larva's cell.
-    expect(w.corpse[w.index(20, 14)]).toBe(1);
+    expect(w.corpse[w.index(20, 17)]).toBe(1);
     expect(w.totalDied).toBe(1);
   });
 
