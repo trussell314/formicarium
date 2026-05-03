@@ -83,6 +83,7 @@ interface SaveStateV16 {
   grainHardness: string;
   food: string;
   foodMoves: string;
+  foodTick: string;
   corpse: string;
   corpseTick: string;
   sprout: string;
@@ -168,6 +169,7 @@ export function captureSnapshot(
     grainHardness: bytesToB64(world.grainHardness),
     food: bytesToB64(world.food),
     foodMoves: bytesToB64(world.foodMoves),
+    foodTick: bytesToB64(new Uint8Array(world.foodTick.buffer, world.foodTick.byteOffset, world.foodTick.byteLength)),
     corpse: bytesToB64(world.corpse),
     corpseTick: bytesToB64(new Uint8Array(world.corpseTick.buffer, world.corpseTick.byteOffset, world.corpseTick.byteLength)),
     sprout: bytesToB64(world.sprout),
@@ -338,6 +340,7 @@ export function restoreSnapshot(
     if (s.grainHardness) copyBytes(s.grainHardness, world.grainHardness);
     copyBytes(s.food!, world.food);
     copyBytes(s.foodMoves!, world.foodMoves);
+    if (s.foodTick) copyBytes(s.foodTick, world.foodTick);
     copyBytes(s.corpse!, world.corpse);
     copyBytes(s.corpseTick!, world.corpseTick);
     copyBytes(s.sprout!, world.sprout);

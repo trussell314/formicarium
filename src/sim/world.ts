@@ -224,6 +224,13 @@ export class World {
    *  corpses break down on a ~weeks timescale. Without this,
    *  middens accumulate immortal corpse markers forever. */
   readonly corpseTick: Int32Array;
+  /** Tick at which each cell's food (seed) was last placed. Mirrors
+   *  corpseTick: surface seeds older than FOOD_LIFETIME_TICKS rot /
+   *  get rained out / are eaten by birds and clear back to AIR via
+   *  the food-decay sweep. Below-surface (granary) food is exempt —
+   *  stored seeds in dry chambers last for years. Cascaded food
+   *  preserves its tick (the seed fell, didn't restart aging). */
+  readonly foodTick: Int32Array;
   /** Tick at which each cell was last carved (for "fresh dig" highlight). */
   readonly digTick: Int32Array;
   initialSoilCells = 0;
@@ -318,6 +325,8 @@ export class World {
     this.sproutTick.fill(-1_000_000);
     this.corpseTick = new Int32Array(width * height);
     this.corpseTick.fill(-1_000_000);
+    this.foodTick = new Int32Array(width * height);
+    this.foodTick.fill(-1_000_000);
     this.plant = new Uint8Array(width);
     this.plantHeight = new Uint16Array(width);
     this.bgPlant = new Uint8Array(width);

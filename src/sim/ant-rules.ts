@@ -483,6 +483,7 @@ export function step(
       ) {
         world.food[aboveIdx] = 1;
         world.foodMoves[aboveIdx] = 0;
+        world.foodTick[aboveIdx] = world.tick;
         break;
       }
     }
@@ -526,6 +527,7 @@ export function step(
                 if (cell === CELL_AIR && world.food[pIdx] === 0) {
                   world.food[pIdx] = 1;
                   world.foodMoves[pIdx] = 0;
+                  world.foodTick[pIdx] = world.tick;
                   break;
                 }
                 if (cell === CELL_SOIL) break;
@@ -681,6 +683,7 @@ export function step(
         if (placeIdx >= 0) {
           world.food[placeIdx] = 1;
           world.foodMoves[placeIdx] = 0;
+          world.foodTick[placeIdx] = world.tick;
           if (particles) {
             const py = (placeIdx / world.width) | 0;
             const pxx = placeIdx - py * world.width;
@@ -894,6 +897,50 @@ export function step(
     }
   }
 
+  // Surface-food decay sweep. Mirror of the corpse path: surface
+  // seeds rot / get eaten by birds / get rained out on a similar
+  // timescale. Below-surface (granary) food is exempt — stored
+  // seeds in dry chambers last for years (Tschinkel 1999, P. badius
+  // granaries). Surface = at or above the column's natural-surface
+  // row. Same 100-tick sweep cadence as corpses keeps the cost
+  // negligible. Lifetime tuned shorter than corpses (140k vs 260k
+  // ticks ≈ 16 vs 30 sim-days at compression 100) since uncovered
+  // seeds in the open weather faster than midden corpses do.
+  const FOOD_LIFETIME_TICKS = 140_000;
+  if (world.tick % 100 === 0) {
+    const wW = world.width;
+    for (let x = 0; x < wW; x++) {
+      const surf = world.naturalSurface[x]!;
+      // Walk just the surface column — every cell at y < surf is
+      // above-ground; food only exists in AIR cells, and AIR above
+      // the surface is exactly where surface food sits.
+      for (let y = 0; y < surf; y++) {
+        const idx = y * wW + x;
+        if (world.food[idx]! === 0) continue;
+        const ft = world.foodTick[idx]!;
+        if (ft === -1_000_000) { world.foodTick[idx] = world.tick; continue; }
+        if (world.tick - ft > FOOD_LIFETIME_TICKS) {
+          world.food[idx] = 0;
+          world.foodMoves[idx] = 0;
+        }
+      }
+      // The natural-surface row itself can contain food (entrance
+      // mound spillage). Treat the surface row as "surface" for
+      // decay purposes; only food strictly below it (in chambers)
+      // gets the granary exemption.
+      const surfIdx = surf * wW + x;
+      if (world.food[surfIdx]! > 0) {
+        const ft = world.foodTick[surfIdx]!;
+        if (ft === -1_000_000) {
+          world.foodTick[surfIdx] = world.tick;
+        } else if (world.tick - ft > FOOD_LIFETIME_TICKS) {
+          world.food[surfIdx] = 0;
+          world.foodMoves[surfIdx] = 0;
+        }
+      }
+    }
+  }
+
   // Grain hardness sweep. Real ant walls reinforce over time —
   // tamping (Tschinkel 2004), saliva / cement secretion (Hölldobler
   // & Wilson 1990 Ch. 7), and time-based geotechnical consolidation.
@@ -1056,6 +1103,9 @@ export function step(
           ) {
             world.food[bidx] = world.food[ridx]!;
             world.foodMoves[bidx] = world.foodMoves[ridx]!;
+            // Cascade preserves food age — the seed fell, didn't
+            // restart aging.
+            world.foodTick[bidx] = world.foodTick[ridx]!;
             world.food[ridx] = 0;
             world.foodMoves[ridx] = 0;
           }
@@ -1850,6 +1900,7 @@ export function step(
             if (world.food[nIdx]! > 0) continue;
             world.food[nIdx] = 1;
             world.foodMoves[nIdx] = Math.min(255, cargoMoves + 1);
+            world.foodTick[nIdx] = world.tick;
           } else {
             placeGrain(world, nx, ny, rng, cargoMoves + 1);
           }
@@ -1900,6 +1951,7 @@ export function step(
             if (world.food[nIdx]! > 0) continue;
             world.food[nIdx] = 1;
             world.foodMoves[nIdx] = Math.min(255, cargoMoves + 1);
+            world.foodTick[nIdx] = world.tick;
           } else {
             placeGrain(world, nx, ny, rng, cargoMoves + 1);
           }
@@ -2335,6 +2387,7 @@ export function step(
           if (world.food[pIdx]! > 0) continue;
           world.food[pIdx] = 1;
           world.foodMoves[pIdx] = Math.min(255, cargoMoves + 1);
+          world.foodTick[pIdx] = world.tick;
           break;
         }
         colony.carryMoves[i] = 0;
@@ -2392,6 +2445,7 @@ export function step(
       ) {
         world.food[dIdx] = 1;
         world.foodMoves[dIdx] = Math.min(255, colony.carryMoves[i]! + 1);
+        world.foodTick[dIdx] = world.tick;
         // Granary marker. Tschinkel (2004) observed P. badius
         // granaries form at consistent depths via positive
         // feedback — CARRY_FOOD ants prefer to deposit where
