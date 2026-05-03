@@ -44,7 +44,7 @@ import {
 } from './colony';
 import type { ParticleSystem } from './particles';
 import { Pheromone, uploadPheromoneCells } from './pheromone';
-import { digCell, pickGrain, placeGrain, recomputeMound, settle, tryStep } from './physics';
+import { digCell, pickGrain, placeGrain, recomputeMound, settle, settleGrain, tryStep } from './physics';
 import type { RNG } from './rng';
 import { type AntSpecies, HARVESTER } from './species';
 import { CELL_AIR, CELL_GRAIN, CELL_SOIL, DAY_TICKS, daylight, macroScale, PLANT_MAX_HEIGHT, WALK_SPEED_CAP, World } from './world';
@@ -277,6 +277,109 @@ function adjacentGrain(world: World, ix: number, iy: number, rng: RNG): { x: num
     if (rng.next() < 1 / count) { pickX = x; pickY = y; }
   }
   return pickX < 0 ? null : { x: pickX, y: pickY };
+}
+
+/**
+ * Floating-island collapse. Walks every 4-connected component of
+ * SOIL/GRAIN cells and detects subsurface "islands" — components
+ * that live entirely below the natural surface AND don't reach the
+ * world's left, right, or bottom edge. Such a component has no
+ * support path back to the surrounding earth and is just hovering
+ * in mid-air, which is what aggressive wall-thinning excavations
+ * leave behind. We re-type the island's cells to loose GRAIN
+ * (hardness=0) and call settleGrain on each, so the chunk cascades
+ * to whatever floor sits below.
+ *
+ * Cells are settled bottom-row-first within the island so a tall
+ * stack falls cleanly: each settle vacates the cell above for the
+ * next iteration's grain. settleGrain itself iterates downward
+ * within a column, so this outer order just stops one cell from
+ * blocking another in the same column.
+ */
+function collapseFloatingIslands(world: World, rng: RNG): void {
+  const w = world.width;
+  const h = world.height;
+  const visited = new Uint8Array(w * h);
+  const queue = new Int32Array(w * h);
+  const compIdx: number[] = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = y * w + x;
+      if (visited[idx]) continue;
+      const k = world.cells[idx]!;
+      if (k !== CELL_SOIL && k !== CELL_GRAIN) {
+        visited[idx] = 1;
+        continue;
+      }
+      // BFS this 4-connected solid component. Track whether any of
+      // its cells touch the world's lateral or bottom boundary or
+      // sit at/above the column's natural surface — either anchors
+      // the component to the main mass and disqualifies it from
+      // the floating-island rule.
+      let qh = 0;
+      let qt = 0;
+      queue[qt++] = idx;
+      visited[idx] = 1;
+      compIdx.length = 0;
+      compIdx.push(idx);
+      // A component is "anchored" (= part of the main mass, NOT a
+      // floating island) if any of its cells touches a lateral or
+      // bottom world boundary OR sits above the natural-surface row
+      // of its column. The above-surface case catches mounds and any
+      // component that spans the surface horizon (which would be
+      // connected to the main mass at the surface).
+      const checkAnchor = (cx: number, cy: number): boolean => {
+        if (cx === 0 || cx === w - 1 || cy === h - 1) return true;
+        return cy < world.naturalSurface[cx]!;
+      };
+      let anchored = checkAnchor(x, y);
+      while (qh < qt) {
+        const p = queue[qh++]!;
+        const py = (p / w) | 0;
+        const px = p - py * w;
+        const nbrs: ReadonlyArray<readonly [number, number]> = [
+          [1, 0], [-1, 0], [0, 1], [0, -1],
+        ];
+        for (const [dx, dy] of nbrs) {
+          const nx = px + dx;
+          const ny = py + dy;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+          const ni = ny * w + nx;
+          if (visited[ni]) continue;
+          const nk = world.cells[ni]!;
+          if (nk !== CELL_SOIL && nk !== CELL_GRAIN) continue;
+          visited[ni] = 1;
+          queue[qt++] = ni;
+          compIdx.push(ni);
+          if (!anchored && checkAnchor(nx, ny)) anchored = true;
+        }
+      }
+      if (anchored) continue;
+      // Subsurface floating island. Re-type to loose grain and
+      // settle each cell. Sorting by y descending means we process
+      // the bottom row first; within a column settleGrain handles
+      // its own cascade.
+      for (let i = 0; i < compIdx.length; i++) {
+        const ci = compIdx[i]!;
+        world.cells[ci] = CELL_GRAIN;
+        world.grainHardness[ci] = 0;
+        world.grainMoves[ci] = 0;
+      }
+      compIdx.sort((a, b) => {
+        const ay = (a / w) | 0;
+        const by = (b / w) | 0;
+        return by - ay;
+      });
+      for (let i = 0; i < compIdx.length; i++) {
+        const ci = compIdx[i]!;
+        const cy = (ci / w) | 0;
+        const cx = ci - cy * w;
+        if (world.cells[ci] === CELL_GRAIN) {
+          settleGrain(world, cx, cy, rng);
+        }
+      }
+    }
+  }
 }
 
 export function step(
@@ -837,6 +940,24 @@ export function step(
         world.grainHardness[idx] = Math.min(255, cur + inc);
       }
     }
+  }
+
+  // Floating-island collapse. Aggressive chamber widening (especially
+  // around tunnel intersections) can leave isolated subsurface chunks
+  // of SOIL/GRAIN suspended in mid-air with no support path back to
+  // the surrounding earth. Real soil obeys gravity: a ceiling fragment
+  // detached from the parent mass falls. We approximate by finding
+  // every solid 4-connected component that (a) lives entirely below
+  // the natural surface and (b) doesn't touch the world's left, right,
+  // or bottom boundary. Those cells get re-typed to loose GRAIN
+  // (hardness reset, so they cascade) and settled top-down so the
+  // pile lands in a stable angle-of-repose heap on whatever floor
+  // sits below.
+  //
+  // O(W·H) per sweep — same cadence as the hardness pass to keep the
+  // amortised cost trivial.
+  if (world.tick % 50 === 0) {
+    collapseFloatingIslands(world, rng);
   }
 
   // Seed germination + sprout decay sweep. Tschinkel (1999): some
@@ -3302,34 +3423,8 @@ export function step(
         const aboveSurface = ay < world.naturalSurface[ax]!;
         const proxScale = (entombed || stranded || !aboveSurface) ? 1.0
           : Math.max(0.05, Math.min(1.0, colonyMarker));
-        // Island-cleanup boost. A SOIL cell with ≥6 of its 8
-        // neighbours non-soil/non-grain (i.e. AIR — out-of-bounds is
-        // treated as solid since the world wall is implicit) is a
-        // near-orphan: only 1-2 connections to the surrounding soil.
-        // Real ants chew these stragglers down to keep chamber walls
-        // contiguous (and the anti-island dig rule will refuse cases
-        // where removing this cell would leave a smaller island
-        // behind). Strong multiplier so cleanup is the dominant
-        // behaviour when an ant is adjacent to an exposed bit.
-        let airNbrs = 0;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            if (dx === 0 && dy === 0) continue;
-            const nx = target.x + dx;
-            const ny = target.y + dy;
-            if (nx < 0 || ny < 0 || nx >= world.width || ny >= world.height) continue;
-            if (world.cells[ny * world.width + nx]! === CELL_AIR) airNbrs++;
-          }
-        }
-        const cleanupBoost = airNbrs >= 6 ? 8.0 : 1.0;
-        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation * hungerDigMul * proxScale * cleanupBoost) {
-          // When the cleanup boost fires (target SOIL has ≥6 AIR
-          // neighbours), bypass digCell's anti-island check. The
-          // anti-island rule normally protects against creating
-          // small isolated bits during chamber widening; cleanup
-          // digs are *removing* already-isolated bits and refusing
-          // them would freeze the orphan in place forever.
-          if (digCell(world, target.x, target.y, rng, airNbrs >= 6)) {
+        if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation * hungerDigMul * proxScale) {
+          if (digCell(world, target.x, target.y, rng)) {
             // Track dig direction relative to the digger's cell, so
             // the diag can surface a vertical-vs-lateral histogram.
             // Order [N, S, E, W] = [-y, +y, +x, -x] from (ax, ay) to
