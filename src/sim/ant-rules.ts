@@ -44,7 +44,7 @@ import {
 } from './colony';
 import type { ParticleSystem } from './particles';
 import { Pheromone, uploadPheromoneCells } from './pheromone';
-import { digCell, pickGrain, placeGrain, recomputeMound, settle, tryStep } from './physics';
+import { digCell, pickGrain, placeGrain, recomputeMound, settle, settleGrain, tryStep } from './physics';
 import type { RNG } from './rng';
 import { type AntSpecies, HARVESTER } from './species';
 import { CELL_AIR, CELL_SOIL, DAY_TICKS, daylight, isLoose, macroScale, PLANT_MAX_HEIGHT, WALK_SPEED_CAP, World } from './world';
@@ -77,21 +77,6 @@ export interface SimParams {
   /** Ticks an ant stays in REST before resuming WANDER. Hard-capped
    *  for deadlock safety — REST always exits cleanly. */
   restDuration: number;
-  /** Where CARRY_FOOD is allowed to deposit. 'granary' (default)
-   *  refuses every below-surface AIR cell unless the granary
-   *  pheromone is above threshold OR the carry has timed out
-   *  (1500-tick bootstrap). 'always' is the legacy "drop in the
-   *  first chamber AIR cell" behaviour — included for A/B testing
-   *  the gate against the colony-starvation failure mode it can
-   *  produce when the bootstrap doesn't fire. */
-  carryFoodDepositGate?: 'granary' | 'always';
-  /** Whether the CARRY_FOOD stuck-bail (60-tick stuck or 4000-tick
-   *  long-carry give-up) counts as a successful forage return for
-   *  Greene & Gordon antennation feedback. Default off matches
-   *  the pre-fix behaviour; turning it on lets the bail path keep
-   *  the foragerReturnRate counter alive when the deposit gate
-   *  refuses every cell. */
-  stuckBailCountsReturn?: boolean;
 }
 
 export const DEFAULT_PARAMS: SimParams = {
@@ -903,6 +888,53 @@ export function step(
         const inc = 50 * (1 + bonus);
         const cur = world.grainHardness[idx]!;
         world.grainHardness[idx] = Math.min(255, cur + inc);
+      }
+    }
+  }
+
+  // Above-ground spire erosion. A consolidated SOIL cell sitting in
+  // a 1-cell-wide above-ground column with AIR on both lateral sides
+  // is structurally unsupported — real soil pillars without lateral
+  // confinement can't bear their own weight and topple under gravity,
+  // weather, and surface traffic. Without an erosion path, mid-game
+  // runs accumulate fence-post-like spires of fully-tamped spoil
+  // wherever foragers carved gaps in the entrance mound.
+  //
+  // Sweep every 100 ticks: scan above-ground SOIL cells, demote any
+  // unsupported pillar cell back to loose (hardness=0), then call
+  // settleGrain so the now-loose grain cascades sideways into an
+  // angle-of-repose pile. The cascade plus subsequent re-tamping
+  // (next hardness sweep) shifts the spire material into a flatter,
+  // physically plausible mound shape over a few hundred ticks.
+  if (world.tick % 100 === 0) {
+    const ewW = world.width;
+    const eroded: number[] = [];
+    for (let x = 1; x < ewW - 1; x++) {
+      const surf = world.naturalSurface[x]!;
+      for (let y = 0; y < surf; y++) {
+        const idx = y * ewW + x;
+        if (world.cells[idx] !== CELL_SOIL) continue;
+        // Already loose — settleGrain will catch it on its own.
+        if (isLoose(world, idx)) continue;
+        // Both lateral cells AIR ⇒ unsupported pillar.
+        if (world.cells[idx - 1] !== CELL_AIR) continue;
+        if (world.cells[idx + 1] !== CELL_AIR) continue;
+        eroded.push(idx);
+      }
+    }
+    // Demote then settle. Bottom-row-first so a tall pillar collapses
+    // cleanly: each settle vacates the cell above for the next
+    // iteration to cascade into.
+    for (let i = 0; i < eroded.length; i++) {
+      world.grainHardness[eroded[i]!] = 0;
+    }
+    eroded.sort((a, b) => Math.floor(b / ewW) - Math.floor(a / ewW));
+    for (let i = 0; i < eroded.length; i++) {
+      const idx = eroded[i]!;
+      const ey = Math.floor(idx / ewW);
+      const ex = idx - ey * ewW;
+      if (isLoose(world, idx)) {
+        settleGrain(world, ex, ey, rng);
       }
     }
   }
@@ -2305,14 +2337,16 @@ export function step(
           bailedDeposit = true;
           break;
         }
-        // Optional: count the bail-deposit as a successful return for
-        // Greene & Gordon antennation feedback. With the granary gate
-        // refusing every cell, the bootstrap-timeout deposit path
-        // rarely fires in practice — the 60-tick stuck-bail trips
-        // first and the foragerReturnRate counter never advances,
-        // starving the colony's forage feedback. Off by default to
-        // preserve historical behaviour.
-        if (bailedDeposit && (params.stuckBailCountsReturn ?? false)) {
+        // Count the bail-deposit as a successful return for the
+        // Greene & Gordon antennation feedback. Without this, the
+        // 60-tick stuck-bail trips before the granary deposit gate's
+        // 1500-tick bootstrap fires for typical mid-game runs, and
+        // foragerReturnRate stays at zero — the antennation feedback
+        // loop dies and the colony slowly starves. With the count,
+        // bail-deposits keep the loop alive at the cost of slightly
+        // diluted "successful trip" semantics. Validated against the
+        // current/no-gate alternatives at 400k ticks.
+        if (bailedDeposit) {
           world.foragerReturnRate += 1;
         }
         colony.carryMoves[i] = 0;
@@ -2380,15 +2414,11 @@ export function step(
       const localGranary = granaryField ? granaryField.sample(dxIdx, dyIdx) : 0;
       const granaryQualified = localGranary >= GRANARY_DEPOSIT_THRESHOLD;
       const bootstrapElapsed = colony.stateTicks[i]! >= GRANARY_BOOTSTRAP_TICKS;
-      const gateMode = params.carryFoodDepositGate ?? 'granary';
-      const gatePasses = gateMode === 'always'
-        ? true
-        : (granaryQualified || bootstrapElapsed || !granaryField);
       if (
         dyIdx > world.naturalSurface[dxIdx]! &&
         world.cells[dIdx] === CELL_AIR &&
         world.food[dIdx] === 0 &&
-        gatePasses
+        (granaryQualified || bootstrapElapsed || !granaryField)
       ) {
         world.food[dIdx] = 1;
         world.foodMoves[dIdx] = Math.min(255, colony.carryMoves[i]! + 1);

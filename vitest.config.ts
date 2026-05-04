@@ -25,7 +25,6 @@ export default defineConfig({
       'tests/_morphology-tuning.test.ts',
       'tests/_compaction-tuning.test.ts',
       'tests/_dig-spread-diag.test.ts',
-      'tests/_carry-food-compare.test.ts',
     ],
   },
 });

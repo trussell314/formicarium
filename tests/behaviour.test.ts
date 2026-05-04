@@ -195,7 +195,7 @@ describe('shaft wear', () => {
     expect(w.digsByDir[2]! + w.digsByDir[3]!).toBeGreaterThan(0);
   });
 
-  it('grain conservation invariant holds with wear: dug = grain + carriers + wearLost', () => {
+  it('grain conservation invariant holds with wear: dug = carriers + wearLost (post-unification)', () => {
     const rng = new RNG(7);
     const w = flatWorld(30, 20, 8);
     const colony = new Colony(5);
@@ -209,7 +209,11 @@ describe('shaft wear', () => {
       if (colony.state[i] === STATE_CARRY) carriers++;
     }
     const dug = w.initialSoilCells - w.countSoil();
-    expect(dug).toBe(w.countGrains() + carriers + w.wearLost);
+    // Post-unification: countSoil() includes both consolidated wall
+    // and loose deposits, so a redeposited grain is back in the
+    // solid count and not in `dug`. The only cells that contribute
+    // to `dug` are in-flight (carriers) or pulverised by wear.
+    expect(dug).toBe(carriers + w.wearLost);
   });
 });
 
