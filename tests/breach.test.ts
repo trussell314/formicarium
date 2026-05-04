@@ -11,7 +11,7 @@
 // land.
 
 import { describe, expect, it } from 'vitest';
-import { Colony, STATE_CARRY } from '../src/sim/colony';
+import { Colony, STATE_CARRY, STATE_WANDER } from '../src/sim/colony';
 import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { Pheromone } from '../src/sim/pheromone';
 import { RNG } from '../src/sim/rng';
@@ -206,5 +206,42 @@ describe('breach repair-deposit', () => {
     // (Other deposit paths may still fire — we only assert the
     // breach path itself doesn't spuriously trigger.)
     expect(w.countSoil()).toBeLessThanOrEqual(stillSoil + 1); // tolerance for routine placements
+  });
+});
+
+describe('breach recruitment (WANDER bias)', () => {
+  it('a WANDER ant near a breach biases heading toward the gradient', () => {
+    // Spawn a WANDER ant adjacent to a saturated breach. Verify
+    // her heading points TOWARD the breach (east), not the
+    // entrance (which is west — entrance homing would otherwise
+    // dominate). Average cos(heading) over a few ticks: positive
+    // average ⇒ pulled east toward the breach; negative would
+    // mean entrance-homing won.
+    const rng = new RNG(301);
+    const w = makeBreachWorld();
+    // Carve a breach at col 35; ant spawns 1 cell west.
+    w.cells[w.index(35, 10)] = CELL_AIR;
+    w.cells[w.index(35, 11)] = CELL_AIR;
+    const colony = new Colony(1);
+    colony.spawn(34.5, 9.5, Math.PI, rng, {
+      digProb: 0, pickProb: 0, stigmergy: 0.55, turnNoise: 0, restThreshold: 100,
+    });
+    colony.state[0] = STATE_WANDER;
+    const f = makeFields(w);
+    // Saturate alarm aggressively so the field at the ant's cell
+    // (after diffusion) crosses the 0.05 threshold for the bias.
+    for (let k = 0; k < 100; k++) f.breachAlarm.deposit(35, 10, 1.0);
+    let cosSum = 0;
+    let samples = 0;
+    for (let t = 0; t < 20; t++) {
+      step(w, colony, f.dig, f.build, rng, DEFAULT_PARAMS, undefined, QUIET,
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        undefined, undefined, f.breachAlarm);
+      f.breachAlarm.deposit(35, 10, 1.0);
+      cosSum += Math.cos(colony.heading[0]!);
+      samples++;
+    }
+    const avgCos = cosSum / samples;
+    expect(avgCos).toBeGreaterThan(0);
   });
 });

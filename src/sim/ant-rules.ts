@@ -2793,6 +2793,24 @@ export function step(
       }
     }
 
+    // Breach recruitment for WANDER ants. Real ants prioritise
+    // breach response over routine duties — Hölldobler & Wilson
+    // 1990 Ch. 7 cite it as one of the strongest emergent recruit
+    // signals (workers from across the colony converge on a
+    // breach edge within minutes). Bias toward the gradient at
+    // 1.5× stigmergy, matching the CARRY diversion strength so
+    // entrance homing (weight 0.5) and routine field bias don't
+    // out-pull it.
+    if (stateIn === STATE_WANDER && breachAlarmField) {
+      const baLocal = breachAlarmField.sample(ix, iy);
+      const baGrad = breachAlarmField.gradient(ix, iy);
+      const baMag = Math.hypot(baGrad.dx, baGrad.dy);
+      if (baLocal > 0.05 && baMag > 1e-5) {
+        const want = Math.atan2(baGrad.dy, baGrad.dx);
+        h += wrapAngle(want - h) * Math.min(1, colony.stigmergy[i]! * 1.5);
+      }
+    }
+
     // Nurse pull toward the queen pheromone gradient. Layered on top
     // of the routine stigmergy bias rather than overriding it: a
     // young WANDER worker who's also responding to a dig front still
