@@ -76,6 +76,7 @@ function buildClaustralWorld(seed: number) {
   const granary = new Pheromone(W, H, 0.10, 0.999);
   const trunk = new Pheromone(W, H, 0.20, 0.9995);
   const breachAlarm = new Pheromone(W, H, 0.50, 0.985);
+  const entrance = new Pheromone(W, H, 0.50, 0.9999);
   const colony = new Colony(HARVESTER.maxColonySize);
   const cx = world.width >> 1;
   const SHAFT_DEPTH = 10, POCKET_HEIGHT = 4;
@@ -86,7 +87,7 @@ function buildClaustralWorld(seed: number) {
   return {
     rng, world, colony,
     dig, build, trail, alarm, queen, brood, necro, noEntry, granary, trunk,
-    breachAlarm,
+    breachAlarm, entrance,
   };
 }
 
@@ -374,7 +375,7 @@ function macroSnapshot(
     ['alarm', sim.alarm], ['queen', sim.queen], ['brood', sim.brood],
     ['necro', sim.necro], ['noEntry', sim.noEntry],
     ['granary', sim.granary], ['trunk', sim.trunk],
-    ['breachAlarm', sim.breachAlarm],
+    ['breachAlarm', sim.breachAlarm], ['entrance', sim.entrance],
   ];
   const pheroPeaks: Array<{ name: string; v: number; x: number; y: number }> = [];
   for (const [name, field] of pheroFields) {
@@ -643,7 +644,7 @@ describe('master long-running diagnostic', () => {
         sim.rng, DEFAULT_PARAMS, undefined, HARVESTER,
         sim.trail, sim.alarm, sim.queen, sim.brood, sim.necro,
         sim.noEntry, sim.granary, sim.trunk,
-        sim.breachAlarm,
+        sim.breachAlarm, sim.entrance,
       );
       while (sampleIdx < samples.length && samples[sampleIdx]!.tick === sim.world.tick) {
         const s = samples[sampleIdx]!;

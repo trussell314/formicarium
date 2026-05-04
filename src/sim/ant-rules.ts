@@ -297,6 +297,16 @@ export function step(
   granaryField?: Pheromone,
   trunkField?: Pheromone,
   breachAlarmField?: Pheromone,
+  /** Open-shaft entrance scent. A long-decay-length field
+   *  refreshed at each shaft cell during the openShaft scan. The
+   *  gradient pulls CARRY_FOOD ants on the surface toward the
+   *  nearest opening, which (combined with the path-integration
+   *  homing vector) lets returning foragers actually find a way
+   *  in even when their PI origin sits above intact soil rather
+   *  than above an existing shaft. Models the well-documented
+   *  cuticular-hydrocarbon plume that real ants use to localise
+   *  the nest entrance (Hangartner 1969; Maschwitz et al. 1986). */
+  entranceField?: Pheromone,
 ): void {
   world.tick++;
   // Macro-rate scale factor. Multiply per-tick macro probabilities,
@@ -341,7 +351,16 @@ export function step(
       const sf = world.naturalSurface[xc]!;
       const yMax = Math.min(world.height - 1, sf + 4);
       for (let yc = sf; yc <= yMax; yc++) {
-        if (world.cells[yc * wW + xc] === CELL_AIR) { openCount++; break; }
+        if (world.cells[yc * wW + xc] === CELL_AIR) {
+          openCount++;
+          // Refresh the entrance scent at the topmost open cell
+          // for this column. Single deposit per column per scan,
+          // sized to saturate quickly under the long retention so
+          // the gradient sharpens at the entrance and decays
+          // smoothly outward.
+          if (entranceField) entranceField.deposit(xc, yc, 0.5);
+          break;
+        }
       }
     }
     world.openShaftCount = openCount;
@@ -629,6 +648,7 @@ export function step(
   if (noEntryField && slowStep) noEntryField.step(cells);
   if (granaryField && slowStep) granaryField.step(cells);
   if (trunkField && slowStep) trunkField.step(cells);
+  if (entranceField && slowStep) entranceField.step(cells);
   // Breach alarm steps every tick — short half-life since a sealed
   // breach should clear quickly, leaving the field free to mark
   // newly-opened ones without a stale-tail dragging recruits to old
@@ -2261,6 +2281,21 @@ export function step(
         if (pMag > 2) {
           const want = Math.atan2(-py, -px);
           h += wrapAngle(want - h) * 0.6;
+        }
+        // Entrance-scent gradient. Composes with PI rather than
+        // replacing it: PI tells her where she came from; entrance
+        // tells her where she can actually get back in. When the
+        // PI origin sits above intact soil (e.g. she emerged from
+        // a satellite shaft that has since collapsed, or she rolled
+        // FORAGE in an unusual spot), the entrance gradient is
+        // what saves the trip.
+        if (entranceField) {
+          const eGrad = entranceField.gradient(ix, iy);
+          const eMag = Math.hypot(eGrad.dx, eGrad.dy);
+          if (eMag > 1e-4) {
+            const want = Math.atan2(eGrad.dy, eGrad.dx);
+            h += wrapAngle(want - h) * 0.6;
+          }
         }
         if (queenField) {
           const qGrad = queenField.gradient(ix, iy);

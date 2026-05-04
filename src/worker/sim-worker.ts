@@ -44,6 +44,7 @@ interface SimBundle {
   granaryField: Pheromone;
   trunkField: Pheromone;
   breachAlarmField: Pheromone;
+  entranceField: Pheromone;
   particles: ParticleSystem;
   species: AntSpecies;
 }
@@ -130,6 +131,12 @@ function buildBundle(s: SaveSettings, restoreBlob: string | null): SimBundle {
   // sites. Decay rate matches the regular alarm field — both signal
   // urgent local conditions that should fade fast on resolution.
   const breachAlarmField = new Pheromone(s.width, s.height, 0.50, 0.985);
+  // Entrance scent. Long decay length (~70 cells) so CARRY_FOOD ants
+  // 50+ cells from the nearest shaft can still resolve a return
+  // gradient. Refreshed at every open-shaft cell during the periodic
+  // open-shaft scan (ant-rules.ts), so the field keeps tracking
+  // the actual entry geometry as new shafts open or old ones seal.
+  const entranceField = new Pheromone(s.width, s.height, 0.50, 0.9999);
 
   const colony = new Colony(HARVESTER.maxColonySize);
   // Founding-colony spawn (matches main.ts pre-worker behaviour).
@@ -199,7 +206,7 @@ function buildBundle(s: SaveSettings, restoreBlob: string | null): SimBundle {
     rng, world, colony,
     digField, buildField, trailField, alarmField, queenField,
     broodField, necroField, noEntryField, granaryField, trunkField,
-    breachAlarmField,
+    breachAlarmField, entranceField,
     particles, species: HARVESTER,
   };
 }
@@ -221,7 +228,7 @@ function drive(now: number): void {
       bundle.trailField, bundle.alarmField, bundle.queenField,
       bundle.broodField, bundle.necroField, bundle.noEntryField,
       bundle.granaryField, bundle.trunkField,
-      bundle.breachAlarmField,
+      bundle.breachAlarmField, bundle.entranceField,
     );
     bioAccum -= TICK_MS;
   }
