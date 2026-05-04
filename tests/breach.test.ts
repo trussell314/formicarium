@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { Colony, STATE_CARRY, STATE_WANDER } from '../src/sim/colony';
 import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { Pheromone } from '../src/sim/pheromone';
+import { settleGrain } from '../src/sim/physics';
 import { RNG } from '../src/sim/rng';
 import { type AntSpecies, HARVESTER } from '../src/sim/species';
 import { CELL_AIR, CELL_SOIL, World } from '../src/sim/world';
@@ -243,5 +244,50 @@ describe('breach recruitment (WANDER bias)', () => {
     }
     const avgCos = cosSum / samples;
     expect(avgCos).toBeGreaterThan(0);
+  });
+});
+
+describe('cave-in physics (option-2 partial guard)', () => {
+  it('loose grain ABOVE a non-entrance breach DOES cascade through into the chamber', () => {
+    // The wouldCrossSurface guard now applies only within
+    // ENTRANCE_GUARD_RADIUS=10 of the canonical entrance. A loose
+    // grain placed above a breach far from the entrance must
+    // cascade through to the chamber (real cave-in physics).
+    const rng = new RNG(401);
+    const w = makeBreachWorld();
+    // Carve a breach at col 35 (15 cols east of entrance, well
+    // outside ENTRANCE_GUARD_RADIUS) with a chamber AIR cell at
+    // (35, 11) below.
+    w.cells[w.index(35, 10)] = CELL_AIR;
+    w.cells[w.index(35, 11)] = CELL_AIR;
+    // Place a loose grain above the breach at (35, 9).
+    w.cells[w.index(35, 9)] = CELL_SOIL;
+    w.grainHardness[w.index(35, 9)] = 0;
+    settleGrain(w, 35, 9, rng);
+    // After settle, the grain should have fallen INTO the chamber.
+    // Cell (35, 11) was AIR — now SOIL (grain landed there).
+    expect(w.cells[w.index(35, 11)]).toBe(CELL_SOIL);
+    // (35, 9) and (35, 10) should be AIR (grain vacated).
+    expect(w.cells[w.index(35, 9)]).toBe(CELL_AIR);
+  });
+
+  it('loose grain ABOVE the entrance shaft does NOT cascade through (entrance-zone guard)', () => {
+    // Inside ENTRANCE_GUARD_RADIUS=10, the surface barrier is
+    // preserved — mound material can't cascade into the entrance.
+    // This approximates real ants actively maintaining entrance
+    // clearance through constant traffic. Verify by checking the
+    // shaft cells (rows 11..14 at col 20) stay AIR — those were
+    // intentionally carved at world-setup and would only become
+    // SOIL if the grain cascaded into them.
+    const rng = new RNG(402);
+    const w = makeBreachWorld();
+    // Place a loose grain above the entrance shaft at (20, 9).
+    w.cells[w.index(20, 9)] = CELL_SOIL;
+    w.grainHardness[w.index(20, 9)] = 0;
+    settleGrain(w, 20, 9, rng);
+    // Shaft cells (the carved entrance, rows 11-14) must remain AIR.
+    for (let y = 11; y <= 14; y++) {
+      expect(w.cells[w.index(20, y)]).toBe(CELL_AIR);
+    }
   });
 });

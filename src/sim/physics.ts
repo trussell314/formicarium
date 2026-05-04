@@ -210,15 +210,28 @@ export function settleGrain(world: World, x: number, y: number, rng: RNG): { x: 
   if (!isLoose(world, y * world.width + x)) return { x, y };
   const w = world.width;
   const h = world.height;
-  // The natural-surface row acts as a one-way barrier. Real soil
-  // has cohesion (clay binding, root mat, micro-organic glue) and
-  // ants reinforce mound material into a structural cap. Once the
-  // entrance shaft is dug, loose above-ground spoil shouldn't
-  // cascade through the natural-surface horizon into the nest.
-  // Implementation: a grain currently above the natural surface
-  // for its column refuses to move into a row at or below that
-  // column's surface — even if the destination cell is AIR.
+  // Surface-horizon barrier — entrance-zone-only. The natural-surface
+  // row used to act as a global one-way barrier (loose spoil never
+  // cascaded through it into the nest). That was overprotective:
+  // real *Pogonomyrmex* mounds DO get material cascading into
+  // breaches, the colony just actively repairs them. With the
+  // surface-breach reaction now in place (breachAlarm + CARRY
+  // diversion + WANDER recruitment), we can safely allow cave-ins
+  // OUTSIDE the canonical-entrance zone — the breach reaction
+  // detects each new opening and seals it.
+  //
+  // We KEEP the barrier within ENTRANCE_GUARD_RADIUS=10 columns of
+  // the founding shaft. Real ants successfully maintain entrance
+  // clearance through constant traffic and dedicated maintenance,
+  // but we don't model that explicitly; treating the entrance zone
+  // as "cascade-immune" is the cheap approximation that produces
+  // the same observable outcome (entrance never gets buried).
+  // Future work: drop this guard entirely once entrance-clearing
+  // worker behaviour is implemented.
+  const ENTRANCE_GUARD_RADIUS = 10;
+  const entranceCx = w >> 1;
   const wouldCrossSurface = (cx: number, fromY: number, toY: number): boolean => {
+    if (Math.abs(cx - entranceCx) > ENTRANCE_GUARD_RADIUS) return false;
     const surf = world.naturalSurface[cx]!;
     return fromY < surf && toY >= surf;
   };
