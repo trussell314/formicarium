@@ -2748,22 +2748,20 @@ export function step(
       continue;
     }
 
-    // WANDER ants overloaded by collisions enter REST — UNLESS
-    // they're hungry. Real ants increase activity when starving,
-    // not decrease it: energy debt overrides social agitation.
-    // Without this gate, the master 1M run showed 78% of workers
-    // (113/144) in REST while mean worker energy crashed to 0.23
-    // — the colony collectively retreated to REST when crowded
-    // and starved itself out instead of foraging. Threshold
-    // chosen at half maxEnergy: above this the worker has reserve
-    // and can afford to rest; below this she needs to keep moving
-    // toward food. CARRY ants are committed to deposit and ignore
-    // the agitation signal — real laden foragers don't drop their
-    // cargo to rest.
-    const restEnergyFloor = species.maxEnergy * 0.5;
-    if (stateIn === STATE_WANDER
-        && colony.collisionCount[i]! > colony.restThreshold[i]!
-        && colony.energy[i]! >= restEnergyFloor) {
+    // WANDER ants overloaded by collisions enter REST. CARRY ants
+    // are committed to deposit and ignore the agitation signal —
+    // real laden foragers don't drop their cargo to rest.
+    //
+    // An earlier "hunger gate" attempt (REST suppressed when
+    // E < maxEnergy * 0.5, on the theory that starving ants should
+    // forage instead of resting) made the colony collapse 50%
+    // faster: peak population dropped from 144 to 77, death wave
+    // shifted from t=700k to t=450k, and 1M-tick mortality went
+    // from 91 to 160. Real biology: starving ants conserve via
+    // REST when food can't be found locally — they don't burn
+    // remaining reserves on aimless thrashing. Reverted to the
+    // unconditional rule.
+    if (stateIn === STATE_WANDER && colony.collisionCount[i]! > colony.restThreshold[i]!) {
       colony.setState(i, STATE_REST);
       continue;
     }
