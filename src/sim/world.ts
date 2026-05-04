@@ -338,6 +338,16 @@ export class World {
    *  of magnitude. */
   foragerReturnRate = 0;
 
+  /** Cumulative diagnostic counters for the forage pipeline. Each
+   *  measures a distinct transition; the master test harness reads
+   *  them as deltas across windows to separate discovery problems
+   *  (low pickups despite many starts) from return-trip problems
+   *  (low deliveries despite many pickups). Not used by sim logic. */
+  totalForageStarts = 0;
+  totalForagePickups = 0;
+  totalForageDeliveries = 0;
+  totalForageBails = 0;
+
   constructor(width: number, height: number) {
     this.width = width;
     this.height = height;

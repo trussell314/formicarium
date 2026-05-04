@@ -110,6 +110,13 @@ export type RenderSnapshot = {
     foodCap: number;
     totalBorn: number;
     totalDied: number;
+    /** Cumulative forage-pipeline counters. Master test reads deltas
+     *  to separate discovery problems (low pickups vs. starts) from
+     *  return-trip problems (low deliveries vs. pickups). */
+    totalForageStarts: number;
+    totalForagePickups: number;
+    totalForageDeliveries: number;
+    totalForageBails: number;
     soilCount: number;
     initialSoilCells: number;
     // 8-bucket histograms over alive non-queen ants.

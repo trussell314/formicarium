@@ -2199,6 +2199,7 @@ export function step(
           world.food[fIdx] = 0;
           world.foodMoves[fIdx] = 0;
           colony.setState(i, STATE_CARRY_FOOD);
+          world.totalForagePickups++;
           // Re-orient downward — head back to the nest.
           colony.heading[i] = Math.PI / 2 + rng.range(-0.3, 0.3);
         }
@@ -2366,6 +2367,7 @@ export function step(
         if (bailedDeposit) {
           world.foragerReturnRate += 1;
         }
+        world.totalForageBails++;
         colony.carryMoves[i] = 0;
         colony.stuckTicks[i] = 0;
         colony.setState(i, STATE_WANDER);
@@ -2452,6 +2454,7 @@ export function step(
         // departure. Pulse the global counter; the forage roll
         // higher up the loop reads it as a multiplicative boost.
         world.foragerReturnRate += 1;
+        world.totalForageDeliveries++;
         colony.carryMoves[i] = 0;
         colony.setState(i, STATE_WANDER);
         colony.heading[i] = rng.range(0, Math.PI * 2);
@@ -2738,6 +2741,7 @@ export function step(
     if (stateIn === STATE_WANDER &&
         rng.next() < species.forageProb * ms * forageActivity * forageMult * smallForageMult * foodVisibleBoost * starvationBoost * inboundBoost * foundingOverride * foundingPatrollerBoost * dawnPatrolGate) {
       colony.setState(i, STATE_FORAGE);
+      world.totalForageStarts++;
       colony.collisionCount[i] = 0;
       // Heading: if below surface, head UP to start the trip; if
       // already above, keep the current heading and let the food-

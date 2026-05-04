@@ -234,9 +234,29 @@ interface TrendRow {
   breachAlarmPeak: number;
   loose: number;
   consolidated: number;
+  // Forage pipeline deltas since the previous macro. A low
+  // discovery ratio (pickups/starts) indicates foragers can't
+  // find food; a low delivery ratio (deliveries/pickups) means
+  // they find it but lose it on the return trip.
+  forageStarts: number;
+  foragePickups: number;
+  forageDeliveries: number;
+  forageBails: number;
 }
 
-function macroSnapshot(sim: Sim, lastReturnRate: { v: number; t: number }, tracked: number[]): TrendRow {
+interface ForageBaseline {
+  starts: number;
+  pickups: number;
+  deliveries: number;
+  bails: number;
+}
+
+function macroSnapshot(
+  sim: Sim,
+  lastReturnRate: { v: number; t: number },
+  forageBaseline: ForageBaseline,
+  tracked: number[],
+): TrendRow {
   const w = sim.world;
   const c = sim.colony;
   let queens = 0, eggs = 0, larvae = 0, pupae = 0, dead = 0;
@@ -375,6 +395,21 @@ function macroSnapshot(sim: Sim, lastReturnRate: { v: number; t: number }, track
     : 0;
   lastReturnRate.v = w.foragerReturnRate;
   lastReturnRate.t = w.tick;
+  // Forage pipeline deltas. Compute window-relative numbers so the
+  // log shows actual activity in the last MACRO_INTERVAL ticks
+  // rather than ever-growing cumulative totals.
+  const dStarts = w.totalForageStarts - forageBaseline.starts;
+  const dPickups = w.totalForagePickups - forageBaseline.pickups;
+  const dDeliveries = w.totalForageDeliveries - forageBaseline.deliveries;
+  const dBails = w.totalForageBails - forageBaseline.bails;
+  forageBaseline.starts = w.totalForageStarts;
+  forageBaseline.pickups = w.totalForagePickups;
+  forageBaseline.deliveries = w.totalForageDeliveries;
+  forageBaseline.bails = w.totalForageBails;
+  // Discovery rate = how often a FORAGE trip results in a pickup.
+  // Delivery rate = how often a pickup makes it home (deposit, not bail).
+  const discoveryPct = dStarts > 0 ? (dPickups / dStarts) * 100 : 0;
+  const deliveryPct = dPickups > 0 ? (dDeliveries / dPickups) * 100 : 0;
   // Activity heatmap — coarse 8×8 occupancy of adult workers.
   const heatmap: number[][] = [];
   const HM_W = 8, HM_H = 8;
@@ -409,6 +444,15 @@ function macroSnapshot(sim: Sim, lastReturnRate: { v: number; t: number }, track
   if (corpses > 5 && necro === 0) {
     anomalies.push(`necrophoresis UNMET — ${corpses} corpses, 0 necro-carriers`);
   }
+  // Forage pipeline anomalies. Need enough starts in the window to
+  // have a meaningful ratio (else early-game sparse starts trigger
+  // false alarms).
+  if (dStarts >= 50 && discoveryPct < 5) {
+    anomalies.push(`forage discovery low (${discoveryPct.toFixed(1)}%) — ${dStarts} starts, ${dPickups} pickups`);
+  }
+  if (dPickups >= 20 && deliveryPct < 30) {
+    anomalies.push(`forage delivery low (${deliveryPct.toFixed(1)}%) — ${dPickups} pickups, ${dDeliveries} deliveries, ${dBails} bails`);
+  }
   if (breachAlarmPeak > 0.5) {
     let respondersNear = 0;
     for (let i = 0; i < c.count; i++) {
@@ -427,6 +471,7 @@ function macroSnapshot(sim: Sim, lastReturnRate: { v: number; t: number }, track
   log(`ENERGY    queen=${queens > 0 ? c.energy[indexOfQueen(c)]!.toFixed(2) : '—'} workers=${meanWorkerE.toFixed(2)} larvae=${meanLarvaE.toFixed(2)}`);
   log(`NEST      depth=${maxDepth} chambers=${chambers} (max ${chamberMaxCells}c) galleries=${galleries} stubs=${stubs} loose=${looseCount} wall=${consolidatedCount}`);
   log(`FOOD      total=${foodCount} surface=${surfaceFoodCount} corpses=${corpses}  returnRate=${w.foragerReturnRate.toFixed(2)} (Δ${returnsThisCp.toFixed(1)})`);
+  log(`FORAGE    Δstarts=${dStarts} Δpickups=${dPickups} Δdeliveries=${dDeliveries} Δbails=${dBails}  discovery=${discoveryPct.toFixed(1)}% delivery=${deliveryPct.toFixed(1)}%`);
   log(`PHEROMONE peaks (value · (x,y) — eyeball whether the location matches the colony's current geography):`);
   for (const p of pheroPeaks) {
     const loc = p.v > 1e-6 ? `(${p.x.toString().padStart(3)},${p.y.toString().padStart(3)})` : '   —     ';
@@ -459,6 +504,10 @@ function macroSnapshot(sim: Sim, lastReturnRate: { v: number; t: number }, track
     breachAlarmPeak,
     loose: looseCount,
     consolidated: consolidatedCount,
+    forageStarts: dStarts,
+    foragePickups: dPickups,
+    forageDeliveries: dDeliveries,
+    forageBails: dBails,
   };
 }
 
@@ -504,8 +553,8 @@ function windowSample(
 
 function writeTrendTable(rows: TrendRow[]): void {
   log('\n══════════════════════════════ TRENDS (per-macro time series) ══════════════════════════════');
-  log('     tick    Q   alive  dead   born  E/L/P     wE    lE    food  surf  corp  depth  chambers  galleries  retRate  breachPk    loose    wall');
-  log('────────  ────  ─────  ────  ─────  ────────  ────  ────  ────  ────  ────  ─────  ────────  ─────────  ───────  ────────  ──────  ──────');
+  log('     tick    Q   alive  dead   born  E/L/P     wE    lE    food  surf  corp  depth  chambers  galleries  retRate  breachPk    loose    wall   fStart  fPick  fDel  fBail');
+  log('────────  ────  ─────  ────  ─────  ────────  ────  ────  ────  ────  ────  ─────  ────────  ─────────  ───────  ────────  ──────  ──────   ──────  ─────  ────  ─────');
   for (const r of rows) {
     log(
       `${r.tick.toLocaleString().padStart(8)}` +
@@ -525,7 +574,11 @@ function writeTrendTable(rows: TrendRow[]): void {
       `  ${r.returnRate.toFixed(2).padStart(7)}` +
       `  ${r.breachAlarmPeak.toFixed(3).padStart(8)}` +
       `  ${r.loose.toString().padStart(6)}` +
-      `  ${r.consolidated.toString().padStart(6)}`,
+      `  ${r.consolidated.toString().padStart(6)}` +
+      `   ${r.forageStarts.toString().padStart(6)}` +
+      `  ${r.foragePickups.toString().padStart(5)}` +
+      `  ${r.forageDeliveries.toString().padStart(4)}` +
+      `  ${r.forageBails.toString().padStart(5)}`,
     );
   }
 }
@@ -544,6 +597,7 @@ describe('master long-running diagnostic', () => {
 
     const sim = buildClaustralWorld(SEED);
     const lastReturnRate = { v: 0, t: 0 };
+    const forageBaseline: ForageBaseline = { starts: 0, pickups: 0, deliveries: 0, bails: 0 };
     const trendRows: TrendRow[] = [];
 
     // Pre-compute all sample tick targets so the driver loop can
@@ -597,7 +651,7 @@ describe('master long-running diagnostic', () => {
           // Pick fresh tracked set BEFORE the macro snapshot so the
           // snapshot includes the picked ants.
           tracked = pickTrackedAnts(sim);
-          const row = macroSnapshot(sim, lastReturnRate, tracked);
+          const row = macroSnapshot(sim, lastReturnRate, forageBaseline, tracked);
           trendRows.push(row);
           lastMacroIdx = s.macroIdx;
         } else if (s.kind === 'medium') {
