@@ -2187,13 +2187,18 @@ export function step(
             const fy = (fIdx / world.width) | 0;
             const fxx = fIdx - fy * world.width;
             if (fy < world.naturalSurface[fxx]!) {
-              trailField.deposit(fxx, fy, 1.0);
+              // EXPERIMENT: 10× foraging recruitment deposits to test
+              // whether weak trail/trunk peaks (typically 0–0.003
+              // across the 500k baseline) are limiting the discovery
+              // feedback loop. Original values were 1.0 / 0.10 here
+              // and 0.10 / 0.02 on the return-step deposits below.
+              trailField.deposit(fxx, fy, 10.0);
               // Trunk-trail: long-half-life persistent path. Each
               // pickup contributes a small amount; over many trips
               // the cumulative concentration on a stable food
               // patch's path saturates and reads as a "highway"
               // even after the volatile foraging trail has decayed.
-              if (trunkField) trunkField.deposit(fxx, fy, 0.10);
+              if (trunkField) trunkField.deposit(fxx, fy, 1.0);
             }
           }
           world.food[fIdx] = 0;
@@ -2402,13 +2407,14 @@ export function step(
         const tx = nx | 0;
         const ty = ny | 0;
         if (ty < world.naturalSurface[tx]!) {
-          trailField.deposit(tx, ty, 0.10);
+          trailField.deposit(tx, ty, 1.0);
           // Persistent trunk-trail accumulates with every
           // returning forager along this path. Smaller per-step
           // than the volatile trail (0.02 vs 0.10) but with much
           // longer retention so a frequented route consolidates
           // into a stable highway over many trips.
-          if (trunkField) trunkField.deposit(tx, ty, 0.02);
+          // (10× experimental scale; original 0.02.)
+          if (trunkField) trunkField.deposit(tx, ty, 0.20);
         }
       }
       // Deposit if we're in a below-surface AIR cell with no food
