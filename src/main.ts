@@ -213,7 +213,7 @@ function main(): void {
   // prod), so the rev string here always reflects the running JS.
   // The trailing "+" if present means the build was made with
   // uncommitted changes in the working tree (dev shorthand).
-  hudEls.build.textContent = `${__BUILD_REV__} · ${__BUILD_TIME__}`;
+  hudEls.build.textContent = __BUILD_REV__;
   hudEls.build.title = `git ${__BUILD_REV__} built ${__BUILD_TIME__}`;
 
   // Population graph. Adaptive-decimation ring buffer: the most
