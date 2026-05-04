@@ -208,9 +208,8 @@
            SPEED       — wall-clock ticks/sec (CPU dimension)
            TIME SCALE  — bio-seconds advanced per tick (compression dial) */
       #dials {
-        position: fixed; left: 50%; bottom: 70px;
-        transform: translateX(-50%);
-        display: flex; gap: 14px;
+        position: fixed; top: 8px; right: 8px;
+        display: flex; flex-direction: column; gap: 8px;
         padding: 8px 12px;
         background: rgba(10, 6, 6, 0.62);
         border: 1px solid rgba(216, 200, 168, 0.18);
@@ -218,9 +217,15 @@
         opacity: 0.65;
         transition: opacity 200ms ease;
         z-index: 10;
-        max-width: calc(100vw - 24px);
+        max-width: 220px;
         font: 600 11px ui-sans-serif, system-ui, sans-serif;
         color: #f0e2c4;
+      }
+      /* On wider screens we can fit both sliders side by side. On
+         mobile / narrow viewports they stack to keep tap-targets
+         reasonable. */
+      @media (min-width: 720px) {
+        #dials { flex-direction: row; gap: 14px; max-width: 420px; }
       }
       #dials:hover, #dials:focus-within { opacity: 1; }
       #dials.hidden { opacity: 0; pointer-events: none; }
