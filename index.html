@@ -79,9 +79,44 @@
       #hud canvas.histo { display: inline-block; width: 120px; height: 14px; vertical-align: middle; image-rendering: pixelated; }
       #hud .histo-label { display: inline-block; margin-right: 6px; opacity: 0.7; font-size: 10px; }
       #hud.minimized .row:not(.hdr):not(.hdr-mini),
+      #hud.minimized .section,
       #hud.minimized .legend,
       #hud.minimized .pop-graph { display: none; }
       #hud.minimized { padding: 4px 10px; }
+      /* Section header — slightly stronger contrast than the
+         normal row labels, so the COLONY / SELECTED dividers stand
+         out as folder-like headers. The per-section +/- button is
+         small and right-aligned. */
+      #hud .section .row.sec-hdr {
+        margin-top: 4px;
+        padding-top: 4px;
+        border-top: 1px solid rgba(216, 200, 168, 0.15);
+        opacity: 0.85;
+        letter-spacing: 0.06em;
+        font-size: 10px;
+      }
+      #hud .section .row.sec-hdr span:first-child {
+        font-weight: 600;
+        color: #e8d8b0;
+      }
+      #hud .sec-min {
+        background: transparent;
+        color: #e8d8b0;
+        border: 1px solid rgba(216, 200, 168, 0.25);
+        border-radius: 3px;
+        font: inherit;
+        font-size: 11px;
+        line-height: 1;
+        padding: 1px 5px;
+        cursor: pointer;
+      }
+      #hud .sec-min:hover { background: rgba(216, 200, 168, 0.1); }
+      /* When a section is collapsed, hide everything inside it
+         except the header row (which stays visible to host the
+         expand button). */
+      #hud .section.collapsed > .row:not(.sec-hdr),
+      #hud .section.collapsed > .pop-graph { display: none; }
+      #hud .section.hidden { display: none; }
       #help {
         position: fixed; right: 12px; bottom: 12px;
         background: rgba(10, 6, 6, 0.78);

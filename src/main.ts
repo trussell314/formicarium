@@ -110,20 +110,26 @@ function main(): void {
     <div class="row hdr"><span>FORMICARIUM</span><span class="v" id="h-seed"></span></div>
     <div class="row hdr-mini"><span class="v" id="h-mini"></span></div>
     <div class="row dim" id="h-build-row"><span>build</span><span class="v" id="h-build"></span></div>
-    <div class="row"><span>colony</span><span class="v" id="h-colony"></span></div>
-    <div class="row"><span>brood</span><span class="v" id="h-brood"></span></div>
-    <div class="row"><span>nest</span><span class="v" id="h-nest"></span></div>
-    <div class="row"><span>resources</span><span class="v" id="h-res"></span></div>
-    <div class="row"><span>time</span><span class="v" id="h-time"></span></div>
-    <div class="row"><span>speed</span><span class="v" id="h-speed"></span></div>
-    <div class="row"><span>states</span><span class="v" id="h-states"></span></div>
-    <div class="row"><span>age</span><span class="v"><span class="histo-label" id="h-age-lbl">young → old</span><canvas class="histo" id="h-age-cv" width="120" height="14"></canvas></span></div>
-    <div class="row"><span>energy</span><span class="v"><span class="histo-label" id="h-energy-lbl">low → full</span><canvas class="histo" id="h-energy-cv" width="120" height="14"></canvas></span></div>
-    <div class="row sel hidden" id="h-sel-row"><span>selected</span><span class="v" id="h-sel"></span></div>
-    <div class="row dim"><span>render</span><span class="v" id="h-fps"></span></div>
-    <div class="pop-graph" id="h-pop-graph">
-      <canvas id="h-pop-canvas" width="340" height="56"></canvas>
+    <div class="section" id="hud-section-colony">
+      <div class="row sec-hdr"><span>COLONY</span><button class="sec-min" data-sec="colony" title="collapse / expand colony stats">−</button></div>
+      <div class="row"><span>colony</span><span class="v" id="h-colony"></span></div>
+      <div class="row"><span>brood</span><span class="v" id="h-brood"></span></div>
+      <div class="row"><span>nest</span><span class="v" id="h-nest"></span></div>
+      <div class="row"><span>resources</span><span class="v" id="h-res"></span></div>
+      <div class="row"><span>time</span><span class="v" id="h-time"></span></div>
+      <div class="row"><span>speed</span><span class="v" id="h-speed"></span></div>
+      <div class="row"><span>states</span><span class="v" id="h-states"></span></div>
+      <div class="row"><span>age</span><span class="v"><span class="histo-label" id="h-age-lbl">young → old</span><canvas class="histo" id="h-age-cv" width="120" height="14"></canvas></span></div>
+      <div class="row"><span>energy</span><span class="v"><span class="histo-label" id="h-energy-lbl">low → full</span><canvas class="histo" id="h-energy-cv" width="120" height="14"></canvas></span></div>
+      <div class="pop-graph" id="h-pop-graph">
+        <canvas id="h-pop-canvas" width="340" height="56"></canvas>
+      </div>
     </div>
+    <div class="section hidden" id="hud-section-sel">
+      <div class="row sec-hdr"><span>SELECTED</span><button class="sec-min" data-sec="sel" title="collapse / expand selection details">−</button></div>
+      <div class="row sel" id="h-sel-row"><span>info</span><span class="v" id="h-sel"></span></div>
+    </div>
+    <div class="row dim"><span>render</span><span class="v" id="h-fps"></span></div>
     <div class="legend" id="h-legend" style="display:none">
       <div><span class="swatch" style="background:#00dcdc"></span><span id="leg-dig">dig</span></div>
       <div><span class="swatch" style="background:#dc00dc"></span><span id="leg-build">build</span></div>
@@ -151,6 +157,7 @@ function main(): void {
     states: document.getElementById('h-states')!,
     sel: document.getElementById('h-sel')!,
     selRow: document.getElementById('h-sel-row')!,
+    selSection: document.getElementById('hud-section-sel')!,
     fps: document.getElementById('h-fps')!,
     legDig: document.getElementById('leg-dig')!,
     legBuild: document.getElementById('leg-build')!,
@@ -309,6 +316,19 @@ function main(): void {
   hudMinBtn.addEventListener('click', () => {
     hud.classList.toggle('minimized');
     hudMinBtn.textContent = hud.classList.contains('minimized') ? '+' : '−';
+  });
+  // Per-section collapse buttons. Each section (colony, selected)
+  // can be folded independently via its own +/- toggle. Useful when
+  // the player wants to keep the selection details open while
+  // collapsing the colony stats during a busy run, or vice versa.
+  document.querySelectorAll<HTMLButtonElement>('.sec-min').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const sec = btn.dataset.sec === 'colony'
+        ? document.getElementById('hud-section-colony')!
+        : document.getElementById('hud-section-sel')!;
+      sec.classList.toggle('collapsed');
+      btn.textContent = sec.classList.contains('collapsed') ? '+' : '−';
+    });
   });
   const help = document.getElementById('help') as HTMLDivElement;
   const renderer = new Renderer(canvas, makePlaceholderWorld(settings));
@@ -808,8 +828,12 @@ function main(): void {
         `Q ${snap.hud.queens} · ${snap.hud.eggs}E · ${snap.hud.larvae}L · ${snap.hud.pupae}P`);
       setPulse(hudEls.nest,
         `${snap.hud.nestVol} cells · depth ${snap.hud.maxDepth} · ${snap.hud.chambers} ch`);
+      // "Grains" was an internal metric (loose-soil cell count) that
+      // didn't translate to a user-meaningful concept. Show the
+      // resources the player actually cares about: food on the
+      // surface and dead bodies awaiting necrophoresis.
       setPulse(hudEls.res,
-        `${snap.hud.grains} grains · ${snap.hud.foodCount} seeds`);
+        `${snap.hud.foodCount} seeds · ${snap.hud.dead} corpses`);
       hudEls.time.textContent =
         `t=${snap.tick.toLocaleString()} · ${bioTime} · ${phaseLabel}`;
       // Minimised-bar text: visible even when the user collapses the
@@ -898,7 +922,7 @@ function main(): void {
         hudEls.sel.textContent =
           `#${id} ${stateCode} (${ex},${ey}) e=${en} ${hd}°` +
           (pheroSummary ? ` · ${pheroSummary}` : '');
-        hudEls.selRow.classList.remove('hidden');
+        hudEls.selSection.classList.remove('hidden');
         // Update legend with values at this ant's cell. Skip the
         // call when pheromones aren't in this snapshot (the worker
         // throttles them every Nth frame to save bandwidth) — keeps
@@ -954,7 +978,7 @@ function main(): void {
         hudEls.sel.textContent =
           `cell (${cx},${cy}) ${cellName} ${where}` +
           (cellPheroSummary ? ` · ${cellPheroSummary}` : '');
-        hudEls.selRow.classList.remove('hidden');
+        hudEls.selSection.classList.remove('hidden');
         // Update legend with values at this clicked cell. Same
         // throttle-skip logic as the ant branch.
         if (snap.pheromones) setLegendValues([
@@ -971,7 +995,7 @@ function main(): void {
           snap.pheromones.breachAlarm[cIdx] ?? 0,
         ]);
       } else {
-        hudEls.selRow.classList.add('hidden');
+        hudEls.selSection.classList.add('hidden');
         setLegendValues(null);
       }
       hudEls.fps.textContent = `${renderFps} fps`;
