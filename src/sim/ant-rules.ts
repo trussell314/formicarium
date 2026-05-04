@@ -2305,6 +2305,41 @@ export function step(
             h += wrapAngle(want - h) * colony.stigmergy[i]! * 0.4;
           }
         }
+        // Shaft-entry snap. The founding shaft is one cell wide;
+        // continuous-position wall-bouncing physics can't reliably
+        // land an ant on a 1-cell target column even with a strong
+        // gradient pointing at it. Real ants don't bounce off the
+        // entrance — they slow down, antennate the rim, and walk in
+        // deliberately (Hölldobler & Wilson 1990, Ch. 7 on entrance
+        // behaviour). Modelled as: when above the surface and within
+        // ±3 columns of an open shaft cell, hard-align lateral
+        // position to the shaft column centre and point heading
+        // straight at the shaft entry. The override outranks the
+        // soft biases above precisely because those biases by
+        // themselves can't solve sub-cell precision problems.
+        let nearestShaft = -1;
+        let nearestDistSq = 100;
+        for (let dx = -3; dx <= 3; dx++) {
+          const col = ix + dx;
+          if (col < 0 || col >= world.width) continue;
+          const sf = world.naturalSurface[col]!;
+          if (world.cells[sf * world.width + col] === CELL_AIR) {
+            const d2 = dx * dx;
+            if (d2 < nearestDistSq) {
+              nearestShaft = col;
+              nearestDistSq = d2;
+            }
+          }
+        }
+        if (nearestShaft >= 0) {
+          // Snap lateral position to the shaft column centre. This
+          // is a discrete jump in posX (typically <3 cells), accepted
+          // because the alternative is forever-bouncing on the rim.
+          colony.posX[i] = nearestShaft + 0.5;
+          // Heading: straight at the shaft entry cell.
+          const tgtY = world.naturalSurface[nearestShaft]!;
+          h = Math.atan2(tgtY + 0.5 - colony.posY[i]!, 0);
+        }
       }
       // Brood emergency rerouting (FIX H). Standard CARRY_FOOD
       // behaviour heads down via geotaxis and biases toward
