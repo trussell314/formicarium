@@ -11,7 +11,7 @@
 // land.
 
 import { describe, expect, it } from 'vitest';
-import { Colony } from '../src/sim/colony';
+import { Colony, STATE_CARRY } from '../src/sim/colony';
 import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { Pheromone } from '../src/sim/pheromone';
 import { RNG } from '../src/sim/rng';
@@ -132,5 +132,79 @@ describe('breach detection', () => {
         undefined, undefined, f.breachAlarm);
     }
     expect(f.breachAlarm.sample(25, 10)).toBe(0);
+  });
+});
+
+describe('breach repair-deposit', () => {
+  it('a CARRY ant at a breach cell deposits her cargo, sealing the breach', () => {
+    // Carve a breach 15 columns east of the entrance. Place a
+    // single CARRY ant at the breach cell with cargo. Pre-charge
+    // the breach alarm above the repair threshold so the deposit
+    // gate fires immediately (otherwise the detection sweep would
+    // need 50 ticks to seed the alarm).
+    const rng = new RNG(201);
+    const w = makeBreachWorld();
+    w.cells[w.index(35, 10)] = CELL_AIR;
+    w.cells[w.index(35, 11)] = CELL_AIR;
+    w.initialSoilCells = w.countSoil();
+    const colony = new Colony(1);
+    colony.spawn(35.5, 10.5, 0, rng, {
+      digProb: 0, pickProb: 0, stigmergy: 0.55, turnNoise: 0, restThreshold: 100,
+    });
+    colony.state[0] = STATE_CARRY;
+    colony.carryMoves[0] = 3;
+    const f = makeFields(w);
+    // Saturate breach alarm at the breach cell so repair gate fires
+    // immediately on the first tick, no waiting on diffusion.
+    for (let k = 0; k < 30; k++) f.breachAlarm.deposit(35, 10, 1.0);
+    let sealed = false;
+    for (let t = 0; t < 100; t++) {
+      step(w, colony, f.dig, f.build, rng, DEFAULT_PARAMS, undefined, QUIET,
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        undefined, undefined, f.breachAlarm);
+      // Re-paint alarm so evaporation doesn't drop it below
+      // threshold during the test (the actual sim would re-emit
+      // from the detection sweep every 50 ticks).
+      f.breachAlarm.deposit(35, 10, 1.0);
+      // Breach is sealed when the surface cell becomes SOIL again.
+      if (w.cells[w.index(35, 10)] === CELL_SOIL) {
+        sealed = true;
+        break;
+      }
+    }
+    expect(sealed).toBe(true);
+    // Ant should have transitioned out of CARRY (deposit succeeded
+    // → setState(WANDER)).
+    expect(colony.state[0]).not.toBe(STATE_CARRY);
+  });
+
+  it('a CARRY ant NOT at a breach cell does NOT trigger the repair-deposit path', () => {
+    // Same setup but the ant is far from any breach. The repair
+    // path should not fire — the routine deposit logic still
+    // applies but the alarm-triggered short-circuit doesn't.
+    const rng = new RNG(202);
+    const w = makeBreachWorld();
+    // No breach carved.
+    const colony = new Colony(1);
+    // Spawn ant in a chamber far from anything — at the bottom of
+    // the canonical shaft (col 20, row 14 = AIR).
+    colony.spawn(20.5, 14.5, 0, rng, {
+      digProb: 0, pickProb: 0, stigmergy: 0.55, turnNoise: 0, restThreshold: 100,
+    });
+    colony.state[0] = STATE_CARRY;
+    colony.carryMoves[0] = 3;
+    const f = makeFields(w);
+    // No alarm anywhere.
+    let stillSoil = w.countSoil();
+    for (let t = 0; t < 50; t++) {
+      step(w, colony, f.dig, f.build, rng, DEFAULT_PARAMS, undefined, QUIET,
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        undefined, undefined, f.breachAlarm);
+    }
+    // No repair-driven deposits should have happened. Soil count
+    // shouldn't have INCREASED via spurious breach-seal placements.
+    // (Other deposit paths may still fire — we only assert the
+    // breach path itself doesn't spuriously trigger.)
+    expect(w.countSoil()).toBeLessThanOrEqual(stillSoil + 1); // tolerance for routine placements
   });
 });

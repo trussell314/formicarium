@@ -2909,6 +2909,26 @@ export function step(
         const outward = ix < entranceCx ? Math.PI : 0;
         h += wrapAngle(outward - h) * 0.20;
       }
+      // Breach diversion. A CARRY ant carrying spoil that detects a
+      // local breach-alarm signal redirects toward the breach edge
+      // to repair it. The bias is layered ON TOP of the routine
+      // outward / negative-geotaxis biases above; if no breach is
+      // active, this is a no-op. Strong weight (1.0× stigmergy)
+      // because surface-breach repair is high-priority — a colony
+      // with an unsealed opening loses brood to weather and
+      // predators, so a carrier who could be sealing the gap should
+      // do that before adding to the routine mound. Real ants
+      // recruit to breach edges in seconds (Hölldobler & Wilson
+      // 1990 Ch. 7).
+      if (breachAlarmField) {
+        const baLocal = breachAlarmField.sample(ix, iy);
+        const baGrad = breachAlarmField.gradient(ix, iy);
+        const baMag = Math.hypot(baGrad.dx, baGrad.dy);
+        if (baLocal > 0.05 && baMag > 1e-5) {
+          const want = Math.atan2(baGrad.dy, baGrad.dx);
+          h += wrapAngle(want - h) * Math.min(1, colony.stigmergy[i]! * 1.5);
+        }
+      }
     } else if (stateIn === STATE_WANDER) {
       if (iy < world.naturalSurface[ix]!) {
         // Above surface: positive geotaxis pulls heading DOWN, but
@@ -3629,6 +3649,47 @@ export function step(
       const aboveSurface = py < surf;
       const groundIsIntact = world.cells[world.index(px, surf)] !== CELL_AIR;
 
+      // Breach repair-deposit. A CARRY ant within sensing range of
+      // a strong breach-alarm signal looks for the nearest actual
+      // breach cell (above-surface AIR cell with chamber AIR
+      // directly below it) within a small radius and deposits her
+      // cargo THERE, sealing the gap. Surface repair is the
+      // highest-priority placement context — Hölldobler & Wilson
+      // 1990 Ch. 7 cite breach response as one of the strongest
+      // emergent recruit signals in mature colonies. Bypasses the
+      // routine Khuong / surface-mound / deadlock paths.
+      //
+      // We use the carrier's tick-start position (ix, iy) for the
+      // search, not the post-movement (px, py), because the routine
+      // CARRY heading bias would have nudged her UP off the breach
+      // cell during this tick's movement. The placeGrain target
+      // is the breach cell itself; the worker is then teleported
+      // adjacent to it (the existing escape-cell scan handles that
+      // for the routine deposit path; we mirror the logic here).
+      const REPAIR_SCAN_R = 2;
+      let repairTarget: { x: number; y: number } | null = null;
+      if (breachAlarmField && breachAlarmField.sample(ix, iy) > 0.3) {
+        let bestD2 = (REPAIR_SCAN_R + 1) ** 2;
+        for (let ddy = -REPAIR_SCAN_R; ddy <= REPAIR_SCAN_R; ddy++) {
+          for (let ddx = -REPAIR_SCAN_R; ddx <= REPAIR_SCAN_R; ddx++) {
+            const cx = ix + ddx;
+            const cy = iy + ddy;
+            if (cx < 0 || cy < 0 || cx >= world.width || cy >= world.height) continue;
+            // Breach cell must be at the natural-surface row of its
+            // column, AIR, with chamber AIR directly below.
+            if (cy !== world.naturalSurface[cx]!) continue;
+            if (world.cells[cy * world.width + cx] !== CELL_AIR) continue;
+            if (cy + 1 >= world.height) continue;
+            if (world.cells[(cy + 1) * world.width + cx] !== CELL_AIR) continue;
+            const d2 = ddx * ddx + ddy * ddy;
+            if (d2 < bestD2) {
+              bestD2 = d2;
+              repairTarget = { x: cx, y: cy };
+            }
+          }
+        }
+      }
+
       // Traffic-driven wall erosion. Hölldobler & Wilson (1990, Ch. 3,
       // "Nest construction"): "Workers passing through soil-walled
       // passages erode the walls over time"; Tschinkel (2004) attributes
@@ -3714,6 +3775,39 @@ export function step(
       if (py > 0 && world.cells[(py - 1) * wW2 + px] === CELL_SOIL) cornerSoil++;
       if (py < world.height - 1 && world.cells[(py + 1) * wW2 + px] === CELL_SOIL) cornerSoil++;
       const cornerBoost = cornerSoil >= 2 ? 2.0 : 1.0;
+      // Breach repair short-circuits everything else: write a
+      // CONSOLIDATED seal directly at the breach cell. We don't use
+      // placeGrain because that creates LOOSE soil (hardness=0)
+      // which immediately cascades through the chamber AIR below
+      // (cells under a breach are AIR by definition — that's what
+      // makes it a breach). Real ants tamp breach repairs hard so
+      // they hold — Hölldobler & Wilson 1990 Ch. 7 describes
+      // soldier/major workers reinforcing entrance and breach
+      // edges with extra cement secretion. Modelled here by
+      // setting hardness = 255 directly so the seal doesn't fall
+      // into the chamber on the next settleGrain pass.
+      //
+      // setState → REST so the worker doesn't immediately re-enter
+      // CARRY on the next dig contact (gives a brief "she just
+      // sealed something" pause before the next task).
+      if (repairTarget !== null) {
+        const sealIdx = repairTarget.y * world.width + repairTarget.x;
+        world.cells[sealIdx] = CELL_SOIL;
+        world.grainHardness[sealIdx] = 255;
+        world.grainMoves[sealIdx] = Math.min(255, colony.carryMoves[i]! + 1);
+        // Move worker out of the breach column to the cell ABOVE
+        // the sealed cell — that's sky AIR by construction since
+        // a breach is at the natural-surface row.
+        const escapeY = repairTarget.y - 1;
+        if (escapeY >= 0
+          && world.cells[escapeY * world.width + repairTarget.x] === CELL_AIR) {
+          colony.posX[i] = repairTarget.x + 0.5;
+          colony.posY[i] = escapeY + 0.5;
+        }
+        colony.setState(i, STATE_REST);
+        colony.carryMoves[i] = 0;
+        continue;
+      }
       let pDeposit = 0;
       // Crater clear zone. Real Pogonomyrmex mounds are RING-shaped
       // — a low/absent central rim around the entrance and an
