@@ -2748,10 +2748,22 @@ export function step(
       continue;
     }
 
-    // WANDER ants overloaded by collisions enter REST. CARRY ants
-    // are committed to deposit and ignore the agitation signal —
-    // real laden foragers don't drop their cargo to rest.
-    if (stateIn === STATE_WANDER && colony.collisionCount[i]! > colony.restThreshold[i]!) {
+    // WANDER ants overloaded by collisions enter REST — UNLESS
+    // they're hungry. Real ants increase activity when starving,
+    // not decrease it: energy debt overrides social agitation.
+    // Without this gate, the master 1M run showed 78% of workers
+    // (113/144) in REST while mean worker energy crashed to 0.23
+    // — the colony collectively retreated to REST when crowded
+    // and starved itself out instead of foraging. Threshold
+    // chosen at half maxEnergy: above this the worker has reserve
+    // and can afford to rest; below this she needs to keep moving
+    // toward food. CARRY ants are committed to deposit and ignore
+    // the agitation signal — real laden foragers don't drop their
+    // cargo to rest.
+    const restEnergyFloor = species.maxEnergy * 0.5;
+    if (stateIn === STATE_WANDER
+        && colony.collisionCount[i]! > colony.restThreshold[i]!
+        && colony.energy[i]! >= restEnergyFloor) {
       colony.setState(i, STATE_REST);
       continue;
     }

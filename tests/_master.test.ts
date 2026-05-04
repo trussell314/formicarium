@@ -484,7 +484,10 @@ function windowSample(
     if (s >= 0 && s < states.length) states[s] = (states[s] ?? 0) + 1;
     if (s !== STATE_DEAD) maxIdx = Math.max(maxIdx, i);
   }
-  const summary = ['Q', 'W', 'C', 'R', 'F', 'Cf', 'N', 'L', 'P', 'E', 'X']
+  // Label order MUST match the state-constant indices in
+  // colony.ts: WANDER=0, CARRY=1, REST=2, FORAGE=3, CARRY_FOOD=4,
+  // DEAD=5, QUEEN=6, EGG=7, NECRO_CARRY=8, LARVA=9, PUPA=10.
+  const summary = ['W', 'C', 'R', 'F', 'Cf', 'X', 'Q', 'E', 'N', 'L', 'P']
     .map((n, k) => `${n}${states[k]!}`)
     .filter((_, k) => states[k]! > 0)
     .join(' ');
