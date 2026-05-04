@@ -2243,6 +2243,7 @@ export function step(
     // Pogonomyrmex badius granaries form at consistent depths
     // without any explicit chamber-allocation rule.
     if (stateIn === STATE_CARRY_FOOD) {
+      colony.stateTicks[i]!++;
       h += rng.gauss() * colony.turnNoise[i]!;
       // Below or above surface, bias DOWN (positive geotaxis).
       h += wrapAngle(Math.PI / 2 - h) * geotaxis;
