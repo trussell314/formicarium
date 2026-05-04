@@ -167,16 +167,42 @@
         border: 1px solid rgba(216, 200, 168, 0.28);
         border-radius: 6px;
         color: #f0e2c4;
-        font: 600 13px ui-sans-serif, system-ui, sans-serif;
-        padding: 8px 12px;
-        min-width: 44px;
-        min-height: 44px;
+        font: 500 12px ui-sans-serif, system-ui, sans-serif;
+        padding: 6px 10px;
+        min-height: 36px;
         line-height: 1;
         cursor: pointer;
         touch-action: manipulation;
         -webkit-tap-highlight-color: transparent;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
       }
       #ctrls button:active { background: rgba(216, 200, 168, 0.25); }
+      #ctrls button .lbl {
+        letter-spacing: 0.02em;
+      }
+      #ctrls button .key {
+        display: inline-block;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 10px;
+        line-height: 1;
+        padding: 3px 5px;
+        min-width: 14px;
+        text-align: center;
+        border: 1px solid rgba(216, 200, 168, 0.30);
+        border-bottom-width: 2px;
+        border-radius: 3px;
+        background: rgba(0, 0, 0, 0.30);
+        color: #d8c8a8;
+      }
+      #ctrls button:hover .key { color: #f0e2c4; }
+      /* Mobile: stack key under label so each button stays tappable
+         without going extra-wide. */
+      @media (max-width: 720px) {
+        #ctrls button { flex-direction: column; gap: 2px; padding: 6px 8px; }
+        #ctrls button .key { font-size: 9px; padding: 2px 4px; }
+      }
       /* Dials cluster — sits above the button row. Two sliders, each
          clearly labeled, for the two orthogonal time knobs:
            SPEED       — wall-clock ticks/sec (CPU dimension)
@@ -239,16 +265,16 @@
       </label>
     </div>
     <div id="ctrls" role="toolbar" aria-label="simulation controls">
-      <button data-act="pause" title="pause / resume (space)">⏯</button>
-      <button data-act="slower" title="slower (-)">−</button>
-      <button data-act="faster" title="faster (+)">+</button>
-      <button data-act="zoomout" title="reset zoom (0)">⌖</button>
-      <button data-act="phero" title="pheromone overlay (p)">𝜙</button>
-      <button data-act="save" title="save state (s)">💾</button>
-      <button data-act="load" title="load saved state (l)">📂</button>
-      <button data-act="reseed" title="reseed (r)">🎲</button>
-      <button data-act="full" title="fullscreen (f)">⛶</button>
-      <button data-act="help" title="help (?)">?</button>
+      <button data-act="pause" title="pause / resume (space)"><span class="lbl">Pause</span><span class="key">␣</span></button>
+      <button data-act="slower" title="slower (-)"><span class="lbl">Slower</span><span class="key">−</span></button>
+      <button data-act="faster" title="faster (+)"><span class="lbl">Faster</span><span class="key">+</span></button>
+      <button data-act="zoomout" title="reset zoom (0)"><span class="lbl">Reset zoom</span><span class="key">0</span></button>
+      <button data-act="phero" title="pheromone overlay (p)"><span class="lbl">Pheromones</span><span class="key">P</span></button>
+      <button data-act="save" title="save state (s)"><span class="lbl">Save</span><span class="key">S</span></button>
+      <button data-act="load" title="load saved state (l)"><span class="lbl">Load</span><span class="key">L</span></button>
+      <button data-act="reseed" title="reseed (r)"><span class="lbl">Reseed</span><span class="key">R</span></button>
+      <button data-act="full" title="fullscreen (f)"><span class="lbl">Fullscreen</span><span class="key">F</span></button>
+      <button data-act="help" title="help (?)"><span class="lbl">Help</span><span class="key">?</span></button>
     </div>
     <div id="help">
       <h1>FORMICARIUM</h1>
