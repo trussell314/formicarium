@@ -95,7 +95,7 @@ uniform usampler2D uPlantHeight; // R16UI W×2: height in cells — row 0 = fg, 
 // guarantees ≥ 16; we had 19 with one sampler per field). Layout:
 //   uPPack0: dig(r),  build(g), trail(b),  alarm(a)
 //   uPPack1: queen(r), brood(g), necro(b),  noEntry(a)
-//   uPPack2: granary(r), trunk(g), unused, unused
+//   uPPack2: granary(r), trunk(g), breachAlarm(b), unused
 uniform sampler2D uPPack0;
 uniform sampler2D uPPack1;
 uniform sampler2D uPPack2;
@@ -430,15 +430,19 @@ void main() {
       col += vec3(0.7, 0.5, 0.3) * (queenLight + broodLight) * 0.18 * darkness;
     }
   } else {
-    // Soil or grain: shared palette (real spoil mounds are the
-    // same earth as undisturbed substrate), but loose grain reads
-    // a touch lighter than tamped/consolidated wall via uHardness.
-    // Multi-octave noise + depth-fog darkening below 55%.
+    // Soil — shared palette across the consolidation spectrum, with
+    // a hardness-driven tint that centres on the base. Fresh
+    // deposits (loose) are lighter; fully consolidated wall is
+    // darker. Range ±18% so the contrast reads clearly. Mirrors the
+    // CPU-renderer formula in renderer.ts.
+    //   hardness=0   → +18% (lit, sandy)
+    //   hardness=128 → 0%   (base palette)
+    //   hardness=255 → −18% (fully consolidated wall)
     float depth = clamp(float(cell.y - surf) / max(1.0, uH - float(surf)), 0.0, 1.0);
     col = mix(SOIL_TOP, SOIL_BOT, depth);
     float hard = float(sampleU8(uHardness, cell)) / 255.0;
-    float looseLift = 0.12 * (1.0 - hard);
-    col *= (1.0 + multiNoise + looseLift);
+    float hardnessTint = 0.36 * (1.0 - hard) - 0.18;
+    col *= (1.0 + multiNoise + hardnessTint);
     if (depth > 0.55) {
       float f = (depth - 0.55) / 0.45;
       col *= (1.0 - 0.55 * f);
@@ -543,6 +547,7 @@ void main() {
     float xv  = sqrt(clamp(p1.a / 1.0,   0.0, 1.0));
     float gv  = sqrt(clamp(p2.r / 2.0,   0.0, 1.0));
     float tkv = sqrt(clamp(p2.g / 2.5,   0.0, 1.0));
+    float bav = sqrt(clamp(p2.b / 1.0,   0.0, 1.0));
     // Heat-distortion at saturation (#19). When any field is at
     // its display peak, jitter the colour slightly with a
     // tick-driven sine — reads as a chemical haze rippling at
@@ -563,6 +568,9 @@ void main() {
     col += (vec3(140.0, 150.0, 170.0) / 255.0 - col) * xv  * W;
     col += (vec3(255.0, 160.0, 60.0)  / 255.0 - col) * gv  * W;
     col += (vec3(200.0, 170.0, 30.0)  / 255.0 - col) * tkv * W;
+    // Breach alarm — bright orange-red. Distinct from regular alarm
+    // (red) so the user can tell them apart in the overlay.
+    col += (vec3(255.0, 90.0,  30.0)  / 255.0 - col) * bav * 0.85;
   }
   fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }
@@ -599,6 +607,7 @@ export interface GLPheromones {
   noEntry: Float32Array;
   granary: Float32Array;
   trunk: Float32Array;
+  breachAlarm: Float32Array;
 }
 
 interface TextureSlot {
@@ -799,7 +808,7 @@ export class GLTerrainRenderer {
       packFour(this.pheroPack1!, pheromones.queen, pheromones.brood,
         pheromones.necro, pheromones.noEntry, cells);
       packFour(this.pheroPack2!, pheromones.granary, pheromones.trunk,
-        null, null, cells);
+        pheromones.breachAlarm, null, cells);
       this.uploadGrid('pPack0', this.pheroPack0, w, h);
       this.uploadGrid('pPack1', this.pheroPack1!, w, h);
       this.uploadGrid('pPack2', this.pheroPack2!, w, h);

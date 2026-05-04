@@ -435,6 +435,7 @@ export class Renderer {
       noEntry?: { current: Float32Array };
       granary?: { current: Float32Array };
       trunk?: { current: Float32Array };
+      breachAlarm?: { current: Float32Array };
     },
     daylight = 1,
     selectedId = -1,
@@ -475,6 +476,7 @@ export class Renderer {
           noEntry: pheromones.noEntry?.current ?? new Float32Array(0),
           granary: pheromones.granary?.current ?? new Float32Array(0),
           trunk: pheromones.trunk?.current ?? new Float32Array(0),
+          breachAlarm: pheromones.breachAlarm?.current ?? new Float32Array(0),
         } : null);
     }
 
@@ -540,12 +542,19 @@ export class Renderer {
           // than uniformly dark.
           const n = (noise[idx]! / 255 - 0.5) * 0.36;
           const looseFrac = 1 - this.world.grainHardness[idx]! / 255;
-          // Up to +12% brightness lift on fresh deposits; 0% on
-          // pristine / fully consolidated wall.
-          const looseLift = 0.12 * looseFrac;
-          r = soil[0] * (1 + n + looseLift);
-          g = soil[1] * (1 + n + looseLift);
-          b = soil[2] * (1 + n + looseLift);
+          // Hardness tint, centred. Fresh deposits (loose) are
+          // lighter than the base palette; fully consolidated wall
+          // is DARKER than base. Range ±18% so the contrast reads
+          // clearly across the cross-section — the original ±0/+12%
+          // (loose only) didn't visibly distinguish hardness levels.
+          //   hardness=0   → +18% (lit, sandy)
+          //   hardness=64  → +9%  (just-tamped surface mound)
+          //   hardness=128 → 0%   (mid-tamp, base palette)
+          //   hardness=255 → −18% (fully consolidated wall)
+          const hardnessTint = 0.36 * looseFrac - 0.18;
+          r = soil[0] * (1 + n + hardnessTint);
+          g = soil[1] * (1 + n + hardnessTint);
+          b = soil[2] * (1 + n + hardnessTint);
           // Depth fog: darken substrate below ~80% of the world
           // height. Sells the cross-section as bottomless rather
           // than a hard floor. Only applied below a threshold so
@@ -639,18 +648,20 @@ export class Renderer {
       const noEntry = pheromones.noEntry?.current;
       const granary = pheromones.granary?.current;
       const trunk = pheromones.trunk?.current;
+      const breachAlarm = pheromones.breachAlarm?.current;
       // Per-field cap values picked so cells at peak concentration
       // saturate to ~1.0 contribution. Calibrated from the deposit
       // rate × retention half-life of each field.
-      //   dig/build: 0.5 (deposit 1.0 on rare events)
-      //   trail:     0.5 (volatile, decays fast)
-      //   alarm:     0.15 (small per-deposit amounts)
-      //   queen:     4.0 (continuous emission, long half-life)
-      //   brood:     1.5 (continuous emission per larva)
-      //   necro:     0.8 (continuous emission per corpse)
-      //   no-entry:  2.0 (slow accumulation by unproductive WANDER)
-      //   granary:   4.0 (rare strong deposits, long half-life)
-      //   trunk:     5.0 (cumulative over many foraging trips)
+      //   dig/build:   0.5 (deposit 1.0 on rare events)
+      //   trail:       0.5 (volatile, decays fast)
+      //   alarm:       0.15 (small per-deposit amounts)
+      //   queen:       4.0 (continuous emission, long half-life)
+      //   brood:       1.5 (continuous emission per larva)
+      //   necro:       0.8 (continuous emission per corpse)
+      //   no-entry:    2.0 (slow accumulation by unproductive WANDER)
+      //   granary:     4.0 (rare strong deposits, long half-life)
+      //   trunk:       5.0 (cumulative over many foraging trips)
+      //   breachAlarm: 1.0 (1.0 deposit per detection sweep, decays fast)
       // We composite ADDITIVELY rather than alpha-stacking — each
       // layer pushes the cell color toward its target by
       // (target - current) * intensity * weight. This produces
@@ -675,9 +686,11 @@ export class Renderer {
         const xv = noEntry ? Math.min(1, noEntry[i]! / 2) : 0;
         const gv = granary ? Math.min(1, granary[i]! / 4) : 0;
         const tkv = trunk ? Math.min(1, trunk[i]! / 5) : 0;
+        const bav = breachAlarm ? Math.min(1, breachAlarm[i]! / 1.0) : 0;
         if (
           dv < 0.01 && bv < 0.01 && tv < 0.01 && av < 0.01 && qv < 0.01 &&
-          brv < 0.01 && nv < 0.01 && xv < 0.01 && gv < 0.01 && tkv < 0.01
+          brv < 0.01 && nv < 0.01 && xv < 0.01 && gv < 0.01 && tkv < 0.01 &&
+          bav < 0.01
         ) continue;
         const cy = (i / w) | 0;
         const cx = i - cy * w;
@@ -698,6 +711,10 @@ export class Renderer {
             r += (140 - r) * xv  * W; g += (150 - g) * xv  * W; b += (170 - b) * xv  * W;
             r += (255 - r) * gv  * W; g += (160 - g) * gv  * W; b += (60  - b) * gv  * W;
             r += (200 - r) * tkv * W; g += (170 - g) * tkv * W; b += (30  - b) * tkv * W;
+            // Breach alarm: bright orange-red. Distinct from regular
+            // alarm (pure red) so the user can tell them apart in
+            // the overlay.
+            r += (255 - r) * bav * 0.85; g += (90  - g) * bav * 0.85; b += (30  - b) * bav * 0.85;
             data[so]     = r < 0 ? 0 : r > 255 ? 255 : r | 0;
             data[so + 1] = g < 0 ? 0 : g > 255 ? 255 : g | 0;
             data[so + 2] = b < 0 ? 0 : b > 255 ? 255 : b | 0;

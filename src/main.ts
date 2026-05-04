@@ -134,6 +134,7 @@ function main(): void {
       <div><span class="swatch" style="background:#8c96aa"></span><span id="leg-noEntry">no-entry</span></div>
       <div><span class="swatch" style="background:#ffa03c"></span><span id="leg-granary">granary</span></div>
       <div><span class="swatch" style="background:#c8aa1e"></span><span id="leg-trunk">trunk</span></div>
+      <div><span class="swatch" style="background:#ff5a1e"></span><span id="leg-breach">breach-alarm</span></div>
     </div>
   `;
   const hudEls = {
@@ -159,6 +160,7 @@ function main(): void {
     legNoEntry: document.getElementById('leg-noEntry')!,
     legGranary: document.getElementById('leg-granary')!,
     legTrunk: document.getElementById('leg-trunk')!,
+    legBreach: document.getElementById('leg-breach')!,
   };
   const LEG_NAMES: ReadonlyArray<readonly [string, string]> = [
     ['legDig', 'dig'],
@@ -171,6 +173,7 @@ function main(): void {
     ['legNoEntry', 'no-entry'],
     ['legGranary', 'granary'],
     ['legTrunk', 'trunk'],
+    ['legBreach', 'breach-alarm'],
   ];
   /** Update the legend labels to show pheromone values at the
    *  given cell. If `values` is null (no selection), reset to
@@ -720,6 +723,7 @@ function main(): void {
         noEntry: { current: snap.pheromones.noEntry },
         granary: { current: snap.pheromones.granary },
         trunk: { current: snap.pheromones.trunk },
+        breachAlarm: { current: snap.pheromones.breachAlarm },
       };
       const particles = snap.particles ?? undefined;
       // If the selection points at a slot that's now dead or out of
@@ -900,6 +904,7 @@ function main(): void {
           snap.pheromones.noEntry[cellIdx] ?? 0,
           snap.pheromones.granary[cellIdx] ?? 0,
           snap.pheromones.trunk[cellIdx] ?? 0,
+          snap.pheromones.breachAlarm[cellIdx] ?? 0,
         ]);
       } else if (selectedCell !== null
                  && selectedCell.x >= 0 && selectedCell.x < snap.width
@@ -953,6 +958,7 @@ function main(): void {
           snap.pheromones.noEntry[cIdx] ?? 0,
           snap.pheromones.granary[cIdx] ?? 0,
           snap.pheromones.trunk[cIdx] ?? 0,
+          snap.pheromones.breachAlarm[cIdx] ?? 0,
         ]);
       } else {
         hudEls.selRow.classList.add('hidden');
