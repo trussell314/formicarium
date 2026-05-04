@@ -296,6 +296,7 @@ export function step(
   noEntryField?: Pheromone,
   granaryField?: Pheromone,
   trunkField?: Pheromone,
+  breachAlarmField?: Pheromone,
 ): void {
   world.tick++;
   // Macro-rate scale factor. Multiply per-tick macro probabilities,
@@ -628,6 +629,11 @@ export function step(
   if (noEntryField && slowStep) noEntryField.step(cells);
   if (granaryField && slowStep) granaryField.step(cells);
   if (trunkField && slowStep) trunkField.step(cells);
+  // Breach alarm steps every tick — short half-life since a sealed
+  // breach should clear quickly, leaving the field free to mark
+  // newly-opened ones without a stale-tail dragging recruits to old
+  // (already-repaired) sites.
+  if (breachAlarmField) breachAlarmField.step(cells);
   if (particles) particles.step();
 
   // Surface trunk-trail clearing. *P. barbatus* maintains literal
@@ -640,6 +646,51 @@ export function step(
   // trail body is wider than a single ant). Cheap: width-many
   // reads per sweep; runs every 64 ticks so we don't pay it every
   // step for a feature that visibly changes only over minutes.
+  // Surface-breach detection. Real *Pogonomyrmex barbatus* mature
+  // colonies treat any unsealed surface opening (other than the
+  // canonical entrance) as an urgent threat — exposed nest interior
+  // means rain ingress, predator access, temperature swings, and
+  // brood mortality. Workers respond by recruiting to the breach
+  // edge and sealing it from inside (Hölldobler & Wilson 1990 Ch. 7;
+  // Mikheyev & Tschinkel 2004 on P. badius repair behaviour).
+  //
+  // Detection: every 50 ticks, scan each column's natural-surface
+  // row. A breach point is an AIR cell at row `naturalSurface[x]`
+  // that's NOT within ENTRANCE_BREACH_RADIUS of the canonical
+  // entrance shaft AND has chamber connectivity below (i.e. the
+  // column was excavated, not just a sky cell above the surface).
+  // Each breach cell gets a strong alarm pulse on the dedicated
+  // `breachAlarmField`. The alarm decays under its own pheromone
+  // step (short half-life so a sealed breach clears quickly), and
+  // the diffusion produces the gradient that downstream behaviour
+  // (CARRY repair-deposit, WANDER recruitment) will follow.
+  //
+  // Discriminator radius: ±10 columns (much tighter than the
+  // ENTRANCE_NO_DIG_RADIUS=20 used for the surface dig gate). The
+  // dig gate suppresses casual mound digging close to the
+  // entrance; the breach gate distinguishes "real opening" from
+  // "the entrance itself" — those don't need to be the same.
+  // Stranded / entombed conditions are not relevant here (this is
+  // a global env scan, not per-ant).
+  const ENTRANCE_BREACH_RADIUS = 10;
+  const BREACH_ALARM_DEPOSIT = 1.0;
+  if (breachAlarmField && world.tick % 50 === 0) {
+    const ecx = world.width >> 1;
+    for (let x = 0; x < world.width; x++) {
+      if (Math.abs(x - ecx) <= ENTRANCE_BREACH_RADIUS) continue;
+      const surf = world.naturalSurface[x]!;
+      const surfIdx = surf * world.width + x;
+      if (world.cells[surfIdx] !== CELL_AIR) continue;
+      // Confirm chamber connectivity: the cell directly below must
+      // also be AIR (otherwise the surface AIR is just sky above an
+      // intact horizon — not a breach into the nest).
+      if (surf + 1 >= world.height) continue;
+      const belowIdx = (surf + 1) * world.width + x;
+      if (world.cells[belowIdx] !== CELL_AIR) continue;
+      breachAlarmField.deposit(x, surf, BREACH_ALARM_DEPOSIT);
+    }
+  }
+
   // Diel entrance plug. P. barbatus closes the nest entrance with
   // sand grains at sunset to retain humidity and exclude robbers,
   // re-opening at dawn (MacKay 1981; Gordon 1991). One grain swap

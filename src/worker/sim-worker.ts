@@ -43,6 +43,7 @@ interface SimBundle {
   noEntryField: Pheromone;
   granaryField: Pheromone;
   trunkField: Pheromone;
+  breachAlarmField: Pheromone;
   particles: ParticleSystem;
   species: AntSpecies;
 }
@@ -124,6 +125,11 @@ function buildBundle(s: SaveSettings, restoreBlob: string | null): SimBundle {
   const noEntryField = new Pheromone(s.width, s.height, 0.05, 0.995);
   const granaryField = new Pheromone(s.width, s.height, 0.10, 0.999);
   const trunkField = new Pheromone(s.width, s.height, 0.20, 0.9995);
+  // Breach alarm: short half-life so a sealed breach clears quickly
+  // and the field doesn't drag recruits to old (already-repaired)
+  // sites. Decay rate matches the regular alarm field — both signal
+  // urgent local conditions that should fade fast on resolution.
+  const breachAlarmField = new Pheromone(s.width, s.height, 0.50, 0.985);
 
   const colony = new Colony(HARVESTER.maxColonySize);
   // Founding-colony spawn (matches main.ts pre-worker behaviour).
@@ -193,6 +199,7 @@ function buildBundle(s: SaveSettings, restoreBlob: string | null): SimBundle {
     rng, world, colony,
     digField, buildField, trailField, alarmField, queenField,
     broodField, necroField, noEntryField, granaryField, trunkField,
+    breachAlarmField,
     particles, species: HARVESTER,
   };
 }
@@ -214,6 +221,7 @@ function drive(now: number): void {
       bundle.trailField, bundle.alarmField, bundle.queenField,
       bundle.broodField, bundle.necroField, bundle.noEntryField,
       bundle.granaryField, bundle.trunkField,
+      bundle.breachAlarmField,
     );
     bioAccum -= TICK_MS;
   }
