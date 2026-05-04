@@ -109,6 +109,7 @@ function main(): void {
     <button id="hud-min" title="minimise / restore">−</button>
     <div class="row hdr"><span>FORMICARIUM</span><span class="v" id="h-seed"></span></div>
     <div class="row hdr-mini"><span class="v" id="h-mini"></span></div>
+    <div class="row dim" id="h-build-row"><span>build</span><span class="v" id="h-build"></span></div>
     <div class="row"><span>colony</span><span class="v" id="h-colony"></span></div>
     <div class="row"><span>brood</span><span class="v" id="h-brood"></span></div>
     <div class="row"><span>nest</span><span class="v" id="h-nest"></span></div>
@@ -140,6 +141,7 @@ function main(): void {
   const hudEls = {
     seed: document.getElementById('h-seed')!,
     mini: document.getElementById('h-mini')!,
+    build: document.getElementById('h-build')!,
     colony: document.getElementById('h-colony')!,
     brood: document.getElementById('h-brood')!,
     nest: document.getElementById('h-nest')!,
@@ -189,6 +191,14 @@ function main(): void {
       }
     }
   }
+  // Build identifier — written once at page load. Refreshing the tab
+  // re-runs vite (in dev) or fetches the latest deployed bundle (in
+  // prod), so the rev string here always reflects the running JS.
+  // The trailing "+" if present means the build was made with
+  // uncommitted changes in the working tree (dev shorthand).
+  hudEls.build.textContent = `${__BUILD_REV__} · ${__BUILD_TIME__}`;
+  hudEls.build.title = `git ${__BUILD_REV__} built ${__BUILD_TIME__}`;
+
   // Population graph. Adaptive-decimation ring buffer: the most
   // recent samples stay fine-grained; once the buffer is full, every
   // other sample is dropped and the push interval doubles. End
