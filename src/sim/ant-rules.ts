@@ -3417,8 +3417,27 @@ export function step(
         // the +0.30 offset so colonyMarker dominates there. Workers
         // beneath the surface get full dig rate; entombed / stranded
         // workers always get full rate too (they need to dig out).
+        //
+        // Entrance-no-dig zone. Real *Pogonomyrmex barbatus* mature
+        // colonies maintain a single dominant entrance; auxiliary
+        // openings get sealed (Tschinkel 2004 on P. badius;
+        // Mikheyev & Tschinkel 2004). The mechanism in real ants is
+        // task-context — a worker on the established trail is in
+        // forager-traffic mode, not exploration / construction mode.
+        // We approximate by hard-zeroing the dig roll for above-
+        // surface workers within ENTRANCE_NO_DIG_RADIUS columns of
+        // the canonical entrance shaft. Without this, workers
+        // standing on the mound around the entrance enter a
+        // degenerate dig→bail→re-dig loop on the surface SOIL row
+        // (dig opens a 1-cell hole, CARRY ant can't reach a deposit
+        // site, stuck-bail refills the hole, repeat). Stranded /
+        // entombed workers still get full rate — they need to escape.
         const aboveSurface = ay < world.naturalSurface[ax]!;
+        const entranceCx = world.width >> 1;
+        const ENTRANCE_NO_DIG_RADIUS = 20;
+        const nearEntrance = Math.abs(ax - entranceCx) <= ENTRANCE_NO_DIG_RADIUS;
         const proxScale = (entombed || stranded || !aboveSurface) ? 1.0
+          : nearEntrance ? 0
           : Math.max(0.05, Math.min(1.0, colonyMarker));
         if (rng.next() < colony.digProb[i]! * khuongBoost * compactionFactor * digMult * alarmBoost * strandedMult * foundingBoost * carrySaturation * hungerDigMul * proxScale) {
           if (digCell(world, target.x, target.y, rng)) {
