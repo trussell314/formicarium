@@ -77,6 +77,37 @@
       }
       #hud .pop-graph canvas { display: block; width: 340px; height: 56px; }
       #hud canvas.histo { display: inline-block; width: 120px; height: 14px; vertical-align: middle; image-rendering: pixelated; }
+      /* Task-distribution bar — stacked horizontal segments showing
+         worker breakdown by higher-level task (foraging, building,
+         tending, patrolling, resting). Flex-grow on each .task-seg
+         is set per-tick from the snapshot HUD counts. */
+      #hud .task-bar {
+        display: inline-flex;
+        width: 120px;
+        height: 14px;
+        vertical-align: middle;
+        border: 1px solid rgba(216, 200, 168, 0.25);
+        border-radius: 2px;
+        overflow: hidden;
+        background: rgba(0, 0, 0, 0.30);
+      }
+      #hud .task-seg {
+        height: 100%;
+        flex: 0 0 0%;
+        transition: flex-basis 250ms ease;
+      }
+      #hud .task-forage { background: #6abf6a; }   /* green = food */
+      #hud .task-build  { background: #c89060; }   /* tan = soil */
+      #hud .task-tend   { background: #aa7eaa; }   /* purple-grey = corpses */
+      #hud .task-patrol { background: #6ec8d0; }   /* cyan = motion */
+      #hud .task-rest   { background: #5a5a5a; }   /* dim = rest */
+      #hud .task-legend {
+        display: inline-block;
+        margin-left: 6px;
+        font-size: 9px;
+        opacity: 0.75;
+        font-family: ui-monospace, "SFMono-Regular", "Menlo", monospace;
+      }
       #hud .histo-label { display: inline-block; margin-right: 6px; opacity: 0.7; font-size: 10px; }
       #hud.minimized .row:not(.hdr):not(.hdr-mini),
       #hud.minimized .section,

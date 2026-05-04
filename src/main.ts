@@ -118,7 +118,16 @@ function main(): void {
       <div class="row"><span>resources</span><span class="v" id="h-res"></span></div>
       <div class="row"><span>time</span><span class="v" id="h-time"></span></div>
       <div class="row"><span>speed</span><span class="v" id="h-speed"></span></div>
-      <div class="row"><span>states</span><span class="v" id="h-states"></span></div>
+      <div class="row"><span>tasks</span><span class="v">
+        <div class="task-bar" id="h-task-bar" title="task distribution across alive workers">
+          <div class="task-seg task-forage" data-task="forage"></div>
+          <div class="task-seg task-build" data-task="build"></div>
+          <div class="task-seg task-tend" data-task="tend"></div>
+          <div class="task-seg task-patrol" data-task="patrol"></div>
+          <div class="task-seg task-rest" data-task="rest"></div>
+        </div>
+        <span class="task-legend" id="h-task-legend">—</span>
+      </span></div>
       <div class="row"><span>age</span><span class="v"><span class="histo-label" id="h-age-lbl">young → old</span><canvas class="histo" id="h-age-cv" width="120" height="14"></canvas></span></div>
       <div class="row"><span>energy</span><span class="v"><span class="histo-label" id="h-energy-lbl">low → full</span><canvas class="histo" id="h-energy-cv" width="120" height="14"></canvas></span></div>
       <div class="pop-graph" id="h-pop-graph">
@@ -154,7 +163,8 @@ function main(): void {
     res: document.getElementById('h-res')!,
     time: document.getElementById('h-time')!,
     speed: document.getElementById('h-speed')!,
-    states: document.getElementById('h-states')!,
+    taskBar: document.getElementById('h-task-bar')!,
+    taskLegend: document.getElementById('h-task-legend')!,
     sel: document.getElementById('h-sel')!,
     selRow: document.getElementById('h-sel-row')!,
     selSection: document.getElementById('hud-section-sel')!,
@@ -857,17 +867,41 @@ function main(): void {
             ? ' · STARVING'
             : '';
       hudEls.speed.textContent = speedDisplay + flag;
-      // Worker breakdown — letter codes match the diag conventions.
-      // W=wander, C=carry-grain, R=rest, F=forage, Cf=carry-food,
-      // N=necro-carry. Skip zero-valued slots to keep the line dense.
-      const stateParts: string[] = [];
-      if (snap.hud.wander) stateParts.push(`W${snap.hud.wander}`);
-      if (snap.hud.carry) stateParts.push(`C${snap.hud.carry}`);
-      if (snap.hud.rest) stateParts.push(`R${snap.hud.rest}`);
-      if (snap.hud.forage) stateParts.push(`F${snap.hud.forage}`);
-      if (snap.hud.carryFood) stateParts.push(`Cf${snap.hud.carryFood}`);
-      if (snap.hud.necroCarry) stateParts.push(`N${snap.hud.necroCarry}`);
-      hudEls.states.textContent = stateParts.join(' ') || '—';
+      // Task distribution. Higher-level grouping over the low-
+      // level state codes — these names map to ant-biology task
+      // categories (Hölldobler & Wilson 1990 Ch. 9 polyethism)
+      // rather than the state-machine internals:
+      //   foraging = FORAGE + CARRY_FOOD (out for / returning with food)
+      //   building = CARRY                 (hauling spoil to deposit)
+      //   tending  = NECRO_CARRY           (corpse handling)
+      //   patrol   = WANDER                (general exploration)
+      //   resting  = REST
+      // Stacked bar: each segment's flex-grow is its share of
+      // alive workers. 0 → segment hidden via flex-grow:0; segments
+      // with workers grow proportionally.
+      const taskCounts = {
+        forage: (snap.hud.forage ?? 0) + (snap.hud.carryFood ?? 0),
+        build: snap.hud.carry ?? 0,
+        tend: snap.hud.necroCarry ?? 0,
+        patrol: snap.hud.wander ?? 0,
+        rest: snap.hud.rest ?? 0,
+      };
+      const totalTasks = taskCounts.forage + taskCounts.build + taskCounts.tend
+        + taskCounts.patrol + taskCounts.rest;
+      for (const seg of Array.from(hudEls.taskBar.children)) {
+        const el = seg as HTMLElement;
+        const k = el.dataset.task as keyof typeof taskCounts;
+        const share = totalTasks > 0 ? taskCounts[k] / totalTasks : 0;
+        el.style.flex = `0 0 ${(share * 100).toFixed(2)}%`;
+      }
+      const taskLabel = totalTasks > 0
+        ? `for${taskCounts.forage} bld${taskCounts.build} ` +
+          `pat${taskCounts.patrol} tnd${taskCounts.tend} rst${taskCounts.rest}`
+        : '—';
+      hudEls.taskLegend.textContent = taskLabel;
+      hudEls.taskBar.title =
+        `tasks: foraging=${taskCounts.forage}, building=${taskCounts.build}, ` +
+        `tending=${taskCounts.tend}, patrolling=${taskCounts.patrol}, resting=${taskCounts.rest}`;
       drawHisto(ageCtx, snap.hud.ageBuckets);
       drawHisto(energyCtx, snap.hud.energyBuckets);
       // Selected-ant inspector. Hidden when no ant is selected; pins
