@@ -856,15 +856,31 @@ export function step(
   // Grain hardness sweep. Real ant walls reinforce over time —
   // tamping (Tschinkel 2004), saliva / cement secretion (Hölldobler
   // & Wilson 1990 Ch. 7), and time-based geotechnical consolidation.
-  // Each GRAIN cell gains hardness per tick: +1 base for sitting
-  // unmoved, +1 per cardinal solid neighbour (the "tamping by
-  // context" — wedged grains compress against their neighbours
-  // faster than loose pile material). Saturates at 255; pickGrain's
-  // probability is gated by (1 − hardness/255), so old hardened
-  // walls resist re-excavation while loose mound grains stay
-  // reshufflable. Sweep every 50 ticks to amortise; the per-cell
-  // accrual is small so the cadence doesn't materially affect the
-  // saturation timing.
+  // Each below-surface SOIL cell gains hardness per sweep: +1 base
+  // for sitting unmoved, +1 per cardinal solid neighbour (the
+  // "tamping by context" — wedged grains compress against their
+  // neighbours faster than loose pile material). Saturates at 255;
+  // pickGrain's probability is gated by (1 − hardness/255), so old
+  // hardened walls resist re-excavation while loose mound grains
+  // stay reshufflable.
+  //
+  // Sweep every 50 ticks to amortise. Time-scale (DAY_TICKS=8640,
+  // 1 tick ≈ 10 biological-seconds): a fresh lone grain crosses
+  // the loose threshold (64) after ~64 sweeps ≈ 9 biological hours;
+  // a wedged grain (bonus=4) crosses in ~13 sweeps ≈ 1.8 hours;
+  // full saturation (255) takes ~24-35 hours. Matches Tschinkel
+  // observations of wall consolidation on a hours-to-days scale —
+  // the previous +50/+50 rates compressed this to 8-42 minutes,
+  // making fresh deposits behave like rock far too quickly.
+  //
+  // Above-surface cells are EXCLUDED. Surface mound material
+  // shouldn't tamp into permanent wall: real *P. barbatus* mounds
+  // are flat-pancake-shaped because gravity dominates above-ground
+  // and tamping happens predominantly on chamber walls below. Once
+  // above-ground deposits stay loose, settleGrain's existing angle-
+  // of-repose physics (wouldCrossSurface + isEntranceColumnAbove
+  // guards already in place) naturally regulates mound shape and
+  // prevents fence-post-like spires.
   if (world.tick % 50 === 0) {
     const hsW = world.width;
     const hsH = world.height;
@@ -872,20 +888,17 @@ export function step(
       const row = y * hsW;
       for (let x = 0; x < hsW; x++) {
         const idx = row + x;
-        // Only loose solid cells need accrual — pristine wall and
-        // already-consolidated deposits are pegged at 255.
         if (world.cells[idx]! !== CELL_SOIL) continue;
         if (world.grainHardness[idx]! >= 255) continue;
+        // Skip above-ground cells: surface mound stays loose so
+        // angle-of-repose physics keeps the pile flat.
+        if (y < world.naturalSurface[x]!) continue;
         let bonus = 0;
         if (x > 0 && world.cells[idx - 1] === CELL_SOIL) bonus++;
         if (x < hsW - 1 && world.cells[idx + 1] === CELL_SOIL) bonus++;
         if (y > 0 && world.cells[idx - hsW] === CELL_SOIL) bonus++;
         if (y < hsH - 1 && world.cells[idx + hsW] === CELL_SOIL) bonus++;
-        // Per-sweep increment: 50 ticks × (1 base + bonus) ≈ 50–250
-        // hardness per sweep. Saturates in 1–5 sweeps (50–250 ticks)
-        // depending on context. Lone grain on chamber floor (bonus 0)
-        // takes ~5 sweeps; wedged grain (bonus 4) saturates in 1.
-        const inc = 50 * (1 + bonus);
+        const inc = 1 + bonus;
         const cur = world.grainHardness[idx]!;
         world.grainHardness[idx] = Math.min(255, cur + inc);
       }

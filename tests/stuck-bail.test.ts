@@ -43,7 +43,11 @@ describe('stuck-CARRY bail-out', () => {
     for (let x = 0; x < 10; x++) w.naturalSurface[x] = 5;
     // Solid soil except for a 1-cell pocket at (5, 10).
     for (let y = 0; y < 20; y++) {
-      for (let x = 0; x < 10; x++) w.cells[w.index(x, y)] = CELL_SOIL;
+      for (let x = 0; x < 10; x++) {
+        const idx = w.index(x, y);
+        w.cells[idx] = CELL_SOIL;
+        w.grainHardness[idx] = 255;
+      }
     }
     w.cells[w.index(5, 10)] = CELL_AIR;
     w.initialSoilCells = w.countSoil();
@@ -70,7 +74,11 @@ describe('stuck-CARRY bail-out', () => {
     const w = new World(10, 20);
     for (let x = 0; x < 10; x++) w.naturalSurface[x] = 8;
     for (let y = 0; y < 20; y++) {
-      for (let x = 0; x < 10; x++) w.cells[w.index(x, y)] = CELL_SOIL;
+      for (let x = 0; x < 10; x++) {
+        const idx = w.index(x, y);
+        w.cells[idx] = CELL_SOIL;
+        w.grainHardness[idx] = 255;
+      }
     }
     // Pocket at (5, 7) — above the natural surface.
     w.cells[w.index(5, 7)] = CELL_AIR;

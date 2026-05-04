@@ -365,7 +365,12 @@ describe('substrate compaction with depth', () => {
     // one with soil deep below. Spawn 50 ants in each pressed
     // against soil with digProb=1.0. The ratio of dug cells should
     // match the compaction factor at the deeper world's depth.
-    const TICKS = 500;
+    // Bumped from 500 ticks. At 500 the absolute dig counts can
+    // bottom out at 0-1 cells under small perturbations to ant
+    // behaviour, making the ratio assertion brittle. 2000 ticks
+    // accumulates dozens of digs in both runs and lets the
+    // compaction signal dominate the noise.
+    const TICKS = 2000;
     function runAtDepth(yPos: number): number {
       const w = new World(40, yPos + 10);
       for (let x = 0; x < w.width; x++) {
@@ -512,7 +517,13 @@ describe('thigmotaxis: ants escape a chamber whose only opening is at the bottom
     for (let x = 0; x < w.width; x++) w.naturalSurface[x] = 4;
     for (let y = 0; y < w.height; y++) {
       for (let x = 0; x < w.width; x++) {
-        w.cells[w.index(x, y)] = y < 4 ? CELL_AIR : CELL_SOIL;
+        const idx = w.index(x, y);
+        if (y < 4) {
+          w.cells[idx] = CELL_AIR;
+        } else {
+          w.cells[idx] = CELL_SOIL;
+          w.grainHardness[idx] = 255; // consolidated wall
+        }
       }
     }
     // Carve a 5×4 pocket with only its bottom row open into a
