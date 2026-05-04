@@ -133,6 +133,23 @@ export class Colony {
    *  the give-up threshold (~60). */
   readonly stuckTicks: Uint8Array;
 
+  /** Path-integration vector (Müller & Wehner 1988; Wehner 2003;
+   *  Buehlmann et al. 2014 in *Pogonomyrmex*). Continuously
+   *  accumulated (cell-units) displacement from the integration
+   *  origin set when the ant most recently entered FORAGE from
+   *  WANDER. While outbound, the vector grows; while returning as
+   *  CARRY_FOOD it shrinks as displacement back toward origin
+   *  cancels out. The negated vector is the homing cue used by
+   *  CARRY_FOOD ants above the surface — replaces the previous
+   *  hardcoded entrance-column bias and gives each forager her own
+   *  return route based on where she actually came out of the nest.
+   *  Cataglyphis-style PI is the canonical desert/savanna ant
+   *  navigation mechanism and the textbook account for harvester
+   *  ants like P. barbatus, which rely on individual route fidelity
+   *  rather than mass-recruitment trails. */
+  readonly pathDx: Float32Array;
+  readonly pathDy: Float32Array;
+
   constructor(capacity: number) {
     this.capacity = capacity;
     this.posX = new Float32Array(capacity);
@@ -152,6 +169,8 @@ export class Colony {
     this.energy = new Float32Array(capacity);
     this.age = new Int32Array(capacity);
     this.stuckTicks = new Uint8Array(capacity);
+    this.pathDx = new Float32Array(capacity);
+    this.pathDy = new Float32Array(capacity);
   }
 
   /**

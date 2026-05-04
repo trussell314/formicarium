@@ -2119,8 +2119,10 @@ export function step(
         }
         h = wrapAngle(h);
         colony.heading[i] = h;
-        let nx = colony.posX[i]!;
-        let ny = colony.posY[i]!;
+        const oldFx = colony.posX[i]!;
+        const oldFy = colony.posY[i]!;
+        let nx = oldFx;
+        let ny = oldFy;
         for (let s = 0; s < subSteps; s++) {
           const dx = Math.cos(h) * stepLen;
           const dy = Math.sin(h) * stepLen;
@@ -2140,6 +2142,12 @@ export function step(
         }
         colony.posX[i] = nx;
         colony.posY[i] = ny;
+        // Path-integration accumulator: outbound trip grows the
+        // displacement vector. Whatever the ant actually moved this
+        // tick (after wall bounces and stuck cells) is what gets
+        // added — so PI tracks ground truth, not desired motion.
+        colony.pathDx[i]! += nx - oldFx;
+        colony.pathDy[i]! += ny - oldFy;
         // Food contact: any food cell within 2-cell radius triggers
         // a pickup. Discrete grab — no probability, foragers
         // actively collect on contact (Gordon 2010, Ch. 4). The
@@ -2229,12 +2237,30 @@ export function step(
       // hard-coded heading toward the founding-shaft column as the
       // primary above-surface cue. The queen gradient is overlaid as
       // a finer correction once she's close enough that it resolves.
+      // Path-integration homing. The pathDx/pathDy accumulator
+      // is the ant's running displacement from the FORAGE-entry
+      // origin (wherever she was when she rolled the forage
+      // transition — usually a chamber near the entrance, or the
+      // surface above it). The negated vector is the heading that
+      // takes her back. Replaces the previous hardcoded
+      // "head toward column W/2" rule, which assumed every forager
+      // started at the founding shaft and broke down for ants
+      // emerging from satellite tunnels. Above-surface only — the
+      // canonical Cataglyphis result is that PI is a sky-cue
+      // mechanism; below-surface navigation should fall back to
+      // queenField / granaryField gradients which already exist.
       if (iy < world.naturalSurface[ix]!) {
-        const entranceCx = world.width >> 1;
-        const dxToEntrance = entranceCx - ix;
-        if (Math.abs(dxToEntrance) > 1) {
-          const want = dxToEntrance > 0 ? 0 : Math.PI;
-          h += wrapAngle(want - h) * 0.5;
+        const px = colony.pathDx[i]!;
+        const py = colony.pathDy[i]!;
+        const pMag = Math.hypot(px, py);
+        // Only steer by PI when the residual is large enough to be
+        // meaningful — within ~2 cells of origin, geotaxis + queen
+        // gradient handle the final approach. Without this gate,
+        // a near-zero PI vector produces a randomly-aligned bias
+        // from float noise.
+        if (pMag > 2) {
+          const want = Math.atan2(-py, -px);
+          h += wrapAngle(want - h) * 0.6;
         }
         if (queenField) {
           const qGrad = queenField.gradient(ix, iy);
@@ -2284,8 +2310,10 @@ export function step(
       }
       h = wrapAngle(h);
       colony.heading[i] = h;
-      let nx = colony.posX[i]!;
-      let ny = colony.posY[i]!;
+      const oldCfX = colony.posX[i]!;
+      const oldCfY = colony.posY[i]!;
+      let nx = oldCfX;
+      let ny = oldCfY;
       let cfHitSoil = false;
       for (let s = 0; s < subSteps; s++) {
         const dx = Math.cos(h) * stepLen;
@@ -2302,6 +2330,14 @@ export function step(
       }
       colony.posX[i] = nx;
       colony.posY[i] = ny;
+      // Path-integration accumulator: return-trip displacement is
+      // added the same way as outbound, which means moves toward
+      // the origin shrink the vector. When the ant gets back to
+      // her FORAGE-entry origin (pathDx, pathDy ≈ 0) the homing
+      // bias above goes quiet and geotaxis + granary take over for
+      // the deposit gate.
+      colony.pathDx[i]! += nx - oldCfX;
+      colony.pathDy[i]! += ny - oldCfY;
       // Stuck-tick tracking. Asymmetric counter so an ant thrashing
       // between two cells (a "stuck" tick of bouncing into a wall
       // alternated with a "progress" tick of falling back into the
@@ -2743,6 +2779,13 @@ export function step(
       colony.setState(i, STATE_FORAGE);
       world.totalForageStarts++;
       colony.collisionCount[i] = 0;
+      // Reset the path-integration accumulator: this is a new trip,
+      // origin is "here." The accumulator grows as the ant walks
+      // outbound, then shrinks back toward zero on the CARRY_FOOD
+      // return as her displacement undoes itself. See colony.ts for
+      // the citation chain (Müller & Wehner 1988 et seq.).
+      colony.pathDx[i] = 0;
+      colony.pathDy[i] = 0;
       // Heading: if below surface, head UP to start the trip; if
       // already above, keep the current heading and let the food-
       // sniff bias steer the search.
