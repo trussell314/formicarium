@@ -77,6 +77,21 @@ export interface SimParams {
   /** Ticks an ant stays in REST before resuming WANDER. Hard-capped
    *  for deadlock safety — REST always exits cleanly. */
   restDuration: number;
+  /** Where CARRY_FOOD is allowed to deposit. 'granary' (default)
+   *  refuses every below-surface AIR cell unless the granary
+   *  pheromone is above threshold OR the carry has timed out
+   *  (1500-tick bootstrap). 'always' is the legacy "drop in the
+   *  first chamber AIR cell" behaviour — included for A/B testing
+   *  the gate against the colony-starvation failure mode it can
+   *  produce when the bootstrap doesn't fire. */
+  carryFoodDepositGate?: 'granary' | 'always';
+  /** Whether the CARRY_FOOD stuck-bail (60-tick stuck or 4000-tick
+   *  long-carry give-up) counts as a successful forage return for
+   *  Greene & Gordon antennation feedback. Default off matches
+   *  the pre-fix behaviour; turning it on lets the bail path keep
+   *  the foragerReturnRate counter alive when the deposit gate
+   *  refuses every cell. */
+  stuckBailCountsReturn?: boolean;
 }
 
 export const DEFAULT_PARAMS: SimParams = {
@@ -2276,6 +2291,7 @@ export function step(
           [0, 1], [0, -1], [1, 0], [-1, 0],
           [1, 1], [1, -1], [-1, 1], [-1, -1],
         ];
+        let bailedDeposit = false;
         for (const [dxx, dyy] of offsetsCF) {
           const px = newAxF + dxx;
           const py = newAyF + dyy;
@@ -2286,7 +2302,18 @@ export function step(
           world.food[pIdx] = 1;
           world.foodMoves[pIdx] = Math.min(255, cargoMoves + 1);
           world.foodTick[pIdx] = world.tick;
+          bailedDeposit = true;
           break;
+        }
+        // Optional: count the bail-deposit as a successful return for
+        // Greene & Gordon antennation feedback. With the granary gate
+        // refusing every cell, the bootstrap-timeout deposit path
+        // rarely fires in practice — the 60-tick stuck-bail trips
+        // first and the foragerReturnRate counter never advances,
+        // starving the colony's forage feedback. Off by default to
+        // preserve historical behaviour.
+        if (bailedDeposit && (params.stuckBailCountsReturn ?? false)) {
+          world.foragerReturnRate += 1;
         }
         colony.carryMoves[i] = 0;
         colony.stuckTicks[i] = 0;
@@ -2353,11 +2380,15 @@ export function step(
       const localGranary = granaryField ? granaryField.sample(dxIdx, dyIdx) : 0;
       const granaryQualified = localGranary >= GRANARY_DEPOSIT_THRESHOLD;
       const bootstrapElapsed = colony.stateTicks[i]! >= GRANARY_BOOTSTRAP_TICKS;
+      const gateMode = params.carryFoodDepositGate ?? 'granary';
+      const gatePasses = gateMode === 'always'
+        ? true
+        : (granaryQualified || bootstrapElapsed || !granaryField);
       if (
         dyIdx > world.naturalSurface[dxIdx]! &&
         world.cells[dIdx] === CELL_AIR &&
         world.food[dIdx] === 0 &&
-        (granaryQualified || bootstrapElapsed || !granaryField)
+        gatePasses
       ) {
         world.food[dIdx] = 1;
         world.foodMoves[dIdx] = Math.min(255, colony.carryMoves[i]! + 1);
