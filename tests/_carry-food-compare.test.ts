@@ -30,7 +30,7 @@ import { HARVESTER } from '../src/sim/species';
 import { World } from '../src/sim/world';
 
 const TICKS_PER_CHECKPOINT = 50_000;
-const NUM_CHECKPOINTS = 4; // 200k ticks per scenario
+const NUM_CHECKPOINTS = parseInt(process.env.COMPARE_CHECKPOINTS ?? '8', 10); // 400k default
 const LOG_PATH = process.env.COMPARE_LOG ?? '/tmp/carry-food-compare.log';
 function log(line: string): void { fs.appendFileSync(LOG_PATH, line + '\n'); }
 
