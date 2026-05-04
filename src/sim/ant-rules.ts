@@ -44,7 +44,7 @@ import {
 } from './colony';
 import type { ParticleSystem } from './particles';
 import { Pheromone, uploadPheromoneCells } from './pheromone';
-import { digCell, pickGrain, placeGrain, recomputeMound, settle, settleGrain, tryStep } from './physics';
+import { digCell, pickGrain, placeGrain, recomputeMound, settle, tryStep } from './physics';
 import type { RNG } from './rng';
 import { type AntSpecies, HARVESTER } from './species';
 import { CELL_AIR, CELL_SOIL, DAY_TICKS, daylight, isLoose, macroScale, PLANT_MAX_HEIGHT, WALK_SPEED_CAP, World } from './world';
@@ -888,53 +888,6 @@ export function step(
         const inc = 50 * (1 + bonus);
         const cur = world.grainHardness[idx]!;
         world.grainHardness[idx] = Math.min(255, cur + inc);
-      }
-    }
-  }
-
-  // Above-ground spire erosion. A consolidated SOIL cell sitting in
-  // a 1-cell-wide above-ground column with AIR on both lateral sides
-  // is structurally unsupported — real soil pillars without lateral
-  // confinement can't bear their own weight and topple under gravity,
-  // weather, and surface traffic. Without an erosion path, mid-game
-  // runs accumulate fence-post-like spires of fully-tamped spoil
-  // wherever foragers carved gaps in the entrance mound.
-  //
-  // Sweep every 100 ticks: scan above-ground SOIL cells, demote any
-  // unsupported pillar cell back to loose (hardness=0), then call
-  // settleGrain so the now-loose grain cascades sideways into an
-  // angle-of-repose pile. The cascade plus subsequent re-tamping
-  // (next hardness sweep) shifts the spire material into a flatter,
-  // physically plausible mound shape over a few hundred ticks.
-  if (world.tick % 100 === 0) {
-    const ewW = world.width;
-    const eroded: number[] = [];
-    for (let x = 1; x < ewW - 1; x++) {
-      const surf = world.naturalSurface[x]!;
-      for (let y = 0; y < surf; y++) {
-        const idx = y * ewW + x;
-        if (world.cells[idx] !== CELL_SOIL) continue;
-        // Already loose — settleGrain will catch it on its own.
-        if (isLoose(world, idx)) continue;
-        // Both lateral cells AIR ⇒ unsupported pillar.
-        if (world.cells[idx - 1] !== CELL_AIR) continue;
-        if (world.cells[idx + 1] !== CELL_AIR) continue;
-        eroded.push(idx);
-      }
-    }
-    // Demote then settle. Bottom-row-first so a tall pillar collapses
-    // cleanly: each settle vacates the cell above for the next
-    // iteration to cascade into.
-    for (let i = 0; i < eroded.length; i++) {
-      world.grainHardness[eroded[i]!] = 0;
-    }
-    eroded.sort((a, b) => Math.floor(b / ewW) - Math.floor(a / ewW));
-    for (let i = 0; i < eroded.length; i++) {
-      const idx = eroded[i]!;
-      const ey = Math.floor(idx / ewW);
-      const ex = idx - ey * ewW;
-      if (isLoose(world, idx)) {
-        settleGrain(world, ex, ey, rng);
       }
     }
   }
