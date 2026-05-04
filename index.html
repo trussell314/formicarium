@@ -258,6 +258,25 @@
       @media (min-width: 720px) {
         #dials { flex-direction: row; gap: 14px; max-width: 420px; }
       }
+      /* On narrow viewports the dials cluster at top-right would
+         visually overlap the HUD (which expands rightward to fit
+         multi-row stats and easily exceeds the screen-width minus
+         the dials' 220px). Move it to bottom-centre above the
+         ctrls bar instead — same place it lived pre-relocation,
+         where the HUD has no presence. */
+      @media (max-width: 719px) {
+        #dials {
+          top: auto;
+          right: auto;
+          bottom: 92px;
+          left: 50%;
+          transform: translateX(-50%);
+          flex-direction: row;
+          gap: 10px;
+          max-width: calc(100vw - 24px);
+        }
+        #dials label { min-width: 150px; }
+      }
       #dials:hover, #dials:focus-within { opacity: 1; }
       #dials.hidden { opacity: 0; pointer-events: none; }
       #dials label {
