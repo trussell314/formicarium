@@ -25,6 +25,7 @@ export default defineConfig({
       'tests/_morphology-tuning.test.ts',
       'tests/_compaction-tuning.test.ts',
       'tests/_dig-spread-diag.test.ts',
+      'tests/_top-of-tunnel-obs.test.ts',
     ],
   },
 });
