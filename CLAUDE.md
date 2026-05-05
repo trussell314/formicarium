@@ -47,6 +47,18 @@ dependencies (Vite, Vitest, ESLint, Prettier) are fine to add as needed.
 - Rendering code is exempt from unit tests but should be smoke-tested
   by running the dev server
 
+## Long-running tests (master test, monitor test)
+For runs longer than ~20 minutes, do NOT use `Bash run_in_background`:
+the spawned process is a child of the agent's shell and gets killed
+when the Claude Code session is paused. Instead use the wrapper:
+
+    scripts/detached-run.sh <log-path> <command...>
+
+It wraps the command in `setsid nohup ... &` plus `disown`, reparenting
+the child to init so it survives session pause/resume. The wrapper
+prints `PID=… LOG=…` and exits; check completion with
+`kill -0 <PID>` and tail the log to follow progress.
+
 ## Code style
 - TypeScript strict mode, no `any` except at WebGL API boundaries
 - Prefer `readonly` on arrays and function params that aren't mutated
