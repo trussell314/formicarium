@@ -2553,7 +2553,18 @@ export function step(
       const dyIdx = ny | 0;
       const dIdx = dyIdx * world.width + dxIdx;
       const GRANARY_DEPOSIT_THRESHOLD = 0.5;
-      const GRANARY_BOOTSTRAP_TICKS = 1500;
+      // Bootstrap window: how long a CARRY_FOOD ant must have been
+      // carrying before she's allowed to drop without an established
+      // granary. Was 1500 ticks — but with the stateTicks++ fix
+      // wired up, the 250k diagnostic showed CARRY_FOOD trips
+      // completing in ~460 ticks median (stuck-bail at 60-120, food-
+      // sloshing on the surface). 1500 was unreachable; bootstrap
+      // never fired; granaryField never seeded; positive feedback
+      // never started. 200 ticks is enough to descend the shaft and
+      // find an interior AIR cell while still well below the stuck-
+      // bail threshold, so legitimate trips qualify and we don't
+      // false-trigger on accidental floor-cells right at pickup.
+      const GRANARY_BOOTSTRAP_TICKS = 200;
       const localGranary = granaryField ? granaryField.sample(dxIdx, dyIdx) : 0;
       const granaryQualified = localGranary >= GRANARY_DEPOSIT_THRESHOLD;
       const bootstrapElapsed = colony.stateTicks[i]! >= GRANARY_BOOTSTRAP_TICKS;
