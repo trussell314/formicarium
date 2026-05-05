@@ -2168,6 +2168,20 @@ export function step(
         // added — so PI tracks ground truth, not desired motion.
         colony.pathDx[i]! += nx - oldFx;
         colony.pathDy[i]! += ny - oldFy;
+        // Surface-emergence re-anchor. If the ant just crossed from
+        // below-surface to above-surface during this tick, reset her
+        // PI origin to the exit point. The original WANDER→FORAGE
+        // origin is useless when it sits above intact soil — typical
+        // for patrollers who roll FORAGE while already on the surface
+        // and would otherwise return to a non-shaft location. With
+        // the re-anchor, every CARRY_FOOD trip homes to a verified
+        // surface exit (which by construction is above an open shaft).
+        const wasBelowF = oldFy >= world.naturalSurface[oldFx | 0]!;
+        const isAboveF = ny < world.naturalSurface[nx | 0]!;
+        if (wasBelowF && isAboveF) {
+          colony.pathDx[i] = 0;
+          colony.pathDy[i] = 0;
+        }
         // Food contact: any food cell within 2-cell radius triggers
         // a pickup. Discrete grab — no probability, foragers
         // actively collect on contact (Gordon 2010, Ch. 4). The
@@ -2313,14 +2327,17 @@ export function step(
         // entrance — they slow down, antennate the rim, and walk in
         // deliberately (Hölldobler & Wilson 1990, Ch. 7 on entrance
         // behaviour). Modelled as: when above the surface and within
-        // ±3 columns of an open shaft cell, hard-align lateral
+        // ±5 columns of an open shaft cell, hard-align lateral
         // position to the shaft column centre and point heading
         // straight at the shaft entry. The override outranks the
         // soft biases above precisely because those biases by
         // themselves can't solve sub-cell precision problems.
+        // Width: ±5 (was ±3) — empirically, foragers picking up food
+        // a few cells off the shaft column drift back to within ~5
+        // cells via PI but rarely closer; widening lets them snap.
         let nearestShaft = -1;
         let nearestDistSq = 100;
-        for (let dx = -3; dx <= 3; dx++) {
+        for (let dx = -5; dx <= 5; dx++) {
           const col = ix + dx;
           if (col < 0 || col >= world.width) continue;
           const sf = world.naturalSurface[col]!;
