@@ -121,7 +121,16 @@ export function tryStep(
       && world.grainHardness[headIy * world.width + cx]! >= LOOSE_HARDNESS_THRESHOLD;
     if (upConsolidated || headConsolidated) break;
   }
-  return { x, y, hitSoil: false };
+  // Loose-grain destination, no climb path within MAX_CLIMB. The
+  // ant attempted to move and was blocked — conceptually a wall hit
+  // for the agent layer's purposes (thigmotaxis bounce, stuck-tick
+  // accumulation, dig-decision gating). Returning hitSoil=false
+  // here was a freeze bug: a WANDER ant standing on a mound peak
+  // adjacent to a 3+-cell pile silently failed every move attempt,
+  // never triggered thigmotaxis, and stayed locked at the same
+  // float coordinates indefinitely (master diagnostic at t=100k+
+  // showed an ant frozen at (149.0, 35.9) for 50k+ ticks).
+  return { x, y, hitSoil: true };
 }
 
 /**
