@@ -61,7 +61,7 @@ function log(line: string): void { fs.appendFileSync(LOG_PATH, line + '\n'); }
 
 function buildClaustralWorld(seed: number) {
   const rng = new RNG(seed);
-  const W = 400, H = 400;
+  const W = 300, H = 400;
   const world = new World(W, H);
   world.foodCap = 1;
   world.generate(rng, Math.floor(H * 0.10), Math.max(6, Math.floor(W * 0.06)), 7);
@@ -590,7 +590,7 @@ describe('master long-running diagnostic', () => {
   it(`runs ${TOTAL_TICKS.toLocaleString()} ticks with macro/medium/fine triple-tier observation`, () => {
     fs.writeFileSync(LOG_PATH, '');
     log(`══════════════════════════════════════════════════════════════════════════════════════════`);
-    log(` MASTER TEST  seed 0x${SEED.toString(16)}  world 400×400  ticks 0..${TOTAL_TICKS.toLocaleString()}`);
+    log(` MASTER TEST  seed 0x${SEED.toString(16)}  world 300×400  ticks 0..${TOTAL_TICKS.toLocaleString()}`);
     log(`══════════════════════════════════════════════════════════════════════════════════════════`);
     log(`Macro every ${MACRO_INTERVAL.toLocaleString()} ticks (${Math.floor(TOTAL_TICKS / MACRO_INTERVAL)} total).`);
     log(`Around each macro: ${MEDIUM_HALF * 2} medium samples (±${MEDIUM_HALF * MEDIUM_SPACING / 1000}k, ${MEDIUM_SPACING}-tick spacing).`);

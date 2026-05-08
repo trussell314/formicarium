@@ -49,11 +49,17 @@ function readSettings(): Settings {
   // pass `?seed=N` to ignore the save and start fresh, or click the
   // 🎲 reseed button (which also clears the save). On parse error,
   // missing save, or wrong schema, falls through to a fresh sim.
+  // Default seed matches the master-test fixed seed so the live build
+  // and the master diagnostic share a baseline colony — anything you
+  // observe in the browser can be reproduced in the headless harness
+  // by passing MASTER_SEED=0xc1ade57a1. The reseed button switches to
+  // a time-based seed for variety; saved descriptors keep whatever
+  // seed was last in use.
   const saved = readSavedDescriptor();
   return {
-    seed: num('seed', saved?.seed ?? ((Date.now() & 0xffffffff) >>> 0)),
-    width: Math.max(40, num('width', saved?.width ?? 400) | 0),
-    height: Math.max(30, num('height', saved?.height ?? 250) | 0),
+    seed: num('seed', saved?.seed ?? 0xc1ade57a1),
+    width: Math.max(40, num('width', saved?.width ?? 300) | 0),
+    height: Math.max(30, num('height', saved?.height ?? 400) | 0),
     ants: Math.max(0, num('ants', 0) | 0),
     speedMul: Math.max(0.125, num('speed', 8192)),
     screensaver: p.get('screensaver') === '1',
@@ -596,7 +602,12 @@ function main(): void {
     minimap: () => { renderer.showMinimap = !renderer.showMinimap; },
     reseed: () => {
       clearSavedSnapshot();
-      settings.seed = (settings.seed * 16807 + 1) >>> 0;
+      // Time-based seed on explicit reseed: every click should give
+      // a genuinely different colony, not a deterministic hop from
+      // the current seed. The default seed at first load is the
+      // shared master-test baseline; reseed is the user's opt-out
+      // from that baseline into novel territory.
+      settings.seed = (Date.now() & 0xffffffff) >>> 0;
       send({ kind: 'reseed', settings: { ...settings } });
       extinct = false;
     },
