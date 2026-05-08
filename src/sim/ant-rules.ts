@@ -3127,7 +3127,32 @@ export function step(
         // (young) get the strongest pull toward the brood pile,
         // foragers (old) get a much weaker one because they're
         // staging near the entrance to leave.
-        h += wrapAngle(Math.PI / 2 - h) * species.belowGeotaxis * geoMult;
+        //
+        // Crowding-driven lateral dispersal. When many workers cluster
+        // at the same depth (typically the floor of an excavated
+        // chamber), weaken the downward geotaxis so random-walk +
+        // turn noise spreads them laterally. The dispersed workers
+        // contact chamber walls and dig them via the normal Sudd
+        // contact roll — producing chambers that widen as they fill.
+        // Without this, geotaxis-down piles every worker at the
+        // deepest cell, creating the runaway-narrow-shaft attractor
+        // user reported visually (a single pencil-line shaft 100s of
+        // cells deep with no lateral galleries). Threshold of 4
+        // workers in a 7×7 box matches the typical chamber occupancy
+        // before walls become the productive dig surface.
+        let crowdMult = 1.0;
+        let nearbyWorkers = 0;
+        for (let j = 0; j < colony.count; j++) {
+          if (j === i) continue;
+          const sj = colony.state[j]!;
+          if (sj === STATE_DEAD || sj === STATE_EGG || sj === STATE_LARVA
+              || sj === 10 /* PUPA */ || sj === STATE_QUEEN) continue;
+          const ndx = (colony.posX[j]! | 0) - ix;
+          const ndy = (colony.posY[j]! | 0) - iy;
+          if (Math.abs(ndx) <= 3 && Math.abs(ndy) <= 3) nearbyWorkers++;
+        }
+        if (nearbyWorkers >= 4) crowdMult = 0.3;
+        h += wrapAngle(Math.PI / 2 - h) * species.belowGeotaxis * geoMult * crowdMult;
       }
     }
     h = wrapAngle(h);
@@ -3577,7 +3602,35 @@ export function step(
         && world.cells[ay * wW3 + (ax - 1)]! === CELL_AIR;
       const rightIsAir = ax < wW3 - 1
         && world.cells[ay * wW3 + (ax + 1)]! === CELL_AIR;
-      const atChamberFloor = downIsSoil && (leftIsAir || rightIsAir);
+      // Force-dig-down rule. Workers standing on a chamber floor
+      // (soil below + at least one lateral AIR) preferentially dig
+      // the cell below them instead of letting heading pick a
+      // (typically lateral) target — without this gate chambers
+      // sprawl shallow instead of forming the species-typical
+      // narrow shaft.
+      //
+      // Crowding relaxation. When the chamber is crowded (≥4 workers
+      // within 7 cells), DEMAND that both laterals be air for the
+      // force-down rule. A worker at the chamber edge (one lateral
+      // wall) is then allowed to fall through to adjacentSoil and
+      // dig the wall instead — the lateral expansion mechanism that
+      // produces stacked chambers in real Pogonomyrmex nests rather
+      // than the deep pencil shaft the no-crowding rule produces in
+      // isolation. Sparse chambers still deepen as before.
+      let nearbyDigWorkers = 0;
+      for (let j = 0; j < colony.count; j++) {
+        if (j === i) continue;
+        const sj = colony.state[j]!;
+        if (sj === STATE_DEAD || sj === STATE_EGG || sj === STATE_LARVA
+            || sj === 10 /* PUPA */ || sj === STATE_QUEEN) continue;
+        const ndx = (colony.posX[j]! | 0) - ax;
+        const ndy = (colony.posY[j]! | 0) - ay;
+        if (Math.abs(ndx) <= 3 && Math.abs(ndy) <= 3) nearbyDigWorkers++;
+      }
+      const isCrowded = nearbyDigWorkers >= 4;
+      const atChamberFloor = isCrowded
+        ? (downIsSoil && leftIsAir && rightIsAir)
+        : (downIsSoil && (leftIsAir || rightIsAir));
       const downSoil = atChamberFloor ? { x: ax, y: ay + 1 } : null;
       const target = stranded && neighbourSoil < 2
         ? { x: ax, y: ay + 1 }

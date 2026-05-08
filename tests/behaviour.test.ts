@@ -404,20 +404,24 @@ describe('substrate compaction with depth', () => {
       }
       return before - w.countSoil();
     }
-    const dugShallow = runAtDepth(6);   // depth 1 cell — near surface, factor ≈ 1.0
-    const dugDeep = runAtDepth(300);    // depth ~295 cells — factor ≈ 0.4 (floor)
-    // Compaction at depth ≈ 0.4 reduces the dig probability, but the
-    // resulting cell count over 500 ticks also depends on chamber
-    // saturation timing (a faster chamber fills with ants and stops
-    // accumulating contacts) — and on whether ants escape the pocket
-    // entirely. Shallow ants can dig through the surface row and
-    // climb to open ground (limited subsequent dig surface). Deep
-    // ants are pocket-bound; every neighbour is SOIL, every tick a
-    // dig opportunity. The two effects can flip the cumulative-cell
-    // ratio in either direction. Use a very generous bound: deep
-    // digs must not be MORE than 5× shallow. Strict per-tick
-    // compaction is verified at the implementation-level tests
-    // below.
+    // Both pockets must be deeply embedded so neither escapes via
+    // surface dig — the crowding-driven lateral expansion in
+    // ant-rules.ts (workers spread to walls when the chamber gets
+    // crowded, then dig walls) opens 1-cell pockets sideways
+    // quickly. At a shallow yPos, lateral dig connects to the
+    // surface row and ants disperse to open ground where the
+    // enclosure gate blocks further digging — making the shallow
+    // pocket a meaningless comparison if it can escape but the deep
+    // one cannot. Run shallow at yPos=30 (25 cells below the
+    // surface = factor ≈ 0.92) and deep at yPos=300 (factor ≈ 0.4).
+    const dugShallow = runAtDepth(30);
+    const dugDeep = runAtDepth(300);
+    // Compaction at depth ≈ 0.4 reduces the per-tick dig probability,
+    // but cumulative cell counts depend on chamber-saturation and
+    // lateral-dispersion dynamics that can flip the ratio either
+    // way. Generous bound: deep cannot exceed 5× shallow. Strict
+    // per-tick compaction is verified at the implementation-level
+    // tests below.
     expect(dugDeep).toBeLessThanOrEqual(dugShallow * 5);
   });
 });

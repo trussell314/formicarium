@@ -394,16 +394,44 @@ export class World {
     chamberHalfWidth: number,
     chamberDepth: number,
   ): void {
-    const phase = rng.range(0, Math.PI * 2);
-    const amp1 = Math.max(1, Math.floor(this.height * 0.015));
-    const amp2 = Math.max(1, Math.floor(amp1 * 0.5));
+    // 4-octave sum-of-sines surface noise. Each octave picks its own
+    // frequency, phase, and amplitude weight from the RNG so the
+    // wavelength PATTERN — not just the phase — varies with the seed.
+    // Earlier versions used two hardcoded frequencies (0.07 and 0.21)
+    // with only the phase seeded; every seed produced the same hill
+    // wavelengths shifted, which read as "the same hills again."
+    // Octave structure: f_k ∈ [base/2, 2·base] · 2^k, base ≈ 0.05;
+    // amplitude weight 1/(k+1) so low-frequency hills dominate and
+    // higher-frequency detail roughens the surface without dwarfing
+    // the macro shape.
+    const octaves = 4;
+    const baseFreq = 0.05;
+    const freqs: number[] = [];
+    const phases: number[] = [];
+    const weights: number[] = [];
+    let weightSum = 0;
+    for (let k = 0; k < octaves; k++) {
+      // Random multiplier in [0.5, 2.0] gives ~2 octave spread;
+      // multiplied by 2^k so successive octaves are higher-frequency.
+      const fJitter = rng.range(0.5, 2.0);
+      freqs.push(baseFreq * Math.pow(2, k) * fJitter);
+      phases.push(rng.range(0, Math.PI * 2));
+      const w = 1 / (k + 1);
+      weights.push(w);
+      weightSum += w;
+    }
+    const ampTotal = Math.max(2, Math.floor(this.height * 0.025));
 
     let soil = 0;
     for (let x = 0; x < this.width; x++) {
-      const wave =
-        Math.round(Math.sin(x * 0.07 + phase) * amp1) +
-        Math.round(Math.sin(x * 0.21 + phase * 1.7) * amp2);
-      const sy = Math.max(2, Math.min(this.height - 4, surfaceRow + wave));
+      let wave = 0;
+      for (let k = 0; k < octaves; k++) {
+        wave += Math.sin(x * freqs[k]! + phases[k]!) * weights[k]!;
+      }
+      // Scale by ampTotal/weightSum so the peak-to-peak roughly
+      // tracks ampTotal regardless of how the random weights summed.
+      const sy = Math.max(2, Math.min(this.height - 4,
+        surfaceRow + Math.round((wave / weightSum) * ampTotal)));
       this.naturalSurface[x] = sy;
       for (let y = 0; y < this.height; y++) {
         const idx = y * this.width + x;
