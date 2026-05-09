@@ -1859,6 +1859,7 @@ export function step(
           [0, 1], [0, -1], [1, 0], [-1, 0],
           [1, 1], [1, -1], [-1, 1], [-1, -1],
         ];
+        let placed = false;
         for (const [dx, dy] of offsets) {
           const nx = ix + dx;
           const ny = iy + dy;
@@ -1873,8 +1874,15 @@ export function step(
           } else {
             placeGrain(world, nx, ny, rng, cargoMoves + 1);
           }
+          placed = true;
           break;
         }
+        // Cargo couldn't be dropped (entombed: all 8 neighbours
+        // non-AIR or food-occupied). Count grain cargo as wearLost
+        // so the world.initialSoilCells = countSoil + carriers
+        // + wearLost invariant continues to hold; food cargo just
+        // leaks (food has its own tracking, no conservation gate).
+        if (!placed && !isFood) world.wearLost++;
       }
       colony.carryMoves[i] = 0;
       colony.setState(i, STATE_DEAD);
@@ -1897,11 +1905,12 @@ export function step(
     if (colony.energy[i]! <= 0) {
       colony.energy[i] = 0;
       // Drop any carried cargo before becoming a corpse — otherwise
-      // each dead carrier permanently sinks 1 grain or 1 seed and
-      // grain conservation breaks. We try the 4 cardinal neighbours
-      // (then diagonals as a fallback) for an empty AIR cell to drop
-      // into. If absolutely nothing is reachable the cargo is lost,
-      // but that's the genuine entombment edge case.
+      // each dead carrier permanently sinks 1 grain or 1 seed. We
+      // try the 4 cardinal neighbours (then diagonals as a fallback)
+      // for an empty AIR cell to drop into. If absolutely nothing is
+      // reachable (genuine entombment) the grain is counted as
+      // wearLost so the conservation invariant initialSoilCells =
+      // countSoil + carriers + wearLost continues to hold.
       const wW = world.width;
       if (stateIn === STATE_CARRY || stateIn === STATE_CARRY_FOOD) {
         const cargoMoves = colony.carryMoves[i]!;
@@ -1910,6 +1919,7 @@ export function step(
           [0, 1], [0, -1], [1, 0], [-1, 0],
           [1, 1], [1, -1], [-1, 1], [-1, -1],
         ];
+        let placed = false;
         for (const [dx, dy] of offsets) {
           const nx = ix + dx;
           const ny = iy + dy;
@@ -1924,8 +1934,10 @@ export function step(
           } else {
             placeGrain(world, nx, ny, rng, cargoMoves + 1);
           }
+          placed = true;
           break;
         }
+        if (!placed && !isFood) world.wearLost++;
       }
       colony.carryMoves[i] = 0;
       colony.setState(i, STATE_DEAD);
@@ -3240,6 +3252,7 @@ export function step(
           [0, 1], [0, -1], [1, 0], [-1, 0],
           [1, 1], [1, -1], [-1, 1], [-1, -1],
         ];
+        let placedC = false;
         for (const [dxx, dyy] of offsetsC) {
           const px = newAxC + dxx;
           const py = newAyC + dyy;
@@ -3247,8 +3260,14 @@ export function step(
           const pIdx = py * wW + px;
           if (world.cells[pIdx] !== CELL_AIR) continue;
           // placeGrain handles the grain-cascade settle if needed.
-          if (placeGrain(world, px, py, rng, cargoMoves + 1) !== null) break;
+          if (placeGrain(world, px, py, rng, cargoMoves + 1) !== null) {
+            placedC = true;
+            break;
+          }
         }
+        // Entombed CARRY worker can't deposit anywhere — count the
+        // grain as wearLost so the conservation invariant holds.
+        if (!placedC) world.wearLost++;
         colony.carryMoves[i] = 0;
         colony.stuckTicks[i] = 0;
         colony.setState(i, hungry ? STATE_FORAGE : STATE_WANDER);
@@ -3577,7 +3596,22 @@ export function step(
         && world.cells[ay * wW3 + (ax - 1)]! === CELL_AIR;
       const rightIsAir = ax < wW3 - 1
         && world.cells[ay * wW3 + (ax + 1)]! === CELL_AIR;
-      const atChamberFloor = downIsSoil && (leftIsAir || rightIsAir);
+      // Force-dig-down at chamber FLOOR. Tightened to require BOTH
+      // laterals AIR (true mid-chamber) — at chamber EDGE positions
+      // (one lateral AIR + one lateral SOIL = the wall side) the
+      // worker falls through to adjacentSoil and digs whichever
+      // soil neighbour her heading aligns with. With heading mostly
+      // downward (geotaxis) she still typically picks the floor,
+      // but random walk + turn noise sometimes points lateral, and
+      // those rare lateral digs accumulate over time to widen
+      // chambers. The earlier rule (downIsSoil && (leftIsAir ||
+      // rightIsAir)) prevented all chamber widening by forcing the
+      // floor target at every edge position; the colony just
+      // produced a deep pencil shaft. The change requires the
+      // dead-ant cargo accounting (just above) to be honest about
+      // entombed cargo, otherwise grain conservation breaks under
+      // the higher dig pressure.
+      const atChamberFloor = downIsSoil && leftIsAir && rightIsAir;
       const downSoil = atChamberFloor ? { x: ax, y: ay + 1 } : null;
       const target = stranded && neighbourSoil < 2
         ? { x: ax, y: ay + 1 }
