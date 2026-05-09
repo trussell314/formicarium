@@ -785,10 +785,20 @@ export class Renderer {
       // 0.5 = noon, 0.75 = sunset. See sim/world.ts daylight().
       const phase = (tick % DAY_TICKS) / DAY_TICKS;
 
-      // Stars. Visible while the sun is below the horizon (phase ∉
-      // [0.25, 0.75]). Fade smoothly through the dawn/dusk shoulder
-      // so they don't pop. starAlpha = 1 at full night, 0 at full day.
-      const starAlpha = Math.max(0, 1 - daylight * 1.4);
+      // Stars. Gate on how far below the horizon the sun is, not on
+      // the (positive-only) daylight signal. Sun altitude proxy:
+      // -cos(2π·phase), in [-1, +1] where -1 = solar midnight, 0 =
+      // sunrise/sunset, +1 = noon. Stars stay invisible until the
+      // sun is meaningfully below the horizon (≈ nautical twilight,
+      // sunAlt ≤ -0.2) and reach full brightness deeper in the
+      // night (sunAlt ≤ -0.6, roughly astronomical twilight). The
+      // earlier formula `1 - daylight·1.4` started fading stars in
+      // at phase ≈ 0.65 — well before sunset — because it used the
+      // daylight ramp on the way down, not the actual horizon
+      // crossing.
+      const sunAlt = -Math.cos(phase * Math.PI * 2);
+      const nightDepth = Math.max(0, -sunAlt);
+      const starAlpha = Math.min(1, Math.max(0, (nightDepth - 0.2) / 0.4));
       if (starAlpha > 0.01) {
         const tw = ow;
         const th = skyHeightPx;
