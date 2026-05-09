@@ -495,6 +495,35 @@ export class World {
     void chamberHalfWidth;
     void chamberDepth;
 
+    // Pre-carved chamber stubs along the central shaft path. Real
+    // Pogonomyrmex nests show stacked chambers at characteristic
+    // depths (Tschinkel 2004 nest casts — ~30 cm intervals, several
+    // chambers connected by short vertical shafts). Without
+    // pre-carved hints, the dig logic tends to produce a single
+    // deep pencil shaft because workers congregate at the deepest
+    // cell and the force-down rule keeps deepening it. Pre-carving
+    // tiny 3-wide × 1-tall pockets at fixed chamber depths gives
+    // the colony a "blueprint": workers reaching a stub find it's
+    // already AIR (no need to dig), can spread laterally, and
+    // existing pheromone-driven recruitment (Khuong et al. 2016
+    // build-field accumulation) widens the stubs into real
+    // chambers via normal dig events nearby. Doesn't touch
+    // cascade physics, so the embed invariant holds.
+    const CHAMBER_INTERVAL = 25;
+    const CHAMBER_HALF = 1; // 3-wide stub (cx-1, cx, cx+1)
+    const firstStubY = pocketBot + CHAMBER_INTERVAL;
+    for (let stubY = firstStubY; stubY < this.height - 4; stubY += CHAMBER_INTERVAL) {
+      const sx0 = Math.max(0, cx - CHAMBER_HALF);
+      const sx1 = Math.min(this.width - 1, cx + CHAMBER_HALF);
+      for (let x = sx0; x <= sx1; x++) {
+        const idx = stubY * this.width + x;
+        if (this.cells[idx] === CELL_SOIL) {
+          this.cells[idx] = CELL_AIR;
+          soil--;
+        }
+      }
+    }
+
     for (let i = 0; i < this.soilNoise.length; i++) {
       this.soilNoise[i] = (rng.next() * 256) | 0;
     }
