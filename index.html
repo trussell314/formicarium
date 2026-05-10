@@ -178,9 +178,8 @@
          Each button mirrors a keyboard binding 1:1. Stays out of the
          way (small, translucent) until tapped. */
       #ctrls {
-        position: fixed; left: 50%; bottom: 12px;
-        transform: translateX(-50%);
-        display: flex; flex-wrap: wrap; gap: 6px;
+        position: fixed; left: 8px; bottom: 8px;
+        display: flex; flex-direction: column; gap: 6px;
         padding: 8px;
         background: rgba(10, 6, 6, 0.62);
         border: 1px solid rgba(216, 200, 168, 0.18);
@@ -188,7 +187,8 @@
         opacity: 0.55;
         transition: opacity 200ms ease;
         z-index: 10;
-        max-width: calc(100vw - 24px);
+        max-height: calc(100vh - 16px);
+        overflow-y: auto;
       }
       #ctrls:hover, #ctrls:focus-within { opacity: 1; }
       #ctrls.hidden { opacity: 0; pointer-events: none; }
@@ -200,14 +200,15 @@
         color: #f0e2c4;
         font: 500 12px ui-sans-serif, system-ui, sans-serif;
         padding: 6px 10px;
-        min-height: 36px;
+        min-height: 32px;
         line-height: 1;
         cursor: pointer;
         touch-action: manipulation;
         -webkit-tap-highlight-color: transparent;
-        display: inline-flex;
+        display: flex;
         align-items: center;
-        gap: 8px;
+        justify-content: space-between;
+        gap: 12px;
       }
       #ctrls button:active { background: rgba(216, 200, 168, 0.25); }
       #ctrls button .lbl {
@@ -228,12 +229,6 @@
         color: #d8c8a8;
       }
       #ctrls button:hover .key { color: #f0e2c4; }
-      /* Mobile: stack key under label so each button stays tappable
-         without going extra-wide. */
-      @media (max-width: 720px) {
-        #ctrls button { flex-direction: column; gap: 2px; padding: 6px 8px; }
-        #ctrls button .key { font-size: 9px; padding: 2px 4px; }
-      }
       /* Dials cluster — sits above the button row. Two sliders, each
          clearly labeled, for the two orthogonal time knobs:
            SPEED       — wall-clock ticks/sec (CPU dimension)

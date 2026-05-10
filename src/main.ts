@@ -655,8 +655,14 @@ function main(): void {
   if (ctrls && settings.screensaver) ctrls.style.display = 'none';
   if (ctrls) {
     ctrls.addEventListener('click', (e) => {
-      const t = e.target as HTMLElement;
-      const act = t?.dataset?.act;
+      // Walk up from the click target to the button itself. Without
+      // closest(), clicking the inner <span class="lbl"> or
+      // <span class="key"> registered on the span (which has no
+      // data-act) and the click silently did nothing — keyboard
+      // shortcuts went through the document handler so they kept
+      // working, masking the bug.
+      const btn = (e.target as HTMLElement | null)?.closest<HTMLElement>('[data-act]');
+      const act = btn?.dataset?.act;
       if (act && actions[act]) actions[act]!();
     });
   }
