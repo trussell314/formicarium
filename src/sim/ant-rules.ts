@@ -3296,8 +3296,18 @@ export function step(
         colony.heading[i] = rng.range(0, Math.PI * 2);
         continue;
       }
-    } else if (stateIn === STATE_WANDER && iy < world.naturalSurface[ix]!) {
-      // Above-surface WANDER stuck tracking. Without this,
+    } else if (stateIn === STATE_WANDER) {
+      // WANDER stuck tracking (mech #1 + #3). Originally above-
+      // surface only — extended in mech #3 to also catch below-
+      // surface freezes (worker oscillating at exact float coords
+      // inside a chamber for thousands of ticks, which the master
+      // diagnostic surfaced as the dominant remaining freeze case
+      // after mech #1+2 landed). Below-surface workers legitimately
+      // bounce off chamber walls during digging, but the asymmetric
+      // counter (+2 stuck, -1 progress) only fires after sustained
+      // wall-only ticks, which a healthy digging worker doesn't
+      // produce. Threshold 60 matches the existing CARRY/CARRY_FOOD
+      // bail rate.
       // surface workers can get caught in a bias attractor —
       // geotaxis-down + entrance-pull re-align the heading to the
       // same blocked direction every tick after thigmotaxis bounces,
