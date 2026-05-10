@@ -3092,7 +3092,21 @@ export function step(
         // pulls every CARRY worker straight back to the existing
         // peak at the entrance, making a single-column spire.
         const entranceCx = world.width >> 1;
-        const outward = ix < entranceCx ? Math.PI : 0;
+        // Direction is the sign of the worker's lateral offset from
+        // the entrance column. A worker exiting straight up the
+        // 1-cell-wide shaft sits at ix === entranceCx exactly; the
+        // earlier `ix < entranceCx ? π : 0` rule fell to the east
+        // (`0`) for every such worker, dumping all spoil on the east
+        // side and leaving the west side perfectly flat (user
+        // observation). Split that midline ambiguity by ant index
+        // (i & 1) so half the population biases east, half west —
+        // symmetric on average, no per-tick RNG cost.
+        const dxFromEntrance = ix - entranceCx;
+        const outward = dxFromEntrance > 0
+          ? 0
+          : dxFromEntrance < 0
+            ? Math.PI
+            : ((i & 1) === 0 ? 0 : Math.PI);
         h += wrapAngle(outward - h) * 0.20;
       }
       // Breach diversion. A CARRY ant carrying spoil that detects a
