@@ -3288,6 +3288,33 @@ export function step(
         colony.heading[i] = rng.range(0, Math.PI * 2);
         continue;
       }
+    } else if (stateIn === STATE_WANDER && iy < world.naturalSurface[ix]!) {
+      // Above-surface WANDER stuck tracking. Without this,
+      // surface workers can get caught in a bias attractor —
+      // geotaxis-down + entrance-pull re-align the heading to the
+      // same blocked direction every tick after thigmotaxis bounces,
+      // and the ant oscillates in place ("dancing on the mound"
+      // failure mode the user reported). Real ants exhibit task-
+      // switching after persistent failure (Gordon 1989, Dynamics of
+      // task switching in harvester ants). Mirror the CARRY stuck
+      // counter: +2 on hit-soil with no cell-level position change,
+      // -1 on progress, threshold 60. On threshold fire, scrap the
+      // heading to a uniform-random direction so the ant walks at
+      // least a cell-time in a different direction before any bias
+      // re-converges her path. Resets the counter to avoid
+      // immediate re-trigger.
+      const newAxW = nx | 0;
+      const newAyW = ny | 0;
+      const stuckThisTickW = hitSoil && newAxW === ix && newAyW === iy;
+      if (stuckThisTickW) {
+        colony.stuckTicks[i] = Math.min(255, colony.stuckTicks[i]! + 2);
+      } else if (colony.stuckTicks[i]! > 0) {
+        colony.stuckTicks[i]!--;
+      }
+      if (colony.stuckTicks[i]! >= 60) {
+        colony.heading[i] = rng.range(0, Math.PI * 2);
+        colony.stuckTicks[i] = 0;
+      }
     } else {
       colony.stuckTicks[i] = 0;
     }
