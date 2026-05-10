@@ -274,7 +274,7 @@ export class Renderer {
    *  the 'p' key in the live UI. Two fields are blended with
    *  translucent unused colours so they don't conflict with the
    *  brown/green/tan terrain palette: cyan = dig, magenta = build. */
-  showPheromones = false;
+  showPheromones = true;
   /** Last pheromone payload received, cached so throttled frames
    *  (the main render loop only requests fresh pheromone data
    *  every Nth frame to keep the snapshot transfer cost down) can

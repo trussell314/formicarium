@@ -145,7 +145,7 @@ function main(): void {
       <div class="row sel" id="h-sel-row"><span>info</span><span class="v" id="h-sel"></span></div>
     </div>
     <div class="row dim"><span>render</span><span class="v" id="h-fps"></span></div>
-    <div class="legend" id="h-legend" style="display:none">
+    <div class="legend" id="h-legend">
       <div><span class="swatch" style="background:#00dcdc"></span><span id="leg-dig">dig</span></div>
       <div><span class="swatch" style="background:#dc00dc"></span><span id="leg-build">build</span></div>
       <div><span class="swatch" style="background:#f0dc3c"></span><span id="leg-trail">trail</span></div>
