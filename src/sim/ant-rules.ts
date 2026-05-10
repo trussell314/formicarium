@@ -2006,7 +2006,7 @@ export function step(
         stateIn = STATE_WANDER;
       } else {
         // Random-walk step. Move-only; no stigmergy bias.
-        h += rng.gauss() * colony.turnNoise[i]!;
+        h += rng.gauss() * colony.turnNoise[i]! * (1 + colony.stuckTicks[i]! * 0.05);
         colony.heading[i] = wrapAngle(h);
         let nx = colony.posX[i]!;
         let ny = colony.posY[i]!;
@@ -2078,7 +2078,7 @@ export function step(
         // does the rest from below the surface).
         colony.heading[i] = Math.PI / 2 + rng.range(-0.3, 0.3);
       } else {
-        h += rng.gauss() * colony.turnNoise[i]!;
+        h += rng.gauss() * colony.turnNoise[i]! * (1 + colony.stuckTicks[i]! * 0.05);
         // Below natural surface: hard upward bias toward exit. Above
         // surface: pure random walk on the open ground, OR — if a
         // foraging trail pheromone gradient is available — bias up
@@ -2270,7 +2270,7 @@ export function step(
     // without any explicit chamber-allocation rule.
     if (stateIn === STATE_CARRY_FOOD) {
       colony.stateTicks[i]!++;
-      h += rng.gauss() * colony.turnNoise[i]!;
+      h += rng.gauss() * colony.turnNoise[i]! * (1 + colony.stuckTicks[i]! * 0.05);
       // Below or above surface, bias DOWN (positive geotaxis).
       h += wrapAngle(Math.PI / 2 - h) * geotaxis;
       // Above-surface homing. A Cf ant returning across the surface
@@ -2622,7 +2622,7 @@ export function step(
     //   the leaf-cutting ant Atta colombica. Behav Ecol. 13: 224–231.
     if (stateIn === STATE_NECRO_CARRY) {
       colony.stateTicks[i]!++;
-      h += rng.gauss() * colony.turnNoise[i]!;
+      h += rng.gauss() * colony.turnNoise[i]! * (1 + colony.stuckTicks[i]! * 0.05);
       // Below or at surface: hard upward bias toward exit. Above
       // surface: pure random walk (drift the body away from the
       // entrance). Mirror of the FORAGE outbound geometry.
@@ -2925,7 +2925,15 @@ export function step(
     }
 
     // (1) Correlated random walk — Gaussian heading perturbation.
-    h += rng.gauss() * colony.turnNoise[i]!;
+    // Klinokinesis (Camhi 1984): real ants increase their turn rate
+    // when encountering obstacles. Multiplied by 1 + stuckTicks·0.05
+    // so a fully-stuck ant (stuckTicks ≈ 60) gets ~4× the normal
+    // turn-noise amplitude, which scrambles her heading enough to
+    // escape the bias attractor before mech #1's threshold-fire
+    // kicks in. The same multiplier is applied at every other
+    // turn-noise site in the per-state movement loops (FORAGE,
+    // CARRY, CARRY_FOOD, NECRO_CARRY).
+    h += rng.gauss() * colony.turnNoise[i]! * (1 + colony.stuckTicks[i]! * 0.05);
 
     // (2) Stigmergy — bias toward the gradient of the field for our
     // current state. WANDER follows dig pheromone (recruit to active
