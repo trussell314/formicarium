@@ -3332,6 +3332,17 @@ export function step(
       if (colony.stuckTicks[i]! >= 60) {
         colony.heading[i] = rng.range(0, Math.PI * 2);
         colony.stuckTicks[i] = 0;
+        // Mech #4: self-deposit noEntryField at her cell so future
+        // visitors (her or another ant) are biased AWAY from this
+        // dead-end. Real ants in *Pheidole* / *Lasius* deposit a
+        // negative recruitment cue at locations they fail at
+        // (Robinson, Jackson, Holcombe, Ratnieks 2005, "'No entry'
+        // signal in ant foraging," Nature 438:442). The existing
+        // noEntryField already biases WANDER ants AWAY from its
+        // gradient (line 3068); piggyback on that infrastructure.
+        // Strength 0.3 saturates the local-gradient bias quickly
+        // without polluting the broader nest.
+        if (noEntryField) noEntryField.deposit(ix, iy, 0.3);
       }
     } else {
       colony.stuckTicks[i] = 0;
