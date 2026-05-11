@@ -857,9 +857,12 @@ export function step(
   // (Hölldobler & Wilson 1990 Ch. 7). Without decay, corpses
   // accumulate immortal markers at the midden forever. Sweep every
   // 100 ticks (cheap O(W·H/100)) and clear corpses older than the
-  // lifetime. 30 sim-days at compression=100 (DAY_TICKS=8640) ≈
-  // 260,000 ticks, within real-biology range for surface decay.
-  const CORPSE_LIFETIME_TICKS = 260_000;
+  // lifetime. 30 visible diel-cycles at DAY_TICKS=43200 ≈ 1.3M
+  // ticks — was 260k under the old DAY_TICKS=8640 (5× faster);
+  // scaled with the DIEL_COMPRESSION decoupling so corpses still
+  // persist for "weeks of watched days" rather than disappearing
+  // after 6.
+  const CORPSE_LIFETIME_TICKS = 1_300_000;
   if (world.tick % 100 === 0) {
     const wW = world.width;
     const wH = world.height;
@@ -886,10 +889,11 @@ export function step(
   // seeds in dry chambers last for years (Tschinkel 1999, P. badius
   // granaries). Surface = at or above the column's natural-surface
   // row. Same 100-tick sweep cadence as corpses keeps the cost
-  // negligible. Lifetime tuned shorter than corpses (140k vs 260k
-  // ticks ≈ 16 vs 30 sim-days at compression 100) since uncovered
-  // seeds in the open weather faster than midden corpses do.
-  const FOOD_LIFETIME_TICKS = 140_000;
+  // negligible. Lifetime tuned shorter than corpses (700k vs 1.3M
+  // ticks ≈ 16 vs 30 visible diel-cycles at DAY_TICKS=43200) since
+  // uncovered seeds in the open weather faster than midden corpses
+  // do. Scaled 5× with the DIEL_COMPRESSION decoupling.
+  const FOOD_LIFETIME_TICKS = 700_000;
   if (world.tick % 100 === 0) {
     const wW = world.width;
     for (let x = 0; x < wW; x++) {
@@ -935,8 +939,9 @@ export function step(
   // hardened walls resist re-excavation while loose mound grains
   // stay reshufflable.
   //
-  // Sweep every 50 ticks to amortise. Time-scale (DAY_TICKS=8640,
-  // 1 tick ≈ 10 biological-seconds): a fresh lone grain crosses
+  // Sweep every 50 ticks to amortise. Time-scale (macro clock:
+  // 1 tick ≈ 10 biological-seconds, independent of DAY_TICKS):
+  // a fresh lone grain crosses
   // the loose threshold (64) after ~64 sweeps ≈ 9 biological hours;
   // a wedged grain (bonus=4) crosses in ~13 sweeps ≈ 1.8 hours;
   // full saturation (255) takes ~24-35 hours. Matches Tschinkel

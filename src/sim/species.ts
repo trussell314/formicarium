@@ -277,7 +277,8 @@ export interface AntSpecies {
 //     1 minute micro-biological  = 600 ticks
 //     1 hour   micro-biological  = 36 000 ticks
 //     1 day    real-world clock  = 864 000 ticks (uncompressed)
-//     1 day    in-sim            = 8 640 ticks  (DAY_TICKS, 100× compressed)
+//     1 day    in-sim (diel)     = 43 200 ticks (DAY_TICKS, DIEL_COMPRESSION = 20×)
+//     1 day    in-sim (macro)    = 8 640 ticks  (lifespan/brood calendar, TIME_COMPRESSION = 100×)
 //
 // ── 100× time-compression convention ────────────────────────────
 //
@@ -428,10 +429,12 @@ export const HARVESTER: AntSpecies = {
   broodMinDepth: 12,
   broodMaxDepth: 30,
   // Eggs need ~26 cell-moves (broodMax - broodMin) over a half-day
-  // window. DAY_TICKS = 8 640 (100× compressed), half-day = 4 320
-  // ticks, so interval = 4320/26 ≈ 166 ticks per migrate step.
-  // Round to 165.
-  broodMigrateInterval: 165,
+  // window. DAY_TICKS = 43 200 (DIEL_COMPRESSION = 20), half-day =
+  // 21 600 ticks, so interval = 21600/26 ≈ 831 ticks per migrate
+  // step. Earlier calibration of 165 was tied to the old
+  // DAY_TICKS = 8 640 (diel = macro compression); after the diel
+  // decoupling it became 5× too fast.
+  broodMigrateInterval: 831,
   // Cassill & Tschinkel (1999) measured per-bout trophallactic
   // transfers of 0.5-5% of the donor's crop in S. invicta. We use
   // 0.005 = 0.5% of maxEnergy per tick of contact, which sums over

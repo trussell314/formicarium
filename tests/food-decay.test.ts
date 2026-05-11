@@ -25,7 +25,7 @@ const QUIET: AntSpecies = {
   clumpInterval: 1e9,
 };
 
-const FOOD_LIFETIME_TICKS = 140_000;
+const FOOD_LIFETIME_TICKS = 700_000;
 
 function fields(w: World) {
   return {
