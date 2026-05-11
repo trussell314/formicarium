@@ -1626,7 +1626,7 @@ export function step(
               world.cells[world.index(qx, newY)] === CELL_AIR &&
               supportedAtNew
             ) {
-              colony.posY[i] = qyNow + dy + 0.5;
+              colony.posY[i] = colony.posY[i]! + dy;
             }
           }
         }
@@ -3317,8 +3317,22 @@ export function step(
         colony.stuckTicks[i]!--;
       }
       if (colony.stuckTicks[i]! >= 60) {
-        colony.heading[i] = rng.range(0, Math.PI * 2);
-        colony.stuckTicks[i] = 0;
+        // Locked-out-at-night case: an ant who reaches the stuck-fire
+        // threshold above the surface AND the sun is below the
+        // horizon AND the entrance is sealed has nowhere productive
+        // to go. Real ants in this situation go quiescent — they
+        // don't pace till dawn. Transition to REST instead of the
+        // usual heading randomization (which produced visible
+        // "dancing near the sealed entrance" patterns at late-night
+        // ticks). REST exits via the existing rest-exit rules once
+        // daylight returns and the entrance reopens at dawn.
+        if (daylight(world.tick) === 0) {
+          colony.setState(i, STATE_REST);
+          colony.stuckTicks[i] = 0;
+        } else {
+          colony.heading[i] = rng.range(0, Math.PI * 2);
+          colony.stuckTicks[i] = 0;
+        }
       }
     } else {
       colony.stuckTicks[i] = 0;

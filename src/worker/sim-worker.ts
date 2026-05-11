@@ -376,6 +376,7 @@ function buildSnapshot(includePheromones: boolean): RenderSnapshot {
       granary: bundle.granaryField.current.slice(),
       trunk: bundle.trunkField.current.slice(),
       breachAlarm: bundle.breachAlarmField.current.slice(),
+      entrance: bundle.entranceField.current.slice(),
     } : null,
     hud: {
       alive, dead, eggs, larvae, pupae, queens,
@@ -451,6 +452,7 @@ function collectSnapshotBuffers(snap: RenderSnapshot): ArrayBuffer[] {
       ab(snap.pheromones.necro), ab(snap.pheromones.noEntry),
       ab(snap.pheromones.granary), ab(snap.pheromones.trunk),
       ab(snap.pheromones.breachAlarm),
+      ab(snap.pheromones.entrance),
     );
   }
   if (snap.particles !== null) {

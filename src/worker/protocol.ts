@@ -80,6 +80,7 @@ export type RenderSnapshot = {
     granary: Float32Array;
     trunk: Float32Array;
     breachAlarm: Float32Array;
+    entrance: Float32Array;
   };
   // Aggregated HUD counters (computed once on the worker each
   // snapshot — cheaper than scanning the full colony on the main
