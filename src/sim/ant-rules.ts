@@ -2006,7 +2006,7 @@ export function step(
         stateIn = STATE_WANDER;
       } else {
         // Random-walk step. Move-only; no stigmergy bias.
-        h += rng.gauss() * colony.turnNoise[i]! * (1 + colony.stuckTicks[i]! * 0.05);
+        h += rng.gauss() * colony.turnNoise[i]!;
         colony.heading[i] = wrapAngle(h);
         let nx = colony.posX[i]!;
         let ny = colony.posY[i]!;
@@ -2078,7 +2078,7 @@ export function step(
         // does the rest from below the surface).
         colony.heading[i] = Math.PI / 2 + rng.range(-0.3, 0.3);
       } else {
-        h += rng.gauss() * colony.turnNoise[i]! * (1 + colony.stuckTicks[i]! * 0.05);
+        h += rng.gauss() * colony.turnNoise[i]!;
         // Below natural surface: hard upward bias toward exit. Above
         // surface: pure random walk on the open ground, OR — if a
         // foraging trail pheromone gradient is available — bias up
@@ -2270,7 +2270,7 @@ export function step(
     // without any explicit chamber-allocation rule.
     if (stateIn === STATE_CARRY_FOOD) {
       colony.stateTicks[i]!++;
-      h += rng.gauss() * colony.turnNoise[i]! * (1 + colony.stuckTicks[i]! * 0.05);
+      h += rng.gauss() * colony.turnNoise[i]!;
       // Below or above surface, bias DOWN (positive geotaxis).
       h += wrapAngle(Math.PI / 2 - h) * geotaxis;
       // Above-surface homing. A Cf ant returning across the surface
@@ -2622,7 +2622,7 @@ export function step(
     //   the leaf-cutting ant Atta colombica. Behav Ecol. 13: 224–231.
     if (stateIn === STATE_NECRO_CARRY) {
       colony.stateTicks[i]!++;
-      h += rng.gauss() * colony.turnNoise[i]! * (1 + colony.stuckTicks[i]! * 0.05);
+      h += rng.gauss() * colony.turnNoise[i]!;
       // Below or at surface: hard upward bias toward exit. Above
       // surface: pure random walk (drift the body away from the
       // entrance). Mirror of the FORAGE outbound geometry.
@@ -2925,15 +2925,7 @@ export function step(
     }
 
     // (1) Correlated random walk — Gaussian heading perturbation.
-    // Klinokinesis (Camhi 1984): real ants increase their turn rate
-    // when encountering obstacles. Multiplied by 1 + stuckTicks·0.05
-    // so a fully-stuck ant (stuckTicks ≈ 60) gets ~4× the normal
-    // turn-noise amplitude, which scrambles her heading enough to
-    // escape the bias attractor before mech #1's threshold-fire
-    // kicks in. The same multiplier is applied at every other
-    // turn-noise site in the per-state movement loops (FORAGE,
-    // CARRY, CARRY_FOOD, NECRO_CARRY).
-    h += rng.gauss() * colony.turnNoise[i]! * (1 + colony.stuckTicks[i]! * 0.05);
+    h += rng.gauss() * colony.turnNoise[i]!;
 
     // (2) Stigmergy — bias toward the gradient of the field for our
     // current state. WANDER follows dig pheromone (recruit to active
@@ -3296,18 +3288,8 @@ export function step(
         colony.heading[i] = rng.range(0, Math.PI * 2);
         continue;
       }
-    } else if (stateIn === STATE_WANDER) {
-      // WANDER stuck tracking (mech #1 + #3). Originally above-
-      // surface only — extended in mech #3 to also catch below-
-      // surface freezes (worker oscillating at exact float coords
-      // inside a chamber for thousands of ticks, which the master
-      // diagnostic surfaced as the dominant remaining freeze case
-      // after mech #1+2 landed). Below-surface workers legitimately
-      // bounce off chamber walls during digging, but the asymmetric
-      // counter (+2 stuck, -1 progress) only fires after sustained
-      // wall-only ticks, which a healthy digging worker doesn't
-      // produce. Threshold 60 matches the existing CARRY/CARRY_FOOD
-      // bail rate.
+    } else if (stateIn === STATE_WANDER && iy < world.naturalSurface[ix]!) {
+      // Above-surface WANDER stuck tracking. Without this,
       // surface workers can get caught in a bias attractor —
       // geotaxis-down + entrance-pull re-align the heading to the
       // same blocked direction every tick after thigmotaxis bounces,
@@ -3332,17 +3314,6 @@ export function step(
       if (colony.stuckTicks[i]! >= 60) {
         colony.heading[i] = rng.range(0, Math.PI * 2);
         colony.stuckTicks[i] = 0;
-        // Mech #4: self-deposit noEntryField at her cell so future
-        // visitors (her or another ant) are biased AWAY from this
-        // dead-end. Real ants in *Pheidole* / *Lasius* deposit a
-        // negative recruitment cue at locations they fail at
-        // (Robinson, Jackson, Holcombe, Ratnieks 2005, "'No entry'
-        // signal in ant foraging," Nature 438:442). The existing
-        // noEntryField already biases WANDER ants AWAY from its
-        // gradient (line 3068); piggyback on that infrastructure.
-        // Strength 0.3 saturates the local-gradient bias quickly
-        // without polluting the broader nest.
-        if (noEntryField) noEntryField.deposit(ix, iy, 0.3);
       }
     } else {
       colony.stuckTicks[i] = 0;
