@@ -121,15 +121,23 @@ describe('Pheromone.step (evaporation)', () => {
     expect(p.sample(4, 4)).toBe(0);
   });
 
-  it('edge cells purely evaporate (no diffusion on the boundary)', () => {
-    // The boundary path is a separate code path in step(). A bug
-    // there would either spuriously diffuse out of the grid or
-    // crash on negative neighbour indices.
+  it('edge cells diffuse with their existing in-grid neighbours (absorbing boundary)', () => {
+    // Pre-fix: edges only evaporated and pheromone accumulated there
+    // unbounded over long runs (visually a glowing wall on the world
+    // border). Now edges diffuse with their existing neighbours;
+    // missing out-of-grid neighbours contribute 0 — pheromone past
+    // the world is gone.
     const p = new Pheromone(8, 8, 0.5, 0.8);
-    p.deposit(0, 3, 10); // left edge
+    p.deposit(0, 3, 10); // left edge with empty neighbours
     p.step();
-    // Left edge: pure evaporation = 10 * 0.8 = 8.
-    expect(p.sample(0, 3)).toBeCloseTo(8, 4);
+    // Left edge cell (0, 3) has 3 in-grid neighbours, all zero. So
+    // v = ((1 - 0.5)*10 + 0.5/4 * 0) * 0.8 = (5 + 0) * 0.8 = 4.
+    // The "missing" west neighbour absorbs 0.5/4 * 10 = 1.25 of the
+    // outflow, which is lost outside the grid.
+    expect(p.sample(0, 3)).toBeCloseTo(4, 4);
+    // The eastward in-grid neighbour (1, 3) receives diffusion
+    // outflow: 0.5/4 * 10 * 0.8 = 1.0.
+    expect(p.sample(1, 3)).toBeCloseTo(1.0, 4);
   });
 
   it('total mass is non-increasing under step (evaporation cannot inject)', () => {
@@ -184,13 +192,37 @@ describe('Pheromone ping-pong (no double-mutation)', () => {
   });
 
   it('current is a different reference after step (the swap actually swapped)', () => {
-    // The cheap structural assertion that the buffer pointer rotated.
-    // If `current` and `scratch` ended up aliased we'd have undefined
-    // behaviour next tick.
+    // The cheap structural assertion that the buffer pointer rotated
+    // when the stencil actually runs. If `current` and `scratch`
+    // ended up aliased we'd have undefined behaviour next tick.
+    // Deposit first — an empty field skips the stencil (no work, no
+    // swap) and that's the documented behaviour, so we have to give
+    // it something to compute.
     const p = new Pheromone(8, 8, 0.2, 0.95);
+    p.deposit(4, 4, 1);
     const before = p.current;
     p.step();
     expect(p.current).not.toBe(before);
+  });
+
+  it('deposit after empty-field step lands in the right buffer (no JS↔WASM desync)', () => {
+    // Regression for an earlier version of step() that ping-pong'd
+    // JS-side `current` / `scratch` references on empty-field early-
+    // exit, while leaving the WASM kernel's internal pointers
+    // untouched. After enough empty steps, JS thought current was
+    // bufferB but the kernel's "current" was still bufferA; the next
+    // deposit landed in bufferB but the kernel then read from
+    // bufferA (zeros) and wrote diffused-from-zero into bufferB,
+    // overwriting the deposit. The pheromone field never accumulated.
+    // Sample stays >0 only if every deposit makes it through.
+    const p = new Pheromone(16, 16, 0.2, 0.99);
+    // Run several empty steps so any latent ping-pong de-syncs.
+    for (let t = 0; t < 5; t++) p.step();
+    p.deposit(8, 8, 100);
+    p.step();
+    expect(p.sample(8, 8)).toBeGreaterThan(0);
+    p.step();
+    expect(p.sample(8, 8)).toBeGreaterThan(0);
   });
 
   it('a single deposit then step puts (1-f)*c*e at the source, not 0', () => {
@@ -202,5 +234,28 @@ describe('Pheromone ping-pong (no double-mutation)', () => {
     p.step();
     // (1-f)*c*e = 0.8*100*0.95 = 76.
     expect(p.sample(4, 4)).toBeCloseTo(76, 4);
+  });
+
+  it('REGRESSION: edges do NOT accumulate pheromone fed from interior', () => {
+    // Before the boundary-fix, edge cells only evaporated — they
+    // never lost pheromone via diffusion. Interior cells still leaked
+    // INTO edges via the 5-point stencil, so over many ticks the
+    // edges became unbounded pheromone traps. User observed a
+    // glowing magenta wall on the world boundary in deployed runs.
+    //
+    // This pins the fix: deposit at an interior cell adjacent to the
+    // left edge, run many ticks, and verify the edge cell never
+    // accumulates more than a sensible bound relative to the source.
+    const p = new Pheromone(20, 20, 0.4, 0.99);
+    for (let t = 0; t < 200; t++) {
+      p.deposit(1, 10, 5.0); // adjacent to left edge at (0, 10)
+      p.step();
+    }
+    const interior = p.sample(1, 10);
+    const edge = p.sample(0, 10);
+    // Edge gets fed by interior but the absorbing boundary lets it
+    // shed pheromone too — no runaway accumulation.
+    expect(edge).toBeLessThan(interior);
+    expect(edge).toBeLessThan(interior * 0.6);
   });
 });

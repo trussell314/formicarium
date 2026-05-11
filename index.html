@@ -3,18 +3,151 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <title>Formicarium</title>
     <style>
       html, body { margin: 0; padding: 0; height: 100%; background: #0a0606; overflow: hidden; }
       body { font-family: ui-sans-serif, system-ui, sans-serif; color: #d8c8a8; }
       canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; image-rendering: crisp-edges; touch-action: none; }
       html, body { touch-action: none; overscroll-behavior: none; }
+      /* HUD — top-left fixed panel, monospace, dimmable. One stat
+         group per row; minimise toggle keeps it out of the way. */
       #hud {
         position: fixed; top: 8px; left: 8px;
-        font-size: 12px; line-height: 1.4; opacity: 0.7;
+        font: 11px / 1.55 ui-monospace, "SFMono-Regular", "Menlo", monospace;
+        color: #d8c8a8;
+        background: rgba(10, 6, 6, 0.72);
+        border: 1px solid rgba(216, 200, 168, 0.18);
+        border-radius: 6px;
+        padding: 8px 10px 6px 10px;
+        width: 360px;
         text-shadow: 0 1px 2px #000;
-        pointer-events: none;
+        z-index: 9;
+        transition: opacity 200ms ease;
+        pointer-events: auto;
       }
+      #hud .row { display: flex; justify-content: space-between; gap: 12px; white-space: nowrap; }
+      #hud .row.hdr { color: #f0e2c4; font-weight: 600; letter-spacing: 0.04em; margin-bottom: 4px; padding-right: 22px; }
+      #hud .row .v { color: #f0e2c4; }
+      #hud .row.dim { opacity: 0.66; }
+      /* Counter animation (#22). When a value changes, briefly
+         flash the .v span — catches the eye on births/deaths/digs
+         without adding extra UI clutter. */
+      #hud .v.pulse {
+        animation: hud-pulse 600ms ease;
+      }
+      @keyframes hud-pulse {
+        0% { color: #ffe060; transform: translateX(0); }
+        30% { color: #ffe060; }
+        100% { color: #f0e2c4; }
+      }
+      #hud .row.sel .v { color: #ffdc50; }
+      #hud .row.hidden { display: none; }
+      #hud .legend {
+        margin-top: 6px;
+        padding-top: 6px;
+        border-top: 1px solid rgba(216, 200, 168, 0.15);
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        column-gap: 10px;
+        row-gap: 2px;
+      }
+      #hud .legend .swatch {
+        display: inline-block;
+        width: 8px; height: 8px;
+        border-radius: 2px;
+        margin-right: 6px;
+        vertical-align: middle;
+      }
+      #hud-min {
+        position: absolute; top: 4px; right: 4px;
+        appearance: none; background: transparent;
+        border: 1px solid rgba(216, 200, 168, 0.22);
+        border-radius: 3px;
+        color: #d8c8a8; font: 11px ui-monospace, monospace;
+        width: 18px; height: 18px; line-height: 1;
+        cursor: pointer;
+        padding: 0;
+      }
+      #hud-min:hover { background: rgba(216, 200, 168, 0.10); }
+      #hud .pop-graph {
+        margin-top: 6px;
+        padding-top: 6px;
+        border-top: 1px solid rgba(216, 200, 168, 0.15);
+      }
+      #hud .pop-graph canvas { display: block; width: 340px; height: 56px; }
+      #hud canvas.histo { display: inline-block; width: 120px; height: 14px; vertical-align: middle; image-rendering: pixelated; }
+      /* Task-distribution bar — stacked horizontal segments showing
+         worker breakdown by higher-level task (foraging, building,
+         tending, patrolling, resting). Flex-grow on each .task-seg
+         is set per-tick from the snapshot HUD counts. */
+      #hud .task-bar {
+        display: inline-flex;
+        width: 120px;
+        height: 14px;
+        vertical-align: middle;
+        border: 1px solid rgba(216, 200, 168, 0.25);
+        border-radius: 2px;
+        overflow: hidden;
+        background: rgba(0, 0, 0, 0.30);
+      }
+      #hud .task-seg {
+        height: 100%;
+        flex: 0 0 0%;
+        transition: flex-basis 250ms ease;
+      }
+      #hud .task-forage { background: #6abf6a; }   /* green = food */
+      #hud .task-build  { background: #c89060; }   /* tan = soil */
+      #hud .task-tend   { background: #aa7eaa; }   /* purple-grey = corpses */
+      #hud .task-patrol { background: #6ec8d0; }   /* cyan = motion */
+      #hud .task-rest   { background: #5a5a5a; }   /* dim = rest */
+      #hud .task-legend {
+        display: inline-block;
+        margin-left: 6px;
+        font-size: 9px;
+        opacity: 0.75;
+        font-family: ui-monospace, "SFMono-Regular", "Menlo", monospace;
+      }
+      #hud .histo-label { display: inline-block; margin-right: 6px; opacity: 0.7; font-size: 10px; }
+      #hud.minimized .row:not(.hdr):not(.hdr-mini),
+      #hud.minimized .section,
+      #hud.minimized .legend,
+      #hud.minimized .pop-graph { display: none; }
+      #hud.minimized { padding: 4px 10px; }
+      /* Section header — slightly stronger contrast than the
+         normal row labels, so the COLONY / SELECTED dividers stand
+         out as folder-like headers. The per-section +/- button is
+         small and right-aligned. */
+      #hud .section .row.sec-hdr {
+        margin-top: 4px;
+        padding-top: 4px;
+        border-top: 1px solid rgba(216, 200, 168, 0.15);
+        opacity: 0.85;
+        letter-spacing: 0.06em;
+        font-size: 10px;
+      }
+      #hud .section .row.sec-hdr span:first-child {
+        font-weight: 600;
+        color: #e8d8b0;
+      }
+      #hud .sec-min {
+        background: transparent;
+        color: #e8d8b0;
+        border: 1px solid rgba(216, 200, 168, 0.25);
+        border-radius: 3px;
+        font: inherit;
+        font-size: 11px;
+        line-height: 1;
+        padding: 1px 5px;
+        cursor: pointer;
+      }
+      #hud .sec-min:hover { background: rgba(216, 200, 168, 0.1); }
+      /* When a section is collapsed, hide everything inside it
+         except the header row (which stays visible to host the
+         expand button). */
+      #hud .section.collapsed > .row:not(.sec-hdr),
+      #hud .section.collapsed > .pop-graph { display: none; }
+      #hud .section.hidden { display: none; }
       #help {
         position: fixed; right: 12px; bottom: 12px;
         background: rgba(10, 6, 6, 0.78);
@@ -45,9 +178,8 @@
          Each button mirrors a keyboard binding 1:1. Stays out of the
          way (small, translucent) until tapped. */
       #ctrls {
-        position: fixed; left: 50%; bottom: 12px;
-        transform: translateX(-50%);
-        display: flex; flex-wrap: wrap; gap: 6px;
+        position: fixed; left: 8px; bottom: 8px;
+        display: flex; flex-direction: column; gap: 6px;
         padding: 8px;
         background: rgba(10, 6, 6, 0.62);
         border: 1px solid rgba(216, 200, 168, 0.18);
@@ -55,7 +187,8 @@
         opacity: 0.55;
         transition: opacity 200ms ease;
         z-index: 10;
-        max-width: calc(100vw - 24px);
+        max-height: calc(100vh - 16px);
+        overflow-y: auto;
       }
       #ctrls:hover, #ctrls:focus-within { opacity: 1; }
       #ctrls.hidden { opacity: 0; pointer-events: none; }
@@ -65,30 +198,133 @@
         border: 1px solid rgba(216, 200, 168, 0.28);
         border-radius: 6px;
         color: #f0e2c4;
-        font: 600 13px ui-sans-serif, system-ui, sans-serif;
-        padding: 8px 12px;
-        min-width: 44px;
-        min-height: 44px;
+        font: 500 12px ui-sans-serif, system-ui, sans-serif;
+        padding: 6px 10px;
+        min-height: 32px;
         line-height: 1;
         cursor: pointer;
         touch-action: manipulation;
         -webkit-tap-highlight-color: transparent;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
       }
       #ctrls button:active { background: rgba(216, 200, 168, 0.25); }
+      #ctrls button .lbl {
+        letter-spacing: 0.02em;
+      }
+      #ctrls button .key {
+        display: inline-block;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 10px;
+        line-height: 1;
+        padding: 3px 5px;
+        min-width: 14px;
+        text-align: center;
+        border: 1px solid rgba(216, 200, 168, 0.30);
+        border-bottom-width: 2px;
+        border-radius: 3px;
+        background: rgba(0, 0, 0, 0.30);
+        color: #d8c8a8;
+      }
+      #ctrls button:hover .key { color: #f0e2c4; }
+      /* Dials cluster — sits above the button row. Two sliders, each
+         clearly labeled, for the two orthogonal time knobs:
+           SPEED       — wall-clock ticks/sec (CPU dimension)
+           TIME SCALE  — bio-seconds advanced per tick (compression dial) */
+      #dials {
+        position: fixed; top: 8px; right: 8px;
+        display: flex; flex-direction: column; gap: 8px;
+        padding: 8px 12px;
+        background: rgba(10, 6, 6, 0.62);
+        border: 1px solid rgba(216, 200, 168, 0.18);
+        border-radius: 8px;
+        opacity: 0.65;
+        transition: opacity 200ms ease;
+        z-index: 10;
+        max-width: 220px;
+        font: 600 11px ui-sans-serif, system-ui, sans-serif;
+        color: #f0e2c4;
+      }
+      /* On wider screens we can fit both sliders side by side. On
+         mobile / narrow viewports they stack to keep tap-targets
+         reasonable. */
+      @media (min-width: 720px) {
+        #dials { flex-direction: row; gap: 14px; max-width: 420px; }
+      }
+      /* On narrow viewports the dials cluster at top-right would
+         visually overlap the HUD (which expands rightward to fit
+         multi-row stats and easily exceeds the screen-width minus
+         the dials' 220px). Move it to bottom-centre above the
+         ctrls bar instead — same place it lived pre-relocation,
+         where the HUD has no presence. */
+      @media (max-width: 719px) {
+        #dials {
+          top: auto;
+          right: auto;
+          bottom: 92px;
+          left: 50%;
+          transform: translateX(-50%);
+          flex-direction: row;
+          gap: 10px;
+          max-width: calc(100vw - 24px);
+        }
+        #dials label { min-width: 150px; }
+      }
+      #dials:hover, #dials:focus-within { opacity: 1; }
+      #dials.hidden { opacity: 0; pointer-events: none; }
+      #dials label {
+        display: flex; flex-direction: column; gap: 3px;
+        min-width: 180px;
+      }
+      #dials .lbl-row {
+        display: flex; justify-content: space-between;
+        align-items: baseline;
+        letter-spacing: 0.05em;
+      }
+      #dials .lbl-name { text-transform: uppercase; font-size: 10px; opacity: 0.85; }
+      #dials .lbl-val { font: 600 11px ui-monospace, monospace; color: #ffe8b8; }
+      #dials input[type=range] {
+        width: 100%;
+        accent-color: #d8c8a8;
+        cursor: pointer;
+        margin: 2px 0 0 0;
+      }
+      /* Save/load confirmation flashes — green on success, red on no-op
+         (e.g., load with no save). 600 ms total: snap on, fade off. */
+      #ctrls button.flash-ok {
+        background: rgba(120, 200, 120, 0.45);
+        border-color: rgba(120, 200, 120, 0.85);
+        transition: background 400ms ease 200ms, border-color 400ms ease 200ms;
+      }
+      #ctrls button.flash-noop {
+        background: rgba(220, 90, 90, 0.45);
+        border-color: rgba(220, 90, 90, 0.85);
+        transition: background 400ms ease 200ms, border-color 400ms ease 200ms;
+      }
     </style>
   </head>
   <body>
     <canvas id="screen"></canvas>
     <div id="hud"></div>
+    <div id="dials" role="group" aria-label="simulation speed">
+      <label for="dial-speed">
+        <span class="lbl-row"><span class="lbl-name">Speed</span><span class="lbl-val" id="dial-speed-val">1×</span></span>
+        <input type="range" id="dial-speed" min="-3" max="13" step="1" value="0" aria-label="simulation speed multiplier" />
+      </label>
+    </div>
     <div id="ctrls" role="toolbar" aria-label="simulation controls">
-      <button data-act="pause" title="pause / resume (space)">⏯</button>
-      <button data-act="slower" title="slower (-)">−</button>
-      <button data-act="faster" title="faster (+)">+</button>
-      <button data-act="zoomout" title="reset zoom (0)">⌖</button>
-      <button data-act="phero" title="pheromone overlay (p)">𝜙</button>
-      <button data-act="reseed" title="reseed (r)">↻</button>
-      <button data-act="full" title="fullscreen (f)">⛶</button>
-      <button data-act="help" title="help (?)">?</button>
+      <button data-act="pause" title="pause / resume (space)"><span class="lbl">Pause</span><span class="key">␣</span></button>
+      <button data-act="slower" title="slower (-)"><span class="lbl">Slower</span><span class="key">−</span></button>
+      <button data-act="faster" title="faster (+)"><span class="lbl">Faster</span><span class="key">+</span></button>
+      <button data-act="zoomout" title="reset zoom (0)"><span class="lbl">Reset zoom</span><span class="key">0</span></button>
+      <button data-act="phero" title="pheromone overlay (p)"><span class="lbl">Pheromones</span><span class="key">P</span></button>
+      <button data-act="save" title="save state (s)"><span class="lbl">Save</span><span class="key">S</span></button>
+      <button data-act="load" title="load saved state (l)"><span class="lbl">Load</span><span class="key">L</span></button>
+      <button data-act="reseed" title="reseed (r)"><span class="lbl">Reseed</span><span class="key">R</span></button>
+      <button data-act="full" title="fullscreen (f)"><span class="lbl">Fullscreen</span><span class="key">F</span></button>
+      <button data-act="help" title="help (?)"><span class="lbl">Help</span><span class="key">?</span></button>
     </div>
     <div id="help">
       <h1>FORMICARIUM</h1>
@@ -99,6 +335,8 @@
       <div>pinch / wheel to zoom, drag to pan</div>
       <div><kbd>0</kbd> reset zoom</div>
       <div><kbd>p</kbd> toggle pheromone overlay</div>
+      <div><kbd>m</kbd> toggle mini-map</div>
+      <div><kbd>s</kbd> save state &nbsp; <kbd>l</kbd> load state</div>
       <div><kbd>?</kbd> hide / show this panel</div>
     </div>
     <script type="module" src="/src/main.ts"></script>

@@ -1,0 +1,41 @@
+<!--
+  Top-down Pogonomyrmex barbatus silhouette. viewBox 32×32 rasterises
+  cleanly at 16×16 and 32×32 favicon sizes. Anatomy:
+    - Head broader than thorax (Pogonomyrmex are the classic large-
+      headed harvester caste; head capsule is the most prominent
+      feature in top-down view)
+    - Forward-projecting mandibles (signature of seed-harvesting
+      Myrmicinae)
+    - Geniculate (elbow-jointed) antennae attached to the head
+    - Three segments separated by a narrow petiole/post-petiole waist
+    - Six legs originating from the thorax, each with a femur-tibia
+      bend (real ant legs are jointed, not smoothly curved)
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <g fill="#1a0e08" stroke="#1a0e08" stroke-linecap="round" stroke-linejoin="round">
+    <!-- mandibles: two short forward-projecting curves -->
+    <path d="M14 5 Q13 2 14.5 1" stroke-width="1.2" fill="none"/>
+    <path d="M18 5 Q19 2 17.5 1" stroke-width="1.2" fill="none"/>
+    <!-- antennae: scape (base) + elbow + funiculus (tip) -->
+    <polyline points="13.5,6 10,4 8,1.5" stroke-width="1.3" fill="none"/>
+    <polyline points="18.5,6 22,4 24,1.5" stroke-width="1.3" fill="none"/>
+    <!-- legs: each is a polyline with one bend (femur → tibia).
+         Originate from the thorax (rows 11.5/14/16.5) and bend
+         outward then back toward the tarsus. -->
+    <polyline points="14,11.5 9,11 5,8"   stroke-width="1.4" fill="none"/>
+    <polyline points="18,11.5 23,11 27,8" stroke-width="1.4" fill="none"/>
+    <polyline points="14,14 8,14.5 3,14"   stroke-width="1.4" fill="none"/>
+    <polyline points="18,14 24,14.5 29,14" stroke-width="1.4" fill="none"/>
+    <polyline points="14,16.5 9,17 5,20"   stroke-width="1.4" fill="none"/>
+    <polyline points="18,16.5 23,17 27,20" stroke-width="1.4" fill="none"/>
+    <!-- gaster (rear, largest) -->
+    <ellipse cx="16" cy="23.5" rx="4.5" ry="5.5"/>
+    <!-- post-petiole + petiole (myrmicine two-segment waist) -->
+    <circle cx="16" cy="18" r="1"/>
+    <circle cx="16" cy="16" r="0.8"/>
+    <!-- thorax -->
+    <ellipse cx="16" cy="13.5" rx="2.8" ry="3"/>
+    <!-- head: broader than thorax for the harvester caste -->
+    <ellipse cx="16" cy="7.5" rx="3.6" ry="3"/>
+  </g>
+</svg>

@@ -17,6 +17,25 @@
 // ping-pong of two arrays is the standard way to avoid sampling and
 // writing the same texture in one pass.
 
+import type { PheromoneWasm, WasmFieldHandle } from './pheromone-wasm';
+
+/** Module-level WASM runtime. When attached via attachPheromoneWasm,
+ *  newly-constructed Pheromone instances allocate their buffers in
+ *  WASM linear memory and route step() through the SIMD kernel.
+ *  Tests don't attach a runtime and exercise the JS path. Both
+ *  paths are bit-exact (same op order, same IEEE-754 rounding). */
+let wasmRuntime: PheromoneWasm | null = null;
+export function attachPheromoneWasm(rt: PheromoneWasm | null): void {
+  wasmRuntime = rt;
+}
+/** Upload the current cells snapshot to the WASM kernel once per
+ *  tick, before any pheromone step() call. No-op if WASM isn't
+ *  attached. The kernel reads cells by pointer; without this call
+ *  it would diffuse against a stale snapshot. */
+export function uploadPheromoneCells(cells: Uint8Array): void {
+  if (wasmRuntime !== null) wasmRuntime.uploadCells(cells);
+}
+
 export class Pheromone {
   readonly width: number;
   readonly height: number;
@@ -28,25 +47,147 @@ export class Pheromone {
    *  in one tick. 0.10–0.20 is the typical literature range. */
   readonly diffuse: number;
   /** Multiplier applied per cell per tick. evap ∈ (0, 1). 0.99 gives
-   *  a half-life of ~69 ticks. */
-  readonly evaporate: number;
+   *  a half-life of ~69 ticks. Mutable: setDecayScale() adjusts this
+   *  to compensate for the time-compression dial's scaling of forager
+   *  rate and walk speed. The baseline is preserved in
+   *  `baseEvaporate` so re-scaling is reversible. */
+  evaporate: number;
+  /** Calibration-baseline evaporate, immutable. Used by setDecayScale
+   *  to recompute `evaporate` from the current scale factor. */
+  readonly baseEvaporate: number;
+  /** WASM kernel handle when this instance is using the SIMD path,
+   *  null otherwise. step() consults this to pick a backend. */
+  private wasmHandle: WasmFieldHandle | null;
+  /** When true, the field diffuses through SOIL/GRAIN cells the same
+   *  as through AIR — modelling persistent caste-recognition signals
+   *  (cuticular hydrocarbons, vibrations, CO2 plumes) that real ants
+   *  detect through substrate. Volatile fields (dig/build/trail/
+   *  alarm/necro) stay AIR-only. Permeable fields run on the JS
+   *  scalar path because the WASM kernel hardcodes the AIR-only
+   *  gating; at 1-2 permeable fields per world the cost is fine. */
+  private readonly permeable: boolean;
+  /** Lower bound on the next tick at which the field could possibly
+   *  hold non-zero values. step() bails immediately whenever this
+   *  is in the future relative to a monotonic counter we maintain
+   *  ourselves — meaning the field is provably empty (zero in →
+   *  zero everywhere out) and there's nothing to compute or to
+   *  swap. Set to +∞ (i.e. unbounded "all clear" window) on
+   *  construction; reset to "0 ticks remaining" by every deposit().
+   *  After a step that produces an all-zero output, we lengthen
+   *  the window again. */
+  private nonZero: boolean;
 
-  constructor(width: number, height: number, diffuse: number, evaporate: number) {
+  constructor(width: number, height: number, diffuse: number, evaporate: number, permeable = false) {
     this.width = width;
     this.height = height;
-    this.current = new Float32Array(width * height);
-    this.scratch = new Float32Array(width * height);
     this.diffuse = diffuse;
     this.evaporate = evaporate;
+    this.baseEvaporate = evaporate;
+    this.permeable = permeable;
+    // Permeable fields skip the WASM allocator — the kernel can't
+    // express through-soil diffusion without recompilation, so we
+    // run them on the JS scalar path with cells effectively ignored.
+    if (wasmRuntime !== null && !permeable) {
+      const handle = wasmRuntime.allocField(width, height);
+      this.wasmHandle = handle;
+      this.current = handle.current;
+      this.scratch = handle.scratch;
+      // Subsequent allocField / uploadCells calls may trigger
+      // memory.grow(), which detaches every TypedArray view onto
+      // the old ArrayBuffer — including the .current / .scratch
+      // refs we just cached. The runtime rebuilds the handle's
+      // own views; this subscription mirrors those rebuilds back
+      // into our cached refs, so a deposit() / step() / .slice()
+      // for snapshot transfer never lands on a detached buffer.
+      wasmRuntime.onBuffersRefreshed((h) => {
+        if (h !== handle) return;
+        this.current = h.current;
+        this.scratch = h.scratch;
+      });
+    } else {
+      this.wasmHandle = null;
+      this.current = new Float32Array(width * height);
+      this.scratch = new Float32Array(width * height);
+    }
+    this.nonZero = false;
   }
 
   /**
    * Advance one tick: 5-point diffusion + multiplicative evaporation.
-   * Edge cells just evaporate (no diffusion partner outside the
-   * grid). Sub-1e-6 values clamp to zero to keep sparse regions
-   * sparse and avoid denormal-float drag.
+   *
+   * Boundary condition: ABSORBING. Cells at the world edge diffuse
+   * to their existing in-grid neighbours; the "missing" out-of-
+   * world neighbours contribute 0, which means a quarter of the
+   * normal outflow is lost to outside (equivalent to pheromone
+   * dispersing into sky above or deep-soil below the simulated
+   * cross-section). The earlier "edges only evaporate" boundary
+   * was a bug: interior cells still leaked INTO edges via the
+   * 5-point stencil, but edges had no way to lose pheromone
+   * except via the very-slow evaporation rate (0.99995 retention =
+   * 30-min half-life for build), so edges became pheromone traps
+   * that accumulated unbounded over the run. Visually that showed
+   * up as a glowing magenta/cyan wall on the world boundary.
+   *
+   * Sub-1e-6 values clamp to zero to keep sparse regions sparse
+   * and avoid denormal-float drag.
    */
-  step(): void {
+  /** Adjust the per-tick decay coefficient to compensate for changes
+   *  in deposit rate caused by the time-compression dial. At higher
+   *  compression, more foragers fire per tick AND each covers more
+   *  cells per tick, so per-cell deposit rate scales as
+   *  `ms × walkScale`. Without compensation, steady-state field
+   *  intensity scales the same way (visibly saturates the overlay).
+   *
+   *  Steady-state intensity = D / (1 - α). Holding it constant
+   *  requires (1 - α) ∝ D, i.e., the per-tick decay-deficit scales
+   *  with `ms × walkScale` too. Clamps non-negative so very high
+   *  compression of an already-fast field doesn't go below zero. */
+  setDecayScale(scale: number): void {
+    const baseDecayDeficit = 1 - this.baseEvaporate;
+    const newDecayDeficit = Math.min(1, baseDecayDeficit * scale);
+    this.evaporate = Math.max(0, 1 - newDecayDeficit);
+  }
+
+  step(cells?: Uint8Array): void {
+    // Provably-empty fast path. A field with no live concentration
+    // anywhere produces zero output cell-by-cell (zero in → zero
+    // diffusion contribution → zero, then × evaporate → still zero,
+    // then sub-floor clamp → still zero). Both buffers stay
+    // all-zero either way, so we skip the stencil and (on the WASM
+    // path) the FFI overhead. `nonZero` is set true on every
+    // deposit and cleared at the end of any step() call where the
+    // output is fully sub-floor.
+    if (!this.nonZero) {
+      // No work to do AND no swap. Both buffers were already
+      // all-zero; leaving `current` / `scratch` as-is keeps the
+      // JS-side references in sync with the WASM handle's internal
+      // pointers (the kernel only swaps its own pointers when we
+      // actually call wasmRuntime.step). An earlier version swapped
+      // JS refs unconditionally to satisfy a "current is a different
+      // reference after step" invariant; that desynced JS from the
+      // WASM handle on every empty-field bail, causing subsequent
+      // deposits to land in a buffer the kernel then overwrote
+      // with zeros — pheromone fields never accumulated and the
+      // overlay rendered against empty/garbage state, locking up
+      // the renderer that's expecting non-empty buffers.
+      return;
+    }
+    // WASM path: kernel reads cells from its own copy (uploaded once
+    // per tick by the worker via PheromoneWasm.uploadCells) and
+    // operates directly on the Float32Array views backing this
+    // instance. After it runs, current/scratch refer to the swapped
+    // buffers, identical semantics to the JS path.
+    if (this.wasmHandle !== null && wasmRuntime !== null) {
+      wasmRuntime.step(this.wasmHandle, this.diffuse, this.evaporate, 1000);
+      this.current = this.wasmHandle.current;
+      this.scratch = this.wasmHandle.scratch;
+      this.refreshNonZero();
+      return;
+    }
+    // Permeable fields ignore the cells gate so they diffuse through
+    // SOIL/GRAIN as if the world were uniform — the JS scalar code
+    // already does no-op gating when cells is undefined.
+    if (this.permeable) cells = undefined;
     const w = this.width;
     const h = this.height;
     const src = this.current;
@@ -54,39 +195,133 @@ export class Pheromone {
     const f = this.diffuse;
     const f4 = f * 0.25;
     const e = this.evaporate;
-    // Interior
-    for (let y = 1; y < h - 1; y++) {
-      const row = y * w;
-      for (let x = 1; x < w - 1; x++) {
-        const i = row + x;
-        const c = src[i]!;
-        const sum = src[i - 1]! + src[i + 1]! + src[i - w]! + src[i + w]!;
-        const v = ((1 - f) * c + f4 * sum) * e;
-        dst[i] = v < 1e-6 ? 0 : v;
+    // Saturation cap. Without an upper bound, fields with steady
+    // deposit > evaporation grow unbounded over long runs (Float32
+    // eventually loses precision; gradient at saturated cells reads
+    // ~0 because all neighbours are equally saturated, so the
+    // sensing radius collapses). 1000 is well above the largest
+    // useful gradient signal — the renderer caps display at ≤4 for
+    // the densest field — so capping here doesn't change visible
+    // behaviour at any concentration the rest of the system reads.
+    const CAP = 1000;
+    // AIR-only diffusion with REFLECTING walls. Real volatile
+    // pheromones don't propagate through soil walls — they live in
+    // the air column the colony has carved out. The 5-point stencil
+    // would normally lose fraction f per tick (split f/4 to each
+    // direction), but in a narrow tunnel where most directions are
+    // soil that f/4 outflow has nowhere to go: previously we just
+    // discarded it (absorbing walls), so a 1-cell-wide tunnel cell
+    // lost 3f/4 per tick to nothing. That made pheromone trails
+    // attenuate fast through narrow passages and queen-pheromone
+    // gradients vanish a few cells from the source.
+    //
+    // Reflecting walls are the physically-correct alternative for
+    // "molecules can't pass": a cell only loses outflow toward
+    // AIR neighbours. Total outflow = (kAir/4) × f × src[i] where
+    // kAir is the count of AIR cardinal neighbours; the rest of the
+    // would-be outflow stays put (reflects). Net concentration in
+    // narrow tunnels and dead-end pockets is preserved.
+    //
+    // CELL_AIR == 0 (see world.ts). Skip the import to keep the
+    // pheromone module self-contained.
+    if (w >= 2 && h >= 2) {
+      const wm1 = w - 1;
+      const hm1 = h - 1;
+      for (let y = 1; y < hm1; y++) {
+        const rowStart = y * w + 1;
+        const rowEnd = y * w + wm1;
+        for (let i = rowStart; i < rowEnd; i++) {
+          if (cells && cells[i] !== 0) { dst[i] = 0; continue; }
+          let sum = 0;
+          let kAir = 0;
+          if (!cells || cells[i - 1] === 0) { sum += src[i - 1]!; kAir++; }
+          if (!cells || cells[i + 1] === 0) { sum += src[i + 1]!; kAir++; }
+          if (!cells || cells[i - w] === 0) { sum += src[i - w]!; kAir++; }
+          if (!cells || cells[i + w] === 0) { sum += src[i + w]!; kAir++; }
+          const mEff = 1 - kAir * f4;
+          let v = mEff * src[i]! + f4 * sum;
+          v *= e;
+          if (v < 1e-6) v = 0;
+          else if (v > CAP) v = CAP;
+          dst[i] = v;
+        }
       }
     }
-    // Edges: pure evaporation (lossy boundary, simplest)
-    for (let x = 0; x < w; x++) {
-      const top = src[x]! * e;
-      const bot = src[(h - 1) * w + x]! * e;
-      dst[x] = top < 1e-6 ? 0 : top;
-      dst[(h - 1) * w + x] = bot < 1e-6 ? 0 : bot;
+    // Edge rows (y=0 and y=h-1) and edge columns (x=0 and x=w-1).
+    // World-edge boundaries are ABSORBING (out-of-grid is a sink:
+    // outflow leaves the simulated cross-section permanently — the
+    // sky above the world or the deep soil below). Soil walls inside
+    // the world are REFLECTING (outflow has nowhere to go; stays put).
+    // Implementation: kOut counts directions where outflow goes
+    // somewhere — either an in-grid AIR neighbour (which receives
+    // it) OR an out-of-grid direction (which absorbs it). In-grid
+    // SOIL/GRAIN neighbours don't count: outflow toward them
+    // reflects. mEff = 1 - kOut × f/4.
+    const stepBoundaryCell = (x: number, y: number): void => {
+      const i = y * w + x;
+      if (cells && cells[i] !== 0) { dst[i] = 0; return; }
+      let sum = 0;
+      let kOut = 0;
+      if (x > 0) {
+        if (!cells || cells[i - 1] === 0) { sum += src[i - 1]!; kOut++; }
+      } else { kOut++; } // OOB: absorbs
+      if (x < w - 1) {
+        if (!cells || cells[i + 1] === 0) { sum += src[i + 1]!; kOut++; }
+      } else { kOut++; }
+      if (y > 0) {
+        if (!cells || cells[i - w] === 0) { sum += src[i - w]!; kOut++; }
+      } else { kOut++; }
+      if (y < h - 1) {
+        if (!cells || cells[i + w] === 0) { sum += src[i + w]!; kOut++; }
+      } else { kOut++; }
+      const mEff = 1 - kOut * f4;
+      let v = (mEff * src[i]! + f4 * sum) * e;
+      if (v < 1e-6) v = 0;
+      else if (v > CAP) v = CAP;
+      dst[i] = v;
+    };
+    if (h > 0) {
+      for (let x = 0; x < w; x++) stepBoundaryCell(x, 0);
+      if (h > 1) for (let x = 0; x < w; x++) stepBoundaryCell(x, h - 1);
     }
-    for (let y = 1; y < h - 1; y++) {
-      const left = src[y * w]! * e;
-      const right = src[y * w + w - 1]! * e;
-      dst[y * w] = left < 1e-6 ? 0 : left;
-      dst[y * w + w - 1] = right < 1e-6 ? 0 : right;
+    if (w > 0) {
+      for (let y = 1; y < h - 1; y++) stepBoundaryCell(0, y);
+      if (w > 1) for (let y = 1; y < h - 1; y++) stepBoundaryCell(w - 1, y);
     }
-    // Swap
     this.current = dst;
     this.scratch = src;
+    this.refreshNonZero();
+  }
+
+  /** Re-derive the empty/non-empty flag from the current buffer.
+   *  Public so external code that mutates `current` in place
+   *  (persist.restoreSnapshot) can resync the flag without
+   *  reaching into private state. */
+  resyncNonZero(): void {
+    this.refreshNonZero();
+  }
+
+  /** Scan the current buffer once to update `nonZero`. We avoid the
+   *  cost of checking every cell during step() itself by piggy-
+   *  backing on the post-step buffer; if the field happens to have
+   *  fully decayed, the next tick's step() bails immediately via
+   *  the empty fast-path. Cost is one Float32Array sweep per tick
+   *  per field — the same shape as the existing renderer scans —
+   *  and saves the full stencil pass on idle fields whose output
+   *  has dropped below floor. */
+  private refreshNonZero(): void {
+    const cur = this.current;
+    for (let i = 0; i < cur.length; i++) {
+      if (cur[i]! > 0) { this.nonZero = true; return; }
+    }
+    this.nonZero = false;
   }
 
   /** Add `amount` to the cell at (x, y). No-op for out-of-bounds. */
   deposit(x: number, y: number, amount: number): void {
     if (x < 0 || y < 0 || x >= this.width || y >= this.height) return;
     this.current[y * this.width + x]! += amount;
+    this.nonZero = true;
   }
 
   /** Concentration at integer (x, y). Zero outside the grid. */
@@ -100,12 +335,24 @@ export class Pheromone {
    * pointing UP the gradient (so an ant heading toward this vector
    * climbs the concentration). At the grid edge the missing
    * neighbour is treated as zero.
+   *
+   * Fast path: most calls happen at interior cells where all four
+   * neighbours are in-bounds. Skipping the four bounds-checked
+   * sample() calls there saves ~16 branches per gradient — and
+   * gradient is the hottest pheromone API since every WANDER ant
+   * samples 5+ fields per tick.
    */
   gradient(x: number, y: number): { dx: number; dy: number } {
-    const xL = this.sample(x - 1, y);
-    const xR = this.sample(x + 1, y);
-    const yU = this.sample(x, y - 1);
-    const yD = this.sample(x, y + 1);
-    return { dx: xR - xL, dy: yD - yU };
+    const w = this.width;
+    if (x > 0 && y > 0 && x < w - 1 && y < this.height - 1) {
+      const i = y * w + x;
+      const cur = this.current;
+      return { dx: cur[i + 1]! - cur[i - 1]!, dy: cur[i + w]! - cur[i - w]! };
+    }
+    // Edge fallback — at least one neighbour out of bounds.
+    return {
+      dx: this.sample(x + 1, y) - this.sample(x - 1, y),
+      dy: this.sample(x, y + 1) - this.sample(x, y - 1),
+    };
   }
 }

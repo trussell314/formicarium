@@ -19,7 +19,16 @@ function flatWorld(width: number, height: number, surfRow: number): World {
   for (let x = 0; x < width; x++) {
     w.naturalSurface[x] = surfRow;
     for (let y = 0; y < height; y++) {
-      w.cells[w.index(x, y)] = y < surfRow ? CELL_AIR : CELL_SOIL;
+      const idx = w.index(x, y);
+      if (y < surfRow) {
+        w.cells[idx] = CELL_AIR;
+      } else {
+        // Pristine substrate is consolidated (hardness=255) — without
+        // this every cell would read as loose under the unified model
+        // and cascade on the next settleGrain pass.
+        w.cells[idx] = CELL_SOIL;
+        w.grainHardness[idx] = 255;
+      }
     }
   }
   w.initialSoilCells = w.countSoil();
@@ -42,18 +51,22 @@ const TRAITS = {
 };
 
 describe('ant-rules: WANDER → CARRY (digging)', () => {
-  it('a WANDER ant adjacent to soil with digProb=1 transitions to CARRY within a few ticks', () => {
-    // Sudd 1970: per-contact dig probability. With digProb=1 every
-    // soil contact must fire, so an ant pressed against a wall MUST
-    // transition out of WANDER quickly. If this regresses we've
-    // broken the basic excavation primitive.
+  it('a WANDER ant in an enclosed pocket with digProb=1 transitions to CARRY within a few ticks', () => {
+    // Sudd 1970: per-contact dig probability INSIDE an excavation
+    // context (the enclosure gate in ant-rules.ts). With digProb=1
+    // every contact-from-inside-a-pocket must fire, so an ant in
+    // a 1-cell pocket pressed against a wall MUST transition out of
+    // WANDER quickly. If this regresses we've broken the basic
+    // excavation primitive.
     const w = flatWorld(40, 30, 10);
+    // Carve a 1-cell pocket so the ant has ≥2 soil neighbours at
+    // its spawn cell (left, right, below all soil).
+    w.cells[w.index(20, 10)] = CELL_AIR;
+    w.initialSoilCells = w.countSoil();
     const params: SimParams = { ...DEFAULT_PARAMS, digProb: 1.0, turnNoise: 0.01 };
     const rng = new RNG(123);
     const colony = new Colony(1);
-    // Spawn just above the soil surface so movement will quickly
-    // press the ant into a soil cell.
-    colony.spawn(20.5, 9.5, Math.PI / 2, rng, { ...TRAITS, digProb: 1.0, turnNoise: 0.01 });
+    colony.spawn(20.5, 10.5, Math.PI / 2, rng, { ...TRAITS, digProb: 1.0, turnNoise: 0.01 });
     const { dig, build } = fields(w);
     let transitioned = false;
     for (let t = 0; t < 50; t++) {
@@ -70,10 +83,12 @@ describe('ant-rules: WANDER → CARRY (digging)', () => {
     // the dig field. Without this the colony loses its "active
     // front" signal and excavation diffuses into noise.
     const w = flatWorld(40, 30, 10);
+    w.cells[w.index(20, 10)] = CELL_AIR;
+    w.initialSoilCells = w.countSoil();
     const params: SimParams = { ...DEFAULT_PARAMS, digProb: 1.0, turnNoise: 0.01 };
     const rng = new RNG(456);
     const colony = new Colony(1);
-    colony.spawn(20.5, 9.5, Math.PI / 2, rng, { ...TRAITS, digProb: 1.0, turnNoise: 0.01 });
+    colony.spawn(20.5, 10.5, Math.PI / 2, rng, { ...TRAITS, digProb: 1.0, turnNoise: 0.01 });
     const { dig, build } = fields(w);
     for (let t = 0; t < 50; t++) {
       step(w, colony, dig, build, rng, params);
@@ -288,11 +303,15 @@ describe('ant-rules: determinism', () => {
 });
 
 describe('ant-rules: grain conservation under arbitrary tick counts', () => {
-  it('initial soil = current soil + grains in world + carriers (CLAUDE.md §6)', () => {
+  it('initial soil = current soil + carriers + wearLost (CLAUDE.md §6, post-unification)', () => {
     // CLAUDE.md §6: hard invariant. Pin at multiple checkpoints to
     // catch a bug that only manifests after some specific transition
     // sequence (e.g. a CARRY ant phasing into REST should not drop
-    // its cargo silently).
+    // its cargo silently). After SOIL/GRAIN unification countSoil()
+    // includes BOTH consolidated wall AND loose deposits, so the
+    // formula collapses: a dug cell either rides on a carrier or got
+    // pulverised into wearLost; redeposited grain becomes solid
+    // again and is counted in countSoil().
     const rng = new RNG(0x808);
     const w = flatWorld(40, 30, 15);
     const colony = new Colony(8);
@@ -306,9 +325,7 @@ describe('ant-rules: grain conservation under arbitrary tick counts', () => {
         if (colony.state[i] === STATE_CARRY) carriers++;
       }
       const dug = w.initialSoilCells - w.countSoil();
-      expect(dug).toBe(w.countGrains() + carriers);
-      // Sanity: no embedded grain/soil collisions detected by inspecting cells type.
-      void CELL_GRAIN;
+      expect(dug).toBe(carriers + w.wearLost);
     }
   });
 });

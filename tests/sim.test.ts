@@ -11,8 +11,8 @@ import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { Pheromone } from '../src/sim/pheromone';
 import { isSupported } from '../src/sim/physics';
 import { RNG } from '../src/sim/rng';
-import { CELL_GRAIN, CELL_SOIL, World } from '../src/sim/world';
-import { STATE_CARRY } from '../src/sim/colony';
+import { CELL_GRAIN, CELL_SOIL, isLoose, World } from '../src/sim/world';
+import { STATE_CARRY, STATE_DEAD } from '../src/sim/colony';
 
 function makeSim(seed: number) {
   const rng = new RNG(seed);
@@ -46,7 +46,33 @@ describe('sim invariants', () => {
     }
   });
 
-  it('grain conservation: dug soil = grains in world + carriers', () => {
+  it('no ant ends up embedded after a long run with floating-island collapses', () => {
+    // 10k ticks at the standard sim seed exercises every code path
+    // that mutates cells under ants — diel-seal, granary cascades,
+    // floating-island collapse, dig/place/pick, settle. Original
+    // 800-tick test passes even with embedding bugs because the
+    // window is too short to hit the rare cascade-into-ant pattern;
+    // the long run reproduces the user-observed "ants stuck in
+    // soil" failure reliably and asserts none happen post-fix.
+    const { rng, world, colony, dig, build } = makeSim(0xb00b1e5);
+    for (let t = 0; t < 10000; t++) {
+      step(world, colony, dig, build, rng, DEFAULT_PARAMS);
+      for (let i = 0; i < colony.count; i++) {
+        const sa = colony.state[i]!;
+        if (sa === STATE_DEAD) continue;
+        const ix = colony.posX[i]! | 0;
+        const iy = colony.posY[i]! | 0;
+        const k = world.cells[world.index(ix, iy)];
+        if (k === CELL_SOIL || k === CELL_GRAIN) {
+          throw new Error(
+            `ant ${i} (state=${sa}) embedded at (${ix}, ${iy}) cell=${k} on tick ${t}`,
+          );
+        }
+      }
+    }
+  });
+
+  it('grain conservation: dug soil = carriers + wearLost (post-unification)', () => {
     const { rng, world, colony, dig, build } = makeSim(0xfeedface);
     for (let t = 0; t < 800; t++) step(world, colony, dig, build, rng, DEFAULT_PARAMS);
     let carriers = 0;
@@ -54,19 +80,26 @@ describe('sim invariants', () => {
       if (colony.state[i] === STATE_CARRY) carriers++;
     }
     const dug = world.initialSoilCells - world.countSoil();
-    const grainsInWorld = world.countGrains();
-    expect(dug).toBe(grainsInWorld + carriers);
+    // After SOIL/GRAIN unification countSoil() includes both
+    // consolidated wall AND loose deposits, so the formula collapses:
+    // a dug cell either rides on a carrier (in CARRY state) or got
+    // pulverised into wearLost (traffic-driven shaft erosion,
+    // Hölldobler & Wilson 1990). Redeposited grain becomes solid
+    // again and shows up in countSoil().
+    expect(dug).toBe(carriers + world.wearLost);
   });
 
   it('the chamber visibly grows over time', () => {
     const { rng, world, colony, dig, build } = makeSim(0xdeadbeef);
     const before = world.countSoil();
-    for (let t = 0; t < 1500; t++) step(world, colony, dig, build, rng, DEFAULT_PARAMS);
+    // 30k ticks ≈ 1 hour biological at the calibrated tick rate
+    // (1 tick ≈ 120 ms). With biology-scaled REST duration (1500
+    // ticks) and reduced turnNoise (0.05) ants take longer to
+    // generate dig contacts than with the old hand-tuned values.
+    for (let t = 0; t < 30000; t++) step(world, colony, dig, build, rng, DEFAULT_PARAMS);
     const after = world.countSoil();
-    // With Sudd's per-contact dig probability (0.10) AND collision-
-    // REST throttling in a packed test world (20 ants in 120×80),
-    // net dig rate is realistic-low. Test guards against a colony-
-    // wide stall, not against any particular throughput.
+    // Test guards against a colony-wide stall, not against any
+    // particular throughput rate.
     expect(before - after).toBeGreaterThan(0);
   });
 
@@ -169,25 +202,31 @@ describe('sim invariants', () => {
       const jump = Math.hypot(dx, dy);
       if (jump > maxJump) maxJump = jump;
     }
-    // Walk speed 0.6 + gravity 1 = 1.6 max plausible per tick.
-    // Anything larger means a teleport that the renderer would
-    // visualise as a straight line through midair.
-    expect(maxJump).toBeLessThanOrEqual(1.6);
+    // Walk speed 1.2 cells/tick + gravity 1 cell = 2.2 cells max
+    // plausible jump per tick. Anything larger means a teleport
+    // that the renderer would visualise as a straight line through
+    // midair. (Bound updated when sim resolution doubled — before
+    // 3-mm cells, walkSpeed was 0.6 and the bound was 1.6.)
+    expect(maxJump).toBeLessThanOrEqual(2.2);
   });
 
-  it('every grain sits on a solid support (sandpile invariant)', () => {
+  it('every loose grain sits on a solid support (sandpile invariant)', () => {
     const { rng, world, colony, dig, build } = makeSim(0xabcd1234);
     for (let t = 0; t < 1500; t++) step(world, colony, dig, build, rng, DEFAULT_PARAMS);
     for (let y = 0; y < world.height; y++) {
       for (let x = 0; x < world.width; x++) {
-        if (world.cells[world.index(x, y)] !== CELL_GRAIN) continue;
-        // Cell directly below must be solid OR we're at the world
-        // floor. Grains placed above ground may later cascade into
-        // voids dug under them — they're still supported (just by
-        // a deeper layer).
+        const idx = world.index(x, y);
+        // Only loose cells need to sit on a support — consolidated
+        // wall is anchored by hardness, not by gravity.
+        if (!isLoose(world, idx)) continue;
         if (y + 1 >= world.height) continue;
         const below = world.cells[world.index(x, y + 1)];
-        expect(below === CELL_SOIL || below === CELL_GRAIN).toBe(true);
+        // Loose grains either rest on a solid cell (any hardness)
+        // OR at the natural-surface horizon, where the surface
+        // acts as structural bedrock and a grain in row (surface − 1)
+        // does not cascade into an open entrance shaft below.
+        const atSurface = (y + 1) === world.naturalSurface[x];
+        expect(below === CELL_SOIL || atSurface).toBe(true);
       }
     }
   });

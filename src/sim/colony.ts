@@ -15,8 +15,63 @@ export const STATE_CARRY = 1;
  *  "agitation" model: ants in a crowded zone briefly withdraw,
  *  freeing the choke point and dispersing the work crew. */
 export const STATE_REST = 2;
+/** Foraging trip — leave the nest, walk on the surface looking for
+ *  food, then return to WANDER. See species.ts for cited species
+ *  defaults. The cycle is what keeps ant population from pooling
+ *  indefinitely at construction fronts (Gordon 1989; Hölldobler &
+ *  Wilson 1990, Ch. 8). */
+export const STATE_FORAGE = 3;
+/** Carrying a food item (e.g. a seed for a granivore species) back
+ *  toward the nest. Mirror of STATE_CARRY but with opposite geotaxis
+ *  sign — food goes DOWN into the nest, grain goes UP onto the mound. */
+export const STATE_CARRY_FOOD = 4;
+/** Ant has died (energy hit zero or external cause). The ant is
+ *  skipped in all behavioural processing; its position stays put
+ *  and a corpse marker is written to world.corpse[idx] at death,
+ *  so necrophoresis workers can later drag the body to a midden. */
+export const STATE_DEAD = 5;
+/** Reproductive caste. The queen sits at her chamber, doesn't move
+ *  (or moves very little), and periodically lays eggs while she has
+ *  energy. Without continuous brood production, worker mortality
+ *  drains the colony to extinction within a few hundred thousand
+ *  ticks at default settings — see Hölldobler & Wilson 1990 Ch. 5
+ *  on claustral founding and colony growth. */
+export const STATE_QUEEN = 6;
+/** Brood. Stationary, doesn't eat, doesn't move. After
+ *  species.eggMatureTicks the egg transitions to STATE_WANDER and
+ *  becomes a fully-functioning worker. Real brood progresses
+ *  egg → larva → pupa → adult over weeks; we collapse those stages
+ *  into a single maturity counter. */
+export const STATE_EGG = 7;
+/** Hauling a nestmate corpse to a midden ("refuse pile"). Wilson,
+ *  Durlach & Roth (1958, "Chemical releaser of necrophoric behavior
+ *  in ants"): workers respond to oleic acid on dead bodies by
+ *  picking them up and dropping them outside the nest. The state
+ *  drives the ant up out of the chamber, randomwalks on the
+ *  surface to drift away from the entrance, then drops the body
+ *  on intact ground — the visible midden is what remains. */
+export const STATE_NECRO_CARRY = 8;
+/** Larva. Stationary stage between EGG and adult worker, with two
+ *  distinguishing properties: (1) larvae are fed by workers via
+ *  trophallaxis (their `energy` drains; they die if neglected),
+ *  and (2) they're visually a soft white grub rather than a small
+ *  cream egg. Hölldobler & Wilson (1990) Ch. 9: real holometabolous
+ *  brood progresses egg → larva → pupa → adult; we collapse pupa
+ *  into the late-larva stage so there's only one transition to
+ *  manage between hatching and the worker debut. */
+export const STATE_LARVA = 9;
+/** Pupa. Stationary cocoon stage between LARVA and adult worker.
+ *  Real Pogonomyrmex pupae form ~1 week into development and emerge
+ *  ~2 weeks later as workers (Hölldobler & Wilson 1990 Ch. 9).
+ *  Pupae don't feed (no trophallaxis) and are visually small white
+ *  oblongs in the brood pile — a distinct shape from the soft larval
+ *  grub. We give them their own state so the renderer can draw them
+ *  separately and the maturation pipeline transitions LARVA → PUPA
+ *  → adult on the same ageTicks-driven schedule the egg→larva
+ *  hatch already uses. */
+export const STATE_PUPA = 10;
 
-export type AntState = 0 | 1 | 2;
+export type AntState = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
 export class Colony {
   count = 0;
@@ -48,6 +103,52 @@ export class Colony {
    *  count, multiplied by COLLISION_DECAY each tick. When it
    *  crosses `restThreshold`, the ant enters REST. */
   readonly collisionCount: Float32Array;
+  /** Move-count of the grain currently being carried by this ant.
+   *  Set on dig (= 0, fresh excavation) or pickup (= grain's stored
+   *  count). On deposit, the carried grain's stored count becomes
+   *  carryMoves + 1 (this deposit is another move). Zero when the
+   *  ant isn't carrying. Renderer doesn't read this; it's just
+   *  state for the per-grain wear visualisation that lives on the
+   *  GRAIN cell itself. */
+  readonly carryMoves: Uint8Array;
+  /** Per-ant energy reserve in [0, species.maxEnergy]. Drains at
+   *  species.metabolism per tick; refills by species.foodValue when
+   *  the ant walks over a food cell. Ant transitions to STATE_DEAD
+   *  when energy reaches zero. Models basal metabolism + food-as-fuel
+   *  so the colony has a real reason to forage and store granaries. */
+  readonly energy: Float32Array;
+  /** Per-ant age in ticks since spawn. Drives age-based polyethism
+   *  (Mersch, Crespi & Keller 2013) — younger ants bias toward
+   *  deeper nest work, older ants bias toward foraging. Frozen
+   *  on death. */
+  readonly age: Int32Array;
+  /** Consecutive ticks the ant has tried to move and failed (tryStep
+   *  returned hitSoil with no cell-level position change). Used as
+   *  a give-up signal: a CARRY or CARRY_FOOD worker stuck for too
+   *  long drops her cargo at an adjacent cell and transitions to
+   *  WANDER, freeing her to participate in digging. Without this,
+   *  alarm-pheromone responders pile up around a permanently-stuck
+   *  carrier and form a self-sustaining REST cluster. Saturates at
+   *  255 — values that high never actually trigger anything beyond
+   *  the give-up threshold (~60). */
+  readonly stuckTicks: Uint8Array;
+
+  /** Path-integration vector (Müller & Wehner 1988; Wehner 2003;
+   *  Buehlmann et al. 2014 in *Pogonomyrmex*). Continuously
+   *  accumulated (cell-units) displacement from the integration
+   *  origin set when the ant most recently entered FORAGE from
+   *  WANDER. While outbound, the vector grows; while returning as
+   *  CARRY_FOOD it shrinks as displacement back toward origin
+   *  cancels out. The negated vector is the homing cue used by
+   *  CARRY_FOOD ants above the surface — replaces the previous
+   *  hardcoded entrance-column bias and gives each forager her own
+   *  return route based on where she actually came out of the nest.
+   *  Cataglyphis-style PI is the canonical desert/savanna ant
+   *  navigation mechanism and the textbook account for harvester
+   *  ants like P. barbatus, which rely on individual route fidelity
+   *  rather than mass-recruitment trails. */
+  readonly pathDx: Float32Array;
+  readonly pathDy: Float32Array;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -64,6 +165,12 @@ export class Colony {
     this.turnNoise = new Float32Array(capacity);
     this.restThreshold = new Float32Array(capacity);
     this.collisionCount = new Float32Array(capacity);
+    this.carryMoves = new Uint8Array(capacity);
+    this.energy = new Float32Array(capacity);
+    this.age = new Int32Array(capacity);
+    this.stuckTicks = new Uint8Array(capacity);
+    this.pathDx = new Float32Array(capacity);
+    this.pathDy = new Float32Array(capacity);
   }
 
   /**
@@ -97,6 +204,12 @@ export class Colony {
     this.turnNoise[i] = this.trait(rng, means.turnNoise, sigma);
     this.restThreshold[i] = this.trait(rng, means.restThreshold, sigma);
     this.collisionCount[i] = 0;
+    // Spawn at full energy. Random sub-threshold variation isn't
+    // useful here — the population's energy distribution becomes
+    // heterogeneous on its own as some ants find food faster than
+    // others.
+    this.energy[i] = 1.0;
+    this.age[i] = 0;
     return i;
   }
 
