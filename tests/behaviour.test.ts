@@ -13,7 +13,7 @@ import { DEFAULT_PARAMS, step } from '../src/sim/ant-rules';
 import { Pheromone } from '../src/sim/pheromone';
 import { RNG } from '../src/sim/rng';
 import { HARVESTER } from '../src/sim/species';
-import { CELL_AIR, CELL_SOIL, World } from '../src/sim/world';
+import { CELL_AIR, CELL_SOIL, DAY_TICKS, World } from '../src/sim/world';
 
 function flatWorld(width: number, height: number, surfRow: number): World {
   const w = new World(width, height);
@@ -228,8 +228,7 @@ describe('foraging cycle', () => {
     // Run at noon so the diurnal forage gate doesn't immediately
     // recall the ant — without this, the FORAGE→CARRY_FOOD pickup
     // never gets a chance because the night-recall fires first.
-    // 3600 ticks = solar noon (DAY_TICKS = 7200 in world.ts).
-    w.tick = 3600;
+    w.tick = DAY_TICKS / 2;
     // Ant on surface at (10, 7) with a seed adjacent at (11, 7).
     w.food[w.index(11, 7)] = 1;
     const colony = new Colony(1);

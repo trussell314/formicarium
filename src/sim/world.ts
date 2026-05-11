@@ -100,11 +100,26 @@ export const MACRO_BASELINE = 100;
  *  trades one set of inaccuracies for another. */
 export const TIME_COMPRESSION = MACRO_BASELINE;
 
-/** Ticks per in-sim day. 24 h biological day compressed 100× plays
- *  out in 8 640 ticks (864 wall-seconds at 10 ticks/sec). The
- *  day/night cycle is a modulo of world.tick by this. */
+/** Diel-cycle-only compression. The day/night cycle's period in
+ *  sim ticks. Decoupled from TIME_COMPRESSION (which governs
+ *  lifespan + brood maturation) because the diel cycle has a
+ *  different "right pace" than calendar biology: foragers move at
+ *  micro-clock speed (30 mm/sec), so at the macro-bio 100×
+ *  compression they barely complete one round-trip before the
+ *  daylight window closes. At 20× the cycle period stretches to
+ *  43200 ticks (~72 min at 1× wall, ~80 sec at typical 56×
+ *  effective), giving ~10 round-trips per visible day — the
+ *  user-observable rhythm Tschinkel/Gordon describe in real
+ *  P. barbatus. The trade-off: a worker now lives ~65 sim-days
+ *  (instead of 304) but the same number of wall-clock hours,
+ *  because lifespan is anchored in ticks not sim-days. */
+export const DIEL_COMPRESSION = 20;
+
+/** Ticks per in-sim day. With DIEL_COMPRESSION = 20, a 24h
+ *  biological day plays out in 43200 ticks. The day/night cycle
+ *  is a modulo of world.tick by this. */
 export const DAY_TICKS =
-  (SECONDS_PER_DAY / TIME_COMPRESSION) * TICKS_PER_SEC;
+  (SECONDS_PER_DAY / DIEL_COMPRESSION) * TICKS_PER_SEC;
 
 /** Macro-biological seconds advanced per tick. At 10 ticks/sec and
  *  100× compression, each tick advances 10 sec of the slow biological
