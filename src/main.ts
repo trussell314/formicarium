@@ -14,7 +14,7 @@ import {
 import {
   clearSavedSnapshot, readSavedBlob, readSavedDescriptor, saveToLocalStorage,
 } from './sim/persist';
-import { DAY_TICKS, SECONDS_PER_TICK_BIO, TICK_MS } from './sim/world';
+import { DAY_TICKS, TICK_MS } from './sim/world';
 import { Renderer } from './render/renderer';
 import type { FromWorker, RenderSnapshot, ToWorker } from './worker/protocol';
 import SimWorker from './worker/sim-worker?worker';
@@ -799,19 +799,23 @@ function main(): void {
       lastHud = now;
       const snap = latest;
       const start = settings.ants + 1;
-      // Bio time conversion. SECONDS_PER_TICK_BIO is the macro-bio
-      // calendar advance per tick (= TIME_COMPRESSION / TICKS_PER_SEC,
-      // currently 10 sec/tick). DAY_TICKS is the in-sim diel period.
-      const bioSecs = snap.tick * SECONDS_PER_TICK_BIO;
-      const bioDays = Math.floor(bioSecs / 86400);
-      const bioHours = Math.floor((bioSecs / 3600) % 24);
-      const bioMins = Math.floor((bioSecs / 60) % 60);
-      const bioSecsR = Math.floor(bioSecs % 60);
+      // Time display keyed to the DIEL cycle, not the macro-bio
+      // calendar. After the DIEL_COMPRESSION decoupling, a "day"
+      // in the UI = one diel cycle = DAY_TICKS ticks. Before this
+      // alignment, the display ran on SECONDS_PER_TICK_BIO (=10
+      // sec/tick macro), so the "13d 8h" counter ticked 5× faster
+      // than "noon"/"night" labels which were keyed off DAY_TICKS.
+      // After: 12h corresponds to "noon", 0h/24h to "midnight",
+      // and the day counter increments on every visible cycle.
+      const ticksPerDay = DAY_TICKS;
+      const ticksPerHour = ticksPerDay / 24;
+      const ticksPerMin = ticksPerHour / 60;
+      const bioDays = Math.floor(snap.tick / ticksPerDay);
+      const bioHours = Math.floor(snap.tick / ticksPerHour) % 24;
+      const bioMins = Math.floor(snap.tick / ticksPerMin) % 60;
       const bioTime = bioDays > 0
         ? `${bioDays}d ${bioHours}h ${bioMins}m`
-        : bioHours > 0
-          ? `${bioHours}h ${bioMins}m ${bioSecsR}s`
-          : `${bioMins}m ${bioSecsR}s`;
+        : `${bioHours}h ${bioMins}m`;
       const dayPhase = (snap.tick % DAY_TICKS) / DAY_TICKS;
       const phaseLabel =
         dayPhase < 0.20 ? 'night'
